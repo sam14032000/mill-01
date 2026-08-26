@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuickDraft — AI Client Updates</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col justify-between antialiased">
+  <header class="py-6 px-4 max-w-4xl mx-auto w-full flex justify-between items-center">
+    <div class="font-bold text-xl tracking-tight text-indigo-600">QuickDraft</div>
+    <span class="text-xs font-semibold bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full border border-indigo-200">Early Access</span>
+  </header>
+
+  <main class="max-w-2xl mx-auto px-4 py-12 text-center flex-grow flex flex-col justify-center">
+    <div class="inline-block mx-auto mb-4 bg-emerald-50 text-emerald-700 text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full border border-emerald-200">
+      Launching Next Month
+    </div>
+
+    <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 mb-4">
+      Turn 15 minutes of client updates into <span class="text-indigo-600">30 seconds</span>.
+    </h1>
+    
+    <p class="text-lg text-slate-600 mb-8 max-w-lg mx-auto">
+      Sync your calendar and git commits. QuickDraft writes polished, client-ready weekly summaries automatically.
+    </p>
+
+    <!-- Pricing Card & CTA -->
+    <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 max-w-md mx-auto w-full">
+      <div class="mb-6">
+        <span class="text-slate-500 text-sm font-medium">Early Adopter Pricing</span>
+        <div class="flex items-baseline justify-center gap-1 mt-1">
+          <span class="text-5xl font-extrabold text-slate-900">$15</span>
+          <span class="text-slate-500 font-medium">/ month</span>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">Locked in for life. No contract, cancel anytime.</p>
+      </div>
+
+      <form id="waitlist-form" class="space-y-3">
+        <input 
+          type="email" 
+          id="email-input" 
+          required 
+          placeholder="Enter your work email" 
+          class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+        />
+        <button 
+          type="submit" 
+          id="cta-btn"
+          class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition text-sm shadow hover:shadow-md"
+        >
+          Get Early Access for $15/mo &rarr;
+        </button>
+      </form>
+
+      <div id="confirmation-msg" class="hidden text-left bg-emerald-50 border border-emerald-200 p-4 rounded-lg mt-4">
+        <p class="font-semibold text-emerald-800 text-sm">🎉 You're on the early access list!</p>
+        <p class="text-xs text-emerald-600 mt-1">We've locked in your $15/mo founder rate. We'll invite you first when doors open.</p>
+      </div>
+
+      <ul class="mt-6 text-xs text-slate-500 text-left space-y-2 border-t border-slate-100 pt-4">
+        <li class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          Unlimited client summaries & project exports
+        </li>
+        <li class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          Slack, Gmail, and ClickUp integrations
+        </li>
+        <li class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          14-day free trial when we go live
+        </li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="py-6 text-center text-xs text-slate-400">
+    &copy; QuickDraft. Fake product test for pricing validation.
+  </footer>
+
+  <script>
+    // Built-in tracking counter for testing conversion rate
+    const pageKey = 'qd_test_views';
+    const clickKey = 'qd_test_conversions';
+
+    let views = parseInt(localStorage.getItem(pageKey) || '0', 10) + 1;
+    localStorage.setItem(pageKey, views);
+
+    document.getElementById('waitlist-form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const email = document.getElementById('email-input').value;
+      if (!email) return;
+
+      let conversions = parseInt(localStorage.getItem(clickKey) || '0', 10) + 1;
+      localStorage.setItem(clickKey, conversions);
+
+      console.log(`[Validation Metric] Views: ${views} | Conversions: ${conversions} | Rate: ${((conversions / views) * 100).toFixed(1)}%`);
+      
+      document.getElementById('waitlist-form').classList.add('hidden');
+      document.getElementById('confirmation-msg').classList.remove('hidden');
+    });
+  </script>
+</body>
+</html>
