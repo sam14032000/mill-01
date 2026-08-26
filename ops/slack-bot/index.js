@@ -14,6 +14,8 @@ const { handleThinkCommand } = require("./commands/think");
 const { handleCrossCommand } = require("./commands/cross");
 const { handleBlindspotCommand } = require("./commands/blindspot");
 const { handleThemesCommand } = require("./commands/themes");
+const { handleTestCommand } = require("./commands/test");
+const { handleThreadMessage } = require("./thread-wait");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -30,13 +32,14 @@ const app = new App({
 });
 
 // The eight slash commands defined in Slack app config (Part 9.1).
-// /attack, /think, /cross, /blindspot, /themes implemented (Part 9b,
-// build order per docs/COMMANDS.md); /test, /audit, /proto still stubs.
-const STUBBED_COMMANDS = ["/test", "/audit", "/proto"];
+// /attack, /think, /cross, /blindspot, /themes, /test implemented (Part
+// 9b, build order per docs/COMMANDS.md); /audit, /proto still stubs.
+const STUBBED_COMMANDS = ["/audit", "/proto"];
 
 app.command("/attack", handleAttackCommand);
 app.command("/think", handleThinkCommand);
 app.command("/cross", handleCrossCommand);
+app.command("/test", handleTestCommand);
 app.command("/blindspot", handleBlindspotCommand);
 app.command("/themes", handleThemesCommand);
 
@@ -79,6 +82,11 @@ function downloadFile(url, destPath) {
 }
 
 app.message(async ({ message, client }) => {
+	// A pending /test field-evidence wait takes priority over anything
+	// else a message could be -- if consumed here, it's not a capture
+	// even if it happened to arrive in a DM.
+	if (handleThreadMessage(message)) return;
+
 	// Only DMs are captures. Ignore channel messages, edits, deletes, bot
 	// messages and anything without a plain user text body.
 	if (message.channel_type !== "im") return;

@@ -74,4 +74,53 @@ function createIdea({ id, founder, originText, caseText, assumption }) {
 	return { dir, relPath: path.relative(REPO_ROOT, dir) };
 }
 
-module.exports = { IDEAS_DIR, ideaExists, generateIdeaId, createIdea };
+function readState(id) {
+	try {
+		return JSON.parse(fs.readFileSync(path.join(IDEAS_DIR, id, "state.json"), "utf8"));
+	} catch {
+		return null;
+	}
+}
+
+function readIdeaMd(id) {
+	try {
+		return fs.readFileSync(path.join(IDEAS_DIR, id, "idea.md"), "utf8");
+	} catch {
+		return null;
+	}
+}
+
+// Extracts the ASSUMPTION text back out of idea.md's "## Assumption"
+// section, since state.json doesn't duplicate it -- idea.md is the
+// single source of truth for the assumption text (docs/COMMANDS.md's
+// file contract: "idea.md: origin text + assumption + founder").
+function readAssumption(id) {
+	const md = readIdeaMd(id);
+	if (!md) return null;
+	const match = md.match(/## Assumption\n\n([\s\S]+?)(\n\n|$)/);
+	return match ? match[1].trim() : null;
+}
+
+function updateState(id, patch) {
+	const current = readState(id);
+	if (!current) throw new Error(`updateState: no state.json for idea ${id}`);
+	const next = { ...current, ...patch, updated_at: nowIso() };
+	fs.writeFileSync(
+		path.join(IDEAS_DIR, id, "state.json"),
+		`${JSON.stringify(next, null, 2)}\n`,
+		"utf8",
+	);
+	return next;
+}
+
+module.exports = {
+	IDEAS_DIR,
+	ideaExists,
+	generateIdeaId,
+	createIdea,
+	readState,
+	readIdeaMd,
+	readAssumption,
+	updateState,
+	nowIso,
+};
