@@ -16,6 +16,7 @@ const { handleBlindspotCommand } = require("./commands/blindspot");
 const { handleThemesCommand } = require("./commands/themes");
 const { handleTestCommand } = require("./commands/test");
 const { handleAuditCommand } = require("./commands/audit");
+const { handleProtoCommand } = require("./commands/proto");
 const { handleThreadMessage } = require("./thread-wait");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
@@ -32,17 +33,16 @@ const app = new App({
 	socketMode: true,
 });
 
-// The eight slash commands defined in Slack app config (Part 9.1).
-// /attack, /think, /cross, /blindspot, /themes, /test, /audit
-// implemented (Part 9b, build order per docs/COMMANDS.md); /proto still
-// a stub.
-const STUBBED_COMMANDS = ["/proto"];
+// All eight slash commands defined in Slack app config (Part 9.1) are
+// now implemented, in the build order docs/COMMANDS.md/D-41 specify.
+const STUBBED_COMMANDS = [];
 
 app.command("/attack", handleAttackCommand);
 app.command("/think", handleThinkCommand);
 app.command("/cross", handleCrossCommand);
 app.command("/test", handleTestCommand);
 app.command("/audit", handleAuditCommand);
+app.command("/proto", handleProtoCommand);
 app.command("/blindspot", handleBlindspotCommand);
 app.command("/themes", handleThemesCommand);
 

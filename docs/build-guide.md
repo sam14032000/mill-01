@@ -608,7 +608,13 @@ genuine signal before curl was added back.
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-SCRATCH="$(mktemp -d /home/agent/scratch/proto-XXXXXX)"
+# A caller that already needs a specific pre-populated directory (e.g.
+# /proto writing an artifact before executing it) can pass one via
+# MILL_SANDBOX_SCRATCH_DIR instead of getting a fresh empty one -- same
+# permission handling applies either way, so this stays the one place
+# that does it rather than callers duplicating the security config.
+SCRATCH="${MILL_SANDBOX_SCRATCH_DIR:-$(mktemp -d /home/agent/scratch/proto-XXXXXX)}"
+mkdir -p "$SCRATCH"
 # mktemp defaults to 700, owned by whichever host user ran this script.
 # The container always runs as a fixed uid (10001, "proto") that won't
 # match the host user's uid, so without this the container can create

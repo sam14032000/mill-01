@@ -85,3 +85,36 @@ One line per completed part of `docs/build-guide.md`. What was done, and anythin
   **Test-data hygiene:** the live pipeline test used a throwaway idea (`yyyy`) with a manually-constructed non-stub research report, since Phase 2 doesn't produce a real one yet — needed to exercise the actual model-calling path rather than just the refusal paths. Fable 5 correctly killed it (the assumption was a placeholder, genuinely untestable), but that verdict and its graveyard entry weren't real data. Removed in a separate, clearly-labeled commit (`88bea9a`) rather than left in place, since `graveyard.md` is read by founders and by `EVAL.md`'s Layer 3 review — fabricated entries there are a different order of problem than a stray idea directory.
 
   Service restarted and deployed. All seven of eight commands now implemented; only `/proto` remains.
+- **Part 10 — Docker sandbox built and independently verified before `/proto`.** Built `~/stack/sandbox/` (Dockerfile, `run.sh`, `mill-sandbox:latest` image, the `egress` opt-in Docker network) exactly per the existing spec, then ran the documented leak tests against the real container rather than trusting the spec was sufficient — per the founder's framing, "the container's job is to contain a misbehaving agent, so neither of us should accept the agent's own assurance that it works."
+
+  **Two real bugs found while verifying, not hypothetical:**
+  1. `curl` was never installed in the image, but the documented network tests use it. Without it, both network tests report `clean`/`BLOCKED-UNEXPECTEDLY` regardless of actual network state — `curl: command not found` exits non-zero and falls through to the `||` branch either way. A false pass, not a real one. Caught because the egress-opt-in test showed `BLOCKED-UNEXPECTEDLY`, which should have been the tell. Re-verified with `python3 -c "import socket; ..."` (genuine DNS failure on the default network, genuine connection on egress) to get a real signal before fixing `curl` and re-confirming the documented tests pass for real with it present.
+  2. `mktemp` defaults scratch directories to mode `700`, owned by the host user running `run.sh`. The container always runs as a fixed uid (`10001`), which never matches, so the container could not write anything into its own scratch mount — would have silently broken every prototype's actual output before this was ever used for real. Fixed with `chmod 777` on the fresh per-invocation directory.
+
+  **C-15/C-16/C-17 raw verification output** (the founder asked to re-run these by hand afterward, so reported verbatim rather than summarized):
+  ```
+  TEST 1 (env leak): clean
+  TEST 2 (/home/agent listing): ls: cannot access '/home/agent': No such file or directory
+  TEST 3 (mill env read): cat: /home/agent/.config/mill/env: No such file or directory
+  TEST 4 (default network, curl): clean
+  TEST 5 (egress opt-in, curl): reaches-network
+  EXTRA (interfaces, default): lo
+  EXTRA (interfaces, egress): eth0, lo
+  EXTRA (read-only root): touch: cannot touch '/etc/test-write': Read-only file system
+  EXTRA (scratch write, post-fix): scratch-write-ok
+  EXTRA (capabilities): CapInh/CapPrm/CapEff/CapBnd/CapAmb all 0000000000000000
+  ```
+  **C-17 specifically:** confirmed at the interface level, not just behaviorally — the default-network container has *only* `lo` (no `eth0` exists at all, not merely blocked), and the egress opt-in genuinely provisions `eth0` with a real route only when `MILL_SANDBOX_NETWORK=egress` is explicitly set. Nothing reaches the egress network by accident.
+
+  `run.sh` extended with `MILL_SANDBOX_SCRATCH_DIR` (falls back to a fresh `mktemp` dir if unset) so `/proto` can pre-populate a scratch directory with a generated artifact before executing it, without duplicating the sandbox's security configuration in a second code path.
+
+- **`/proto` built and verified against all four required behaviors, end-to-end, against a real throwaway idea.** New `sandbox.js`: the only function in the codebase that executes generated content, always through Part 10's `run.sh` (D-06/D-29 isolation, mirroring `audit-llm.js`'s D-10 isolation pattern). `parseProtoResponse` requires a `FILENAME: <name>` header (not specified by `docs/COMMANDS.md`, added since some parseable contract is needed) and rejects path separators/`..` outright — a generated filename can't write outside its own touch directory.
+
+  - **Refuses without a named assumption:** verified — `/proto <id>` alone, or `/proto` with no id/assumption at all, produces the exact refusal message, no model call.
+  - **Refuses on killed ideas:** verified against a real idea manually set to `state: killed`.
+  - **Caps at five touches:** verified for real — five consecutive successful touches against a throwaway idea (touch 5 correctly warned "the next /proto ... will be refused"), then a 6th attempt correctly refused with the exact verbatim cap message from `docs/COMMANDS.md`, no model call.
+  - **Executes only inside the sandbox:** verified both directions on real model output. A technical assumption ("a checksum validator correctly flags ≥90% of malformed GST invoice numbers") produced real Python, genuinely executed via `sandbox.js`/`run.sh` inside the container, with real output (correctly flagged 18/19 malformed test numbers) captured and posted. A non-technical assumption (a landing-page click-through rate) produced `index.html` with no execution attempted at all — confirmed no `output.txt` was written for that touch, since `.html` isn't in the executable-extension map.
+
+  Found and worked around one real testing-environment artifact (not a code bug): an interactive shell testing this command directly showed `permission denied` connecting to the Docker socket, while the actual deployed `mill-chat` systemd process does not — confirmed directly by reading `/proc/<pid>/status` for the running service's `Groups:` line against `id agent`, both showing `docker` (gid 988) already present. The discrepancy was the interactive shell's stale group cache from when `agent` was first added to the `docker` group (Part 5), not anything wrong with `sandbox.js` — subsequent tests were run via `sg docker -c` to match the real service's environment.
+
+  Two throwaway test ideas (`dead`, `prot`) used across this verification were removed afterward, consistent with how other pure test scaffolding was handled elsewhere in this build. Service restarted and deployed. **All eight commands from `docs/COMMANDS.md` are now implemented.**
