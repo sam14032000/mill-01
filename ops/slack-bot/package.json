@@ -1,0 +1,17 @@
+{
+  "name": "mill-slack-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mill Slack transport (Part 9). Connection lifecycle, D-40 allowlist, capture handling. Command logic lands in Part 9b per docs/COMMANDS.md.",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.0.0"
+  }
+}
