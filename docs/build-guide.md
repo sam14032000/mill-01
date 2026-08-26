@@ -161,8 +161,8 @@ source ~/.bashrc
 ```bash
 npm install -g @anthropic-ai/claude-code
 mkdir -p ~/workspace && cd ~/workspace
-git clone git@github.com:YOU/mill.git   # or https + PAT for now
-cd mill
+git clone git@github.com:sam14032000/mill-01.git   # or https + PAT for now
+cd mill-01
 
 tmux new -s cc
 claude
@@ -393,7 +393,7 @@ curl -s -H "Authorization: Bearer $MASTER" \
 # Part 8 — Repo
 
 ```bash
-cd ~/workspace/mill
+cd ~/workspace/mill-01
 
 mkdir -p minds/{amit,priya,rohan}/captures
 mkdir -p minds/shared ideas evals telemetry ops runners
@@ -484,9 +484,9 @@ Wants=network-online.target
 Type=simple
 User=agent
 EnvironmentFile=/home/agent/.config/mill/env
-WorkingDirectory=/home/agent/workspace/mill
+WorkingDirectory=/home/agent/workspace/mill-01
 Environment=PATH=/home/agent/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/agent/.npm-global/bin/pi-chat --config /home/agent/workspace/mill/ops/chat.config.json
+ExecStart=/home/agent/.npm-global/bin/pi-chat --config /home/agent/workspace/mill-01/ops/chat.config.json
 Restart=always
 RestartSec=10
 StandardOutput=append:/home/agent/logs/chat.log
@@ -583,7 +583,7 @@ python3 -m venv ~/venv && source ~/venv/bin/activate
 pip install gpt-researcher
 ```
 
-`~/workspace/mill/ops/research.py`:
+`~/workspace/mill-01/ops/research.py`:
 
 ```python
 import asyncio, json, os, sys
@@ -591,7 +591,7 @@ from datetime import datetime
 from pathlib import Path
 from gpt_researcher import GPTResearcher
 
-REPO = Path("/home/agent/workspace/mill")
+REPO = Path("/home/agent/workspace/mill-01")
 FIELD = REPO / "ideas" / sys.argv[1] / "field"   # founder-pasted notes
 OUT   = REPO / "ideas" / sys.argv[1]
 ASSUMPTION = sys.argv[2]
@@ -637,7 +637,7 @@ Two things to add after the report is written:
 
 # Part 12 — Cron and healthcheck
 
-`~/workspace/mill/ops/healthcheck.sh`:
+`~/workspace/mill-01/ops/healthcheck.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -667,11 +667,11 @@ fi
 ```
 
 ```cron
-*/30 * * * * /home/agent/workspace/mill/ops/healthcheck.sh
+*/30 * * * * /home/agent/workspace/mill-01/ops/healthcheck.sh
 0 3 * * 0    docker system prune -af --volumes >> /home/agent/logs/cleanup.log 2>&1
 0 3 * * 0    find /home/agent/scratch -mtime +7 -type d -exec rm -rf {} + 2>/dev/null
-30 9 * * 0   /home/agent/venv/bin/python /home/agent/workspace/mill/ops/profile_diff.py
-0 2 1 * *    /home/agent/venv/bin/python /home/agent/workspace/mill/ops/eval.py
+30 9 * * 0   /home/agent/venv/bin/python /home/agent/workspace/mill-01/ops/profile_diff.py
+0 2 1 * *    /home/agent/venv/bin/python /home/agent/workspace/mill-01/ops/eval.py
 ```
 
 **Disk threshold is 80%, not 85%** — 40GB fills faster than you expect with Docker layers and node_modules.
