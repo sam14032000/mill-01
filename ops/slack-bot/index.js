@@ -9,6 +9,7 @@ const config = require("./config");
 const { founderForUserId } = config;
 const { writeCapture, MINDS_DIR } = require("./capture");
 const { startBatchCommitLoop, commitCaptures } = require("./git-batch");
+const { handleAttackCommand } = require("./commands/attack");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -24,21 +25,22 @@ const app = new App({
 	socketMode: true,
 });
 
-// The eight slash commands defined in Slack app config (Part 9.1). Command
-// logic lands in Part 9b per docs/COMMANDS.md, in the order recorded there:
-// /attack, /think, /cross, /blindspot, /themes, /test, /audit, /proto.
-const REGISTERED_COMMANDS = [
+// The eight slash commands defined in Slack app config (Part 9.1).
+// /attack is implemented (Part 9b, first per the build order in
+// docs/COMMANDS.md); the rest are still stubs until their turn.
+const STUBBED_COMMANDS = [
 	"/think",
 	"/cross",
 	"/blindspot",
-	"/attack",
 	"/test",
 	"/audit",
 	"/proto",
 	"/themes",
 ];
 
-for (const command of REGISTERED_COMMANDS) {
+app.command("/attack", handleAttackCommand);
+
+for (const command of STUBBED_COMMANDS) {
 	app.command(command, async ({ ack, command: cmd }) => {
 		const founder = founderForUserId(cmd.user_id);
 		if (!founder) {
