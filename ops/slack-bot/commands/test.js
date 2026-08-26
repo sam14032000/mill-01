@@ -81,7 +81,7 @@ async function runFieldEvidencePhase({ client, researchChannel, founderUserId, i
 // generate plausible-sounding filler. The one real model call this
 // makes is the gap-output question generation, which asks questions
 // rather than asserting facts, so it doesn't carry the same risk.
-async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFile }) {
+async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFile, threadTs }) {
 	const evidenceBasis = hasFieldEvidence ? "field-supported" : "web-only";
 	let gapOutput = null;
 	let tokensIn = 0;
@@ -113,6 +113,7 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 		"",
 		`**Assumption:** ${assumption}`,
 		`**Evidence basis:** ${evidenceBasis}`,
+		"**Research stub:** true — no web research ran; /audit will not rule on this report as-is.",
 		`**Generated:** ${ts}`,
 		"",
 		"## Field evidence",
@@ -137,6 +138,16 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 		sources: [],
 		field_notes_file: fieldNotesFile,
 		web_research_status: "not_yet_built",
+		// Unmissable, not just documented in prose: Part 11 (GPT
+		// Researcher) isn't built, so no web research actually ran.
+		// /audit checks this flag in code and refuses to rule when it's
+		// set -- a stub silently producing a kill or narrow verdict is
+		// worse than an explicit "no research has run" error.
+		research_stub: true,
+		// So /audit can post its verdict "in the research thread" per
+		// docs/COMMANDS.md, without re-deriving or guessing which
+		// message started it.
+		slack_thread_ts: threadTs,
 		ts,
 	};
 
@@ -205,6 +216,7 @@ async function handleTestCommand({ command, ack, client }) {
 			assumption,
 			hasFieldEvidence,
 			fieldNotesFile,
+			threadTs,
 		});
 
 		updateState(id, { state: "researched" });
@@ -233,7 +245,7 @@ async function handleTestCommand({ command, ack, client }) {
 		await client.chat.postMessage({
 			channel: researchChannel,
 			thread_ts: threadTs,
-			text: `Research pass complete for \`${id}\` — evidence basis: *${evidenceBasis}*.\n\n${reportMd}\n\n\`/audit ${id}\` when ready.`,
+			text: `Research pass complete for \`${id}\` — evidence basis: *${evidenceBasis}*.\n\n${reportMd}\n\nThis report is a stub (no web research ran) — \`/audit ${id}\` will refuse to rule on it until Part 11's research pipeline is built.`,
 		});
 	} catch (err) {
 		console.error("test command failed:", err);

@@ -14,6 +14,22 @@ function readProfile(founder) {
 	}
 }
 
+// Measured directly (building /cross): with an empty or near-empty
+// profile, the model does not refuse or hedge when asked to attack an
+// idea "from the angle this founder's profile says they'd miss" -- it
+// produces a full, confident, plausible-sounding reading anyway, which
+// is worse than an explicit "no profile yet" message because it's
+// indistinguishable from a working, personalized read. Anything below
+// this length isn't "how this founder fails" (D-26), it's not
+// describing anything yet -- shared by every command that reads a
+// profile into its prompt, not just /cross, so it lives here rather
+// than being redefined per command.
+const MIN_PROFILE_LENGTH = 50;
+
+function hasProfile(founder) {
+	return readProfile(founder).trim().length >= MIN_PROFILE_LENGTH;
+}
+
 function readDynamics() {
 	try {
 		return fs.readFileSync(path.join(MINDS_DIR, "shared", "dynamics.md"), "utf8");
@@ -71,4 +87,11 @@ function readCaptures(founder, { maxEntries = Infinity, maxDays = Infinity, maxT
 	return lines;
 }
 
-module.exports = { readProfile, readDynamics, readCaptures, MINDS_DIR };
+module.exports = {
+	readProfile,
+	readDynamics,
+	readCaptures,
+	hasProfile,
+	MIN_PROFILE_LENGTH,
+	MINDS_DIR,
+};

@@ -101,6 +101,31 @@ function readAssumption(id) {
 	return match ? match[1].trim() : null;
 }
 
+// Finds the most recent research-<stamp>.{md,json} pair for an idea
+// (a founder can /test the same idea more than once). Returns null if
+// none exists yet.
+function readLatestResearch(id) {
+	const dir = path.join(IDEAS_DIR, id);
+	let files;
+	try {
+		files = fs.readdirSync(dir).filter((f) => /^research-\d{8}-\d{4}\.json$/.test(f));
+	} catch {
+		return null;
+	}
+	if (files.length === 0) return null;
+	files.sort(); // stamps are YYYYMMDD-HHMM, lexicographic order is chronological
+	const latestStamp = files[files.length - 1].replace("research-", "").replace(".json", "");
+
+	const json = JSON.parse(fs.readFileSync(path.join(dir, `research-${latestStamp}.json`), "utf8"));
+	let md = "";
+	try {
+		md = fs.readFileSync(path.join(dir, `research-${latestStamp}.md`), "utf8");
+	} catch {
+		md = "";
+	}
+	return { stamp: latestStamp, json, md };
+}
+
 function updateState(id, patch) {
 	const current = readState(id);
 	if (!current) throw new Error(`updateState: no state.json for idea ${id}`);
@@ -121,6 +146,7 @@ module.exports = {
 	readState,
 	readIdeaMd,
 	readAssumption,
+	readLatestResearch,
 	updateState,
 	nowIso,
 };

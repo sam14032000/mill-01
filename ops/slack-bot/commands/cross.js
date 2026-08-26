@@ -4,7 +4,7 @@ const { founderForUserId, channelId } = require("../config");
 const { callFlash } = require("../llm");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
-const { readProfile } = require("../context");
+const { readProfile, hasProfile } = require("../context");
 
 const MODEL = "flash-fast";
 const STAGE = "cross";
@@ -24,25 +24,21 @@ function otherFounders(sender) {
 	return ALL_FOUNDERS.filter((f) => f !== sender);
 }
 
-// Measured directly: with an empty profile, the model does not refuse
-// or hedge -- it produces a full, confident, plausible-sounding "attack
-// from this founder's angle" anyway (two such readings on the same idea
-// came back independently near-duplicate, both reaching for the same
-// generic objections). That's worse than no reading at all, because
-// it's indistinguishable from a working /cross. A profile this short
-// isn't "how this founder fails" (D-26) -- it's not describing anything
-// yet, so there's nothing to read the idea through.
-const MIN_PROFILE_LENGTH = 50;
-
 // Context per docs/COMMANDS.md: [1] + each other founder's profile +
 // the idea. Never the sender's own profile. Exactly two separate
 // calls -- no third call computes convergence/divergence; that's for
 // the founders reading both outputs to judge (runbook.md's "Reading
 // /cross" guidance), not something fabricated by the model.
+//
+// Guarded against fabrication from an empty profile -- measured
+// directly: the model doesn't refuse or hedge, it produces a full,
+// confident, plausible-sounding reading anyway (see context.js's
+// hasProfile for the full story; shared across every command that
+// reads a profile into its prompt, not redefined per command).
 async function readAs(readerFounder, ideaText) {
 	const profile = readProfile(readerFounder);
 
-	if (profile.trim().length < MIN_PROFILE_LENGTH) {
+	if (!hasProfile(readerFounder)) {
 		return {
 			founder: readerFounder,
 			responseText: `(${readerFounder}'s profile hasn't been recorded yet -- no reading generated from nothing.)`,
