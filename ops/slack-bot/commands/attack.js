@@ -16,7 +16,9 @@ const SYSTEM_PROMPT = [
 	"Make the strongest case against this idea. Not balanced — the prosecution.",
 	"Then output the single assumption that, if false, kills it.",
 	'It must be falsifiable: something evidence could refute. "Users want this" is not falsifiable. "Users currently pay >$50/mo for a worse alternative" is.',
+	"The assumption must contain a number — a price, a percentage, or a count — and must name the specific alternative it's being displaced from. An assumption without both is not falsifiable enough to research.",
 	"Return the assumption alone on the final line, prefixed `ASSUMPTION:`.",
+	"If the idea doesn't name a specific customer, mechanism, or context precisely enough to attack, do not invent them. Instead return a single line, prefixed `TOO_VAGUE:`, naming the two or three specifics that would be needed before this could be attacked.",
 ].join("\n");
 
 function readProfile(founder) {
@@ -28,21 +30,32 @@ function readProfile(founder) {
 	}
 }
 
-// Requires the assumption on the model's actual final non-empty line,
-// per spec ("final line, prefixed ASSUMPTION:") -- deliberately does not
-// scan the whole body for a stray match, since that would accept a
-// sloppier response than the prompt asked for.
-function extractAssumption(responseText) {
+// Requires the assumption (or refusal) on the model's actual final
+// non-empty line -- deliberately does not scan the whole body for a
+// stray match, since that would accept a sloppier response than the
+// prompt asked for. Returns one of:
+//   { kind: "assumption", assumption, caseText }
+//   { kind: "too_vague", detail }
+//   null (neither found -- triggers the one retry in runAttack)
+function parseAttackResponse(responseText) {
 	const lines = responseText.trim().split("\n");
 	for (let i = lines.length - 1; i >= 0; i--) {
 		const line = lines[i].trim();
 		if (!line) continue;
-		const match = line.match(/^ASSUMPTION:\s*(.+)$/i);
-		if (!match) return null;
-		return {
-			assumption: match[1].trim(),
-			caseText: lines.slice(0, i).join("\n").trim(),
-		};
+
+		const vague = line.match(/^TOO_VAGUE:\s*(.+)$/i);
+		if (vague) return { kind: "too_vague", detail: vague[1].trim() };
+
+		const assumption = line.match(/^ASSUMPTION:\s*(.+)$/i);
+		if (assumption) {
+			return {
+				kind: "assumption",
+				assumption: assumption[1].trim(),
+				caseText: lines.slice(0, i).join("\n").trim(),
+			};
+		}
+
+		return null;
 	}
 	return null;
 }
@@ -72,7 +85,7 @@ async function runAttack({ founder, ideaText }) {
 			model: "flash-fast",
 			maxTokens: 4096,
 		}));
-		parsed = extractAssumption(responseText);
+		parsed = parseAttackResponse(responseText);
 	}
 
 	return { responseText, usage, parsed };
@@ -114,13 +127,33 @@ async function handleAttackCommand({ command, ack, client }) {
 				command: "attack",
 				founder,
 				status: "failed",
-				reason: "no ASSUMPTION: line after retry",
+				reason: "no ASSUMPTION: or TOO_VAGUE: line after retry",
 				reasoning_tokens: reasoningTokens,
 			});
 			if (millChannel) {
 				await client.chat.postMessage({
 					channel: millChannel,
 					text: `\`/attack\` failed for ${founder}: the model didn't return a falsifiable assumption after one retry. No idea created.`,
+				});
+			}
+			return;
+		}
+
+		if (parsed.kind === "too_vague") {
+			// Refusal path: no retry (the model already returned a
+			// definite answer on this attempt), no idea created. Post
+			// the line as-is per docs/COMMANDS.md.
+			emit({
+				command: "attack",
+				founder,
+				status: "refused",
+				reason: "too_vague",
+				reasoning_tokens: reasoningTokens,
+			});
+			if (millChannel) {
+				await client.chat.postMessage({
+					channel: millChannel,
+					text: `TOO_VAGUE: ${parsed.detail}`,
 				});
 			}
 			return;
@@ -174,4 +207,4 @@ async function handleAttackCommand({ command, ack, client }) {
 	}
 }
 
-module.exports = { handleAttackCommand, extractAssumption, runAttack };
+module.exports = { handleAttackCommand, parseAttackResponse, runAttack };

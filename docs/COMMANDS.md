@@ -86,7 +86,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/think <idea>`
 
-- **Model:** flash · **Posts to:** `#mill-ideas`
+- **Model:** flash-fast (`thinking_level: low`) · **Posts to:** `#mill-ideas`
 - **Context:** [1][2][4]
 - **System prompt:**
   > Develop this idea concretely — mechanism, who it serves, what has to be true.
@@ -98,7 +98,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/cross <idea>`
 
-- **Model:** flash, **two separate calls** · **Posts to:** `#mill-ideas`
+- **Model:** flash-fast (`thinking_level: low`), **two separate calls** · **Posts to:** `#mill-ideas`
 - **Context:** [1] + *each other founder's* profile + the idea. Never the sender's profile.
 - **System prompt (per call):**
   > You are reading this idea through the lens of a different founder's thinking patterns, given below. Attack it as they would.
@@ -109,7 +109,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/blindspot <idea>`
 
-- **Model:** flash · **Posts to:** `#mill-ideas`
+- **Model:** flash-fast (`thinking_level: low`) · **Posts to:** `#mill-ideas`
 - **Context:** [1][3] + idea. **No individual profile** — this is about all three.
 - **System prompt:**
   > Attack from the shared blind spot described below. All three founders would miss this.
@@ -120,16 +120,19 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/attack <idea>` — creates the idea
 
-- **Model:** flash · **Posts to:** `#mill-ideas`
+- **Model:** flash-fast (`thinking_level: low` — see D-08 amendment, `docs/DECISIONS.md`) · **Posts to:** `#mill-ideas`
 - **Context:** [1][2] + idea
 - **System prompt:**
   > Make the strongest case against this idea. Not balanced — the prosecution.
   > Then output the single assumption that, if false, kills it.
   > It must be falsifiable: something evidence could refute. "Users want this" is not falsifiable. "Users currently pay >$50/mo for a worse alternative" is.
+  > The assumption must contain a number — a price, a percentage, or a count — and must name the specific alternative it's being displaced from. An assumption without both is not falsifiable enough to research.
   > Return the assumption alone on the final line, prefixed `ASSUMPTION:`.
+  > If the idea doesn't name a specific customer, mechanism, or context precisely enough to attack, do not invent them. Instead return a single line, prefixed `TOO_VAGUE:`, naming the two or three specifics that would be needed before this could be attacked.
 - **Writes:** `ideas/<id>/idea.md`, `state.json` → `open`
 - **Reply:** the case, then the assumption and its id, e.g. `Created a3f9 — /test a3f9 to research it`
 - **Fails if:** no `ASSUMPTION:` line returned. Retry once, then report failure. No idea created.
+- **Refuses if:** the model returns `TOO_VAGUE:` instead of an assumption. Post the `TOO_VAGUE:` line as-is. No retry, no idea created — measured directly (`ops/BUILD-LOG.md`): before this refusal path existed, a deliberately unfalsifiable idea ("an AI app that helps people be more productive") got silently reframed into a plausible-looking assumption at every thinking level tried, which would have let it consume a $1.50 research pass and a $1.60 audit before the vagueness ever surfaced.
 
 ---
 
@@ -194,7 +197,7 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 ### `/proto <id> <assumption>`
 
-- **Model:** flash · **Posts to:** `#mill-ideas`
+- **Model:** flash-fast (`thinking_level: low`) · **Posts to:** `#mill-ideas`
 - **Refuses if:** no assumption argument (D-29), or state is `killed`
 - **System prompt:**
   > Build the smallest artifact that tests this one assumption. Default to non-code — landing page, mock flow, fake pricing table, one-pager. Single file.
@@ -209,7 +212,7 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 ### `/themes`
 
-- **Model:** flash · **Posts to:** `#mill-ideas` · **Context:** last 30 days of that founder's captures
+- **Model:** flash-fast (`thinking_level: low`) · **Posts to:** `#mill-ideas` · **Context:** last 30 days of that founder's captures
 - **System prompt:**
   > What has this founder circled back to repeatedly? Name recurring preoccupations, not a summary.
   > Flag anything returned to more than twice without ever becoming an idea — that is a signal worth surfacing.
