@@ -63,7 +63,7 @@ would resolve the assumption and who to ask. That output is the point.
 - **No claim without a retrieved source.** Unfound is `unresolved`, never
   "likely". (D-20)
 - **Profile diffs are proposed, never auto-applied.** (D-30)
-- **Raw captures are private per founder.** DMs only. (D-31)
+- **Raw captures arrive by DM, then land in the shared repo.** Not private after commit — all three founders can read them once pushed. (D-38, supersedes D-31)
 - **No credentials reachable from the prototype container.** Pi ships no
   permission system; the sandbox is ours to enforce. (D-06)
 - **Never modify `sshd_config` or restart ssh.** Founders do this by

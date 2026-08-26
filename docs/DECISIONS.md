@@ -288,13 +288,25 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 
 ---
 
-### D-31 · Raw captures are private by default
+### D-31 · Raw captures are private by default · SUPERSEDED
 
 **Decision.** Captures arrive by DM and stay private to that founder. Profiles, `themes.md` and `dynamics.md` are shared.
 
 **Why.** Half-formed thoughts are not always things people want read. Trivial now, awkward to retrofit.
 
-**Revisit when:** all three founders explicitly agree to open them.
+**Superseded by D-38.** All three founders explicitly agreed to open raw captures — the revisit condition below was met.
+
+---
+
+### D-38 · Raw captures are visible to all three founders via the shared repo
+
+**Decision.** Captures still arrive privately by DM — that part of D-31 is unchanged. But under D-21 (git repo as externalized memory), every capture is committed to `minds/<founder>/captures/`, and the repo is shared. Once a capture is pushed, all three founders can read it.
+
+**Why.** All three founders explicitly agreed to this, superseding D-31's private-by-default rule. Recorded here because it is a real change in what "private" means in this system: private at arrival, not private after commit.
+
+**Practical effect.** There is no DM-only, repo-excluded storage tier for captures. A founder who wants a thought to stay unread by the other two should not send it to the bot.
+
+**Revisit when:** never, without an explicit decision to reverse it. If a genuinely private tier is wanted later, it needs new infrastructure (per-founder repo access, or a store outside the shared repo) — not just a documentation change back to D-31.
 
 ---
 

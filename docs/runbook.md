@@ -55,11 +55,11 @@ Ideas land while walking. Any friction and the layer goes unused, which degrades
 
 ```
 minds/
-  amit/     captures/YYYY-MM-DD.md
+  saksham/  captures/YYYY-MM-DD.md
             profile.md
             graveyard.md
-  priya/    …
-  rohan/    …
+  amisha/   …
+  vaibhav/  …
   shared/
     themes.md      recurring preoccupations across all three
     dynamics.md    where the three of you converge too fast

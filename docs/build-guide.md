@@ -395,7 +395,7 @@ curl -s -H "Authorization: Bearer $MASTER" \
 ```bash
 cd ~/workspace/mill-01
 
-mkdir -p minds/{amit,priya,rohan}/captures
+mkdir -p minds/{saksham,amisha,vaibhav}/captures
 mkdir -p minds/shared ideas evals telemetry ops runners
 touch minds/shared/{themes.md,dynamics.md}
 
