@@ -1,19 +1,15 @@
 "use strict";
 
-const fs = require("node:fs");
-const path = require("node:path");
-
 const { founderForUserId, channelId } = require("../config");
 const { callFlash } = require("../llm");
 const { generateIdeaId, createIdea } = require("../ideas");
 const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
-const { geminiFlashCost } = require("../pricing");
+const { buildEvalEvent } = require("../eval-event");
+const { readProfile } = require("../context");
 
 const MODEL = "flash-fast";
 const STAGE = "attack";
-
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 // Verbatim from docs/COMMANDS.md's /attack system prompt.
 const SYSTEM_PROMPT = [
@@ -24,15 +20,6 @@ const SYSTEM_PROMPT = [
 	"Return the assumption alone on the final line, prefixed `ASSUMPTION:`.",
 	"If the idea doesn't name a specific customer, mechanism, or context precisely enough to attack, do not invent them. Instead return a single line, prefixed `TOO_VAGUE:`, naming the two or three specifics that would be needed before this could be attacked.",
 ].join("\n");
-
-function readProfile(founder) {
-	const p = path.join(REPO_ROOT, "minds", founder, "profile.md");
-	try {
-		return fs.readFileSync(p, "utf8");
-	} catch {
-		return "";
-	}
-}
 
 // Requires the assumption (or refusal) on the model's actual final
 // non-empty line -- deliberately does not scan the whole body for a
@@ -108,33 +95,6 @@ async function runAttack({ founder, ideaText }) {
 	return { responseText, tokensIn, tokensOut, wallClockS, parsed };
 }
 
-// docs/EVAL.md Layer 2 schema. cache_hit_ratio is always 0.0 for now --
-// LiteLLM's /chat/completions response for this route exposes no
-// cached-token field to compute a real ratio from (checked directly:
-// prompt_tokens_details only has text_tokens), so this isn't a
-// measurement, it's an honest placeholder until that data exists.
-// verdict/evidence_basis are null -- not applicable outside the audit
-// and research stages. status/reason_code follow docs/COMMANDS.md's own
-// telemetry section ("Emit on failure too, with status: failed and a
-// reason").
-function buildTelemetryEvent({ founder, ideaId, tokensIn, tokensOut, wallClockS, status, reasonCode }) {
-	return {
-		founder,
-		stage: STAGE,
-		idea_id: ideaId ?? null,
-		model: MODEL,
-		tokens_in: tokensIn,
-		tokens_out: tokensOut,
-		cache_hit_ratio: 0.0,
-		cost_usd: geminiFlashCost({ tokensIn, tokensOut }),
-		wall_clock_s: Math.round(wallClockS * 1000) / 1000,
-		verdict: null,
-		evidence_basis: null,
-		reason_code: reasonCode ?? null,
-		status,
-	};
-}
-
 async function handleAttackCommand({ command, ack, client }) {
 	const founder = founderForUserId(command.user_id);
 	if (!founder) {
@@ -167,7 +127,9 @@ async function handleAttackCommand({ command, ack, client }) {
 
 		if (!parsed) {
 			emit(
-				buildTelemetryEvent({
+				buildEvalEvent({
+					stage: STAGE,
+					model: MODEL,
 					founder,
 					tokensIn,
 					tokensOut,
@@ -190,7 +152,9 @@ async function handleAttackCommand({ command, ack, client }) {
 			// definite answer on this attempt), no idea created. Post
 			// the line as-is per docs/COMMANDS.md.
 			emit(
-				buildTelemetryEvent({
+				buildEvalEvent({
+					stage: STAGE,
+					model: MODEL,
 					founder,
 					tokensIn,
 					tokensOut,
@@ -224,7 +188,9 @@ async function handleAttackCommand({ command, ack, client }) {
 		);
 
 		emit(
-			buildTelemetryEvent({
+			buildEvalEvent({
+				stage: STAGE,
+				model: MODEL,
 				founder,
 				ideaId: id,
 				tokensIn,
@@ -248,7 +214,9 @@ async function handleAttackCommand({ command, ack, client }) {
 		// provider actually billed on a failed call, and can't invent a
 		// number for it.
 		emit(
-			buildTelemetryEvent({
+			buildEvalEvent({
+				stage: STAGE,
+				model: MODEL,
 				founder,
 				tokensIn: 0,
 				tokensOut: 0,

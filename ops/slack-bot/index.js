@@ -10,6 +10,10 @@ const { founderForUserId } = config;
 const { writeCapture, MINDS_DIR } = require("./capture");
 const { startBatchCommitLoop, commitCaptures } = require("./git-batch");
 const { handleAttackCommand } = require("./commands/attack");
+const { handleThinkCommand } = require("./commands/think");
+const { handleCrossCommand } = require("./commands/cross");
+const { handleBlindspotCommand } = require("./commands/blindspot");
+const { handleThemesCommand } = require("./commands/themes");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -26,19 +30,15 @@ const app = new App({
 });
 
 // The eight slash commands defined in Slack app config (Part 9.1).
-// /attack is implemented (Part 9b, first per the build order in
-// docs/COMMANDS.md); the rest are still stubs until their turn.
-const STUBBED_COMMANDS = [
-	"/think",
-	"/cross",
-	"/blindspot",
-	"/test",
-	"/audit",
-	"/proto",
-	"/themes",
-];
+// /attack, /think, /cross, /blindspot, /themes implemented (Part 9b,
+// build order per docs/COMMANDS.md); /test, /audit, /proto still stubs.
+const STUBBED_COMMANDS = ["/test", "/audit", "/proto"];
 
 app.command("/attack", handleAttackCommand);
+app.command("/think", handleThinkCommand);
+app.command("/cross", handleCrossCommand);
+app.command("/blindspot", handleBlindspotCommand);
+app.command("/themes", handleThemesCommand);
 
 for (const command of STUBBED_COMMANDS) {
 	app.command(command, async ({ ack, command: cmd }) => {
