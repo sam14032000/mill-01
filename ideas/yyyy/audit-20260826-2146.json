@@ -1,0 +1,9 @@
+{
+  "verdict": "kill",
+  "evidence_basis": "web-only",
+  "load_bearing_assumption": "The submission contains no actual assumption — 'test assumption' is a placeholder, so there is nothing falsifiable to audit.",
+  "strongest_failure_reason": "No testable claim exists. The research fragment (ClearTax pricing at INR 999/mo, generic reports on CA firm price sensitivity) is orphaned evidence attached to no hypothesis — it cannot support, narrow, or refute anything.",
+  "what_would_change_verdict": "Resubmit with a concrete, falsifiable assumption (e.g., 'Indian CA firms with 5-50 clients will pay INR X/mo for Y') plus research that bears directly on it. Field evidence from real prospective buyers would be required for any proceed verdict.",
+  "evidence_quality": "thin",
+  "who_to_talk_to": "Once a real assumption is defined: the specific buyer it names — e.g., practicing CAs at small-to-mid firms who currently pay for GST reconciliation tooling."
+}

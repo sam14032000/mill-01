@@ -1,0 +1,13 @@
+{
+  "id": "yyyy",
+  "assumption": "test assumption",
+  "evidence_basis": "web-only",
+  "sources": [
+    "https://clear.in/pricing"
+  ],
+  "field_notes_file": null,
+  "web_research_status": "test-harness-manual",
+  "research_stub": false,
+  "slack_thread_ts": "thread-yyyy-test",
+  "ts": "2026-08-26T21:45:30.967Z"
+}
