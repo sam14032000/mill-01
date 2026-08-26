@@ -588,12 +588,20 @@ correctly.
 ```dockerfile
 FROM node:24-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git python3 python3-pip ca-certificates \
+      git python3 python3-pip ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 10001 proto
 USER proto
 WORKDIR /scratch
 ```
+
+`curl` is required here, not optional -- the verify-by-hand tests below
+use it. Found by running them: without curl, both network tests report
+"clean"/"BLOCKED-UNEXPECTEDLY" regardless of actual network state,
+because `curl: command not found` exits non-zero and falls through to
+the `||` branch either way. That's a false pass, not a real one — the
+tests were re-run with `python3 -c "import socket; ..."` to get a
+genuine signal before curl was added back.
 
 `~/stack/sandbox/run.sh`:
 
@@ -601,6 +609,14 @@ WORKDIR /scratch
 #!/usr/bin/env bash
 set -euo pipefail
 SCRATCH="$(mktemp -d /home/agent/scratch/proto-XXXXXX)"
+# mktemp defaults to 700, owned by whichever host user ran this script.
+# The container always runs as a fixed uid (10001, "proto") that won't
+# match the host user's uid, so without this the container can create
+# nothing in its own scratch mount -- found by testing the mount
+# end-to-end, not assumed from :rw on the bind mount. World-writable is
+# acceptable here: fresh, per-invocation, ephemeral (D-29 deletes
+# prototypes by default), not a shared or long-lived location.
+chmod 777 "$SCRATCH"
 
 # D-06: network egress allowlisted, not open by default. Default is
 # `none` -- full isolation, no egress at all. A prototype that names a
