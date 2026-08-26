@@ -66,16 +66,17 @@
 
 ### D-03 · Pi as the harness
 
-**Decision.** Pi (`@earendil-works/pi-coding-agent`), MIT licensed. Provider access through `pi-ai`. Slack through `pi-chat`.
+**Decision.** Pi (`@earendil-works/pi-coding-agent`), MIT licensed. Provider access through `pi-ai`. Slack control surface is custom-built (see D-39) — not through `pi-chat`.
 
 **Supersedes:** dsh (DeepSeek Harness), which held this slot for the first two versions.
 
-**Why the switch.** dsh was accepted as a given in the opening message and never compared against alternatives — a real gap, since every model choice was interrogated repeatedly while the layer beneath them went unexamined. On comparison Pi wins on four axes that matter here:
+**Why the switch.** dsh was accepted as a given in the opening message and never compared against alternatives — a real gap, since every model choice was interrogated repeatedly while the layer beneath them went unexamined. On comparison Pi wins on the axes that matter here:
 
-- **`pi-chat` exists** — Slack/chat automation on the same foundation. The entire control surface is a chat bot; dsh meant writing one from scratch.
 - **Maturity.** 11.5K+ GitHub stars, 3.17M+ monthly npm downloads, new model support within hours — against a developer preview warning in capital letters about breaking changes between release candidates.
 - **Four runtime modes.** Interactive TUI, `pi -p "query"` with `--mode json` for scripts, RPC over stdin/stdout for non-Node integrations, SDK embedding. Stage runners want print/JSON; the bot wants RPC. Both first-class.
 - **20+ providers** through one unified API including Anthropic, Google Gemini and Vertex, and OpenRouter.
+
+**Correction (26 August 2026): the `pi-chat` claim was wrong.** The original comparison listed *"`pi-chat` exists — Slack/chat automation on the same foundation"* as a deciding factor. That claim traces to Pi's own README, which is inaccurate — the error was propagated from upstream docs, not invented at this layer. The actual `earendil-works/pi-chat` project bridges Discord and Telegram only; it has never supported Slack. Third-party Slack bridges for Pi do exist (`comsysto/pi-slack-bridge`, `tintinweb/pi-messenger-bridge`) but were evaluated and rejected as a fit — see D-39. Removing this bullet changes the count of deciding factors but not the outcome: Pi still wins on maturity and runtime-mode fit alone, and D-06's sandboxing cost was already priced in independent of the Slack question.
 
 **Second-order benefit retained.** Model-agnosticism makes cloud credits exploitable without lock-in — you can spend Google credits on Gemini for two years and leave when they run out.
 
@@ -101,11 +102,11 @@
 
 ### D-05 · Slack as the control surface
 
-**Decision.** Slack, via `pi-chat`. Not Telegram.
+**Decision.** Slack, via a custom Bolt-based bot (see D-39). Not Telegram.
 
 **Supersedes** the v1/v2 Telegram design, which was chosen in a single line and then survived eight revisions unexamined.
 
-**Why.** `pi-chat` targets Slack natively — the plumbing exists rather than being written. Slack handles three-user structure properly: DMs for private captures, shared channels for brainstorm output, threads for research reports and their audit verdicts.
+**Why.** Slack handles three-user structure properly: DMs for private captures, shared channels for brainstorm output, threads for research reports and their audit verdicts.
 
 | Surface | Use |
 |---|---|
@@ -116,7 +117,9 @@
 
 **Attribution is not optional.** Every capture and command is attributed to its founder; attribution drives profile routing.
 
-**Improvement over the previous design.** dsh headless failed closed on approvals with no way to route them to a phone — recorded in v2 as an unfixable constraint. Pi's extension model lets you write a permission gate that posts to Slack and waits. The constraint is gone.
+**Improvement over the previous design.** dsh headless failed closed on approvals with no way to route them to a phone — recorded in v2 as an unfixable constraint. A Slack bot that posts and waits removes that constraint.
+
+**Correction (26 August 2026).** The original text here read *"`pi-chat` targets Slack natively — the plumbing exists rather than being written."* That was wrong — see D-03's correction and D-39. The choice of Slack over Telegram stands on its own merits (the three-user structure argument above) independent of whether the plumbing was pre-built.
 
 ---
 
@@ -424,3 +427,29 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 **Why it is here.** A week of setup and $100/month is itself an idea that has not been through the mill. The honest prediction is that capture and `/blindspot` get used constantly while the research apparatus gets used twice — and that would change what gets built first.
 
 **Status:** raised twice, not answered. Left open deliberately.
+
+---
+
+### D-39 · Custom Bolt bot for Slack, not a pi-chat bridge
+
+**Decision.** The Slack control surface is a small custom bot (Slack Bolt SDK, Socket Mode) that shells out to `pi -p --mode json` per message, not an installed Pi extension.
+
+**Why this came up.** D-03 and D-05 originally credited `pi-chat` with Slack support — that claim was wrong (see both entries' corrections). Real Slack bridges for Pi exist once the actual ecosystem was checked: `comsysto/pi-slack-bridge` (a Slack-focused fork) and `tintinweb/pi-messenger-bridge` (its multi-transport parent, Telegram/WhatsApp/Slack/Discord/Matrix). Both were read as reference implementations for their Slack block-splitting and message-length handling before writing this bot's equivalent — neither was adopted.
+
+**Why not adopt one.** Both bridges are built for a different problem: **remote control of one person's own Pi terminal session**, not a multi-tenant application. Their auth model makes this explicit — a single trusted Slack user claims the bridge via a 6-digit challenge code, and every other user is ignored until that claim is manually released (`/slk-bridge releaseclaim` or `/msg-bridge revoke`). That is the right model for "let me drive my laptop's Pi session from my phone." It is the wrong model for three founders who each need to be simultaneously trusted and routed to their own `minds/<name>/` directory (D-31/D-38's attribution requirement). Retrofitting three-way simultaneous trust onto a single-claim architecture is more work than writing a stateless allowlist against Slack's verified `user_id` — see D-40.
+
+**What was reused.** Not code — the design patterns. Slack Block Kit's markdown block technically allows up to 12,000 characters but both references stay conservatively under ~6,000 and split on markdown-aware boundaries (headers, then paragraphs/sentences, then raw) before falling back to hard truncation. That splitting strategy is reused in this bot's own message-formatting code.
+
+**Revisit when:** the founder base grows beyond three and a single-tenant-per-instance model with one bridge process per founder becomes viable, or one of the reference bridges adds native multi-tenant trust.
+
+---
+
+### D-40 · Slack auth: verified user_id allowlist, no secondary login
+
+**Decision.** Founder identity comes from Slack's verified `user_id` in the event payload — nothing else. The bot holds a static, explicit map of the three founders' Slack user IDs to their `minds/<name>/` directory. A message from a `user_id` not on the map is dropped silently: no error reply, no capture written, no log visible to the sender.
+
+**Why no passphrase or secondary login.** Slack has already authenticated the human before the event reaches the bot. A passphrase or code-based claim step (the pattern both D-39 reference bridges use) adds a second, weaker credential on top of one that's already trustworthy, and it's the wrong shape for three founders who should all be trusted from the first message, permanently, not one at a time.
+
+**Why silent-drop, not an error reply.** An error message to an unrecognized `user_id` confirms to that sender that the bot exists and is listening — surface area this system doesn't need. Founders only ever touch Slack (no SSH, no keys, no server access), so the allowlist is the entire access-control boundary; it fails closed by default (unknown IDs produce no effect) rather than failing open or leaking its own existence.
+
+**Revisit when:** a fourth founder joins, or Slack's `user_id` stops being a reliable verified identity (e.g., a shared-workspace or guest-account edge case surfaces).

@@ -30,7 +30,8 @@ capture → brainstorm → research → AUDIT → prototype ⇄ touches
                                    kill
 ```
 
-Harness is **Pi**. Control surface is **Slack** via `pi-chat`. Provider
+Harness is **Pi**. Control surface is **Slack** via a custom Bolt bot
+(D-39) — not `pi-chat`, which supports Discord and Telegram only. Provider
 access through `pi-ai`.
 
 ---
@@ -133,7 +134,10 @@ A `kill` writes to that founder's `graveyard.md` and posts to `#graveyard`.
 | `#research` | Reports and audit verdicts, threaded |
 | `#graveyard` | Kill verdicts |
 
-Attribution drives profile routing and is not optional.
+Attribution drives profile routing and is not optional. Identity comes
+only from Slack's verified `user_id` against a static allowlist — no
+passphrase, no secondary login (D-40). Messages from off-allowlist IDs are
+dropped silently: no reply, no capture.
 
 ---
 
