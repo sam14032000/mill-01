@@ -131,7 +131,7 @@ A `kill` writes to that founder's `graveyard.md` and posts to `#graveyard`.
 | Surface | Use |
 |---|---|
 | DM to bot | Private captures |
-| `#mill` | Brainstorm, cross, blindspot |
+| `#mill-ideas` | Brainstorm, cross, blindspot |
 | `#research` | Reports and audit verdicts, threaded |
 | `#graveyard` | Kill verdicts |
 

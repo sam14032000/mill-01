@@ -5,7 +5,8 @@ const path = require("node:path");
 const { App } = require("@slack/bolt");
 const https = require("node:https");
 
-const { founderForUserId } = require("./allowlist");
+const config = require("./config");
+const { founderForUserId } = config;
 const { writeCapture, MINDS_DIR } = require("./capture");
 const { startBatchCommitLoop, commitCaptures } = require("./git-batch");
 
@@ -132,6 +133,16 @@ app.message(async ({ message, client }) => {
 
 	startBatchCommitLoop((reason) => {
 		console.error(`batch commit failed: ${reason}`);
+	});
+
+	// Reload the allowlist/channel map from disk on SIGHUP, so adding a
+	// founder (or fixing a channel id) later is just editing
+	// ~/.config/mill/env and `systemctl kill -s HUP mill-chat` -- no code
+	// change, no full restart needed. A plain `systemctl restart` also
+	// picks up the change, since config.load() runs at require time too.
+	process.on("SIGHUP", () => {
+		console.log("SIGHUP received, reloading config");
+		config.load();
 	});
 
 	for (const sig of ["SIGINT", "SIGTERM"]) {

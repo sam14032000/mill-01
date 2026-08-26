@@ -70,7 +70,7 @@ minds/
 | Channel | Purpose |
 |---|---|
 | DM to the bot | Private captures — one per founder |
-| `#mill` | Brainstorm, cross, blindspot. Shared. |
+| `#mill-ideas` | Brainstorm, cross, blindspot. Shared. |
 | `#research` | Research reports and audit verdicts, threaded |
 | `#graveyard` | Kill verdicts. Read it monthly. |
 

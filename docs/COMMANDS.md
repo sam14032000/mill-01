@@ -86,7 +86,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/think <idea>`
 
-- **Model:** flash · **Posts to:** `#mill`
+- **Model:** flash · **Posts to:** `#mill-ideas`
 - **Context:** [1][2][4]
 - **System prompt:**
   > Develop this idea concretely — mechanism, who it serves, what has to be true.
@@ -98,7 +98,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/cross <idea>`
 
-- **Model:** flash, **two separate calls** · **Posts to:** `#mill`
+- **Model:** flash, **two separate calls** · **Posts to:** `#mill-ideas`
 - **Context:** [1] + *each other founder's* profile + the idea. Never the sender's profile.
 - **System prompt (per call):**
   > You are reading this idea through the lens of a different founder's thinking patterns, given below. Attack it as they would.
@@ -109,7 +109,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/blindspot <idea>`
 
-- **Model:** flash · **Posts to:** `#mill`
+- **Model:** flash · **Posts to:** `#mill-ideas`
 - **Context:** [1][3] + idea. **No individual profile** — this is about all three.
 - **System prompt:**
   > Attack from the shared blind spot described below. All three founders would miss this.
@@ -120,7 +120,7 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ### `/attack <idea>` — creates the idea
 
-- **Model:** flash · **Posts to:** `#mill`
+- **Model:** flash · **Posts to:** `#mill-ideas`
 - **Context:** [1][2] + idea
 - **System prompt:**
   > Make the strongest case against this idea. Not balanced — the prosecution.
@@ -194,7 +194,7 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 ### `/proto <id> <assumption>`
 
-- **Model:** flash · **Posts to:** `#mill`
+- **Model:** flash · **Posts to:** `#mill-ideas`
 - **Refuses if:** no assumption argument (D-29), or state is `killed`
 - **System prompt:**
   > Build the smallest artifact that tests this one assumption. Default to non-code — landing page, mock flow, fake pricing table, one-pager. Single file.
@@ -209,7 +209,7 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 ### `/themes`
 
-- **Model:** flash · **Posts to:** `#mill` · **Context:** last 30 days of that founder's captures
+- **Model:** flash · **Posts to:** `#mill-ideas` · **Context:** last 30 days of that founder's captures
 - **System prompt:**
   > What has this founder circled back to repeatedly? Name recurring preoccupations, not a summary.
   > Flag anything returned to more than twice without ever becoming an idea — that is a signal worth surfacing.
@@ -227,7 +227,7 @@ Sunday 09:30. Per founder: reads the week's captures, their graveyard, and curre
   > It does not record what they believe. A profile that reflects beliefs back is an echo chamber and defeats its purpose.
   > Propose only changes the week's evidence supports. Small diffs are correct.
 
-`shared/dynamics.md` updates on the same run, posted to `#mill`, approved by any founder.
+`shared/dynamics.md` updates on the same run, posted to `#mill-ideas`, approved by any founder.
 
 ---
 
@@ -248,7 +248,7 @@ Emit on failure too, with `"status": "failed"` and a reason. Failures are data.
 | Malformed audit JSON | One retry. Then report failure. **Never post an unvalidated verdict.** |
 | Research pass crashes | Post the traceback tail to `#research`. Leave state at `open` so `/test` can re-run. |
 | Unknown Slack user | Silent ignore. No reply, no file. |
-| Git push fails | Log locally, alert to `#mill`, keep working. Never block a command on git. |
+| Git push fails | Log locally, alert to `#mill-ideas`, keep working. Never block a command on git. |
 
 ---
 
@@ -257,7 +257,7 @@ Emit on failure too, with `"status": "failed"` and a reason. Failures are data.
 - No natural-language command parsing. Slash commands only.
 - No idea search or listing UI. The repo is the interface.
 - No editing captures. Append-only.
-- No cross-founder notifications. `#mill` is shared; that is sufficient.
+- No cross-founder notifications. `#mill-ideas` is shared; that is sufficient.
 - No web UI of any kind.
 
 Every one of these is a place scope would expand without improving the kill rate.

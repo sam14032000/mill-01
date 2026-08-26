@@ -111,7 +111,7 @@
 | Surface | Use |
 |---|---|
 | DM to bot | Private captures, per founder |
-| `#mill` | Brainstorm, cross, blindspot |
+| `#mill-ideas` | Brainstorm, cross, blindspot |
 | `#research` | Reports and audit verdicts, threaded |
 | `#graveyard` | Kill verdicts |
 
