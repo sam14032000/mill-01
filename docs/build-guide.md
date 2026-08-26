@@ -426,7 +426,16 @@ __pycache__/
 
 ---
 
-# Part 9 — Slack
+# Part 9 — Slack transport
+
+**Scope: wiring only.** Connection lifecycle, D-40 allowlist, channel routing,
+systemd service. No command logic — see Part 9b. `pi-chat` does not support
+Slack (D-03/D-39 corrections); this is a custom bot on the Slack Bolt SDK.
+
+**Stop and verify before Part 9b.** A DM from an allowlisted founder must
+create a correctly attributed capture file. A DM from anyone else must
+produce no reply and no file. Do not start command implementation until
+both are confirmed.
 
 ### 9.1 App config
 
@@ -446,10 +455,10 @@ At `api.slack.com/apps` → your app:
 - Bot User OAuth Token (`xoxb-…`)
 - App-Level Token with `connections:write` (`xapp-…`)
 
-### 9.2 Wire pi-chat
+### 9.2 Wire the Bolt bot
 
 ```bash
-npm install -g @earendil-works/pi-chat   # verify exact package name against docs
+cd ~/workspace/mill-01/ops/slack-bot && npm install
 ```
 
 Add to `~/.config/mill/env`:
@@ -460,16 +469,16 @@ SLACK_APP_TOKEN=xapp-...
 LITELLM_BASE_URL=http://127.0.0.1:4000
 MILL_FLASH_KEY=sk-...
 MILL_AUDIT_KEY=sk-...
-FOUNDER_AMIT=U01ABC
-FOUNDER_PRIYA=U02DEF
-FOUNDER_ROHAN=U03GHI
+FOUNDER_SAKSHAM=U01ABC
+FOUNDER_AMISHA=U02DEF
+FOUNDER_VAIBHAV=U03GHI
 ```
 
 ```bash
 chmod 600 ~/.config/mill/env
 ```
 
-Map Slack user IDs to `minds/<name>/` directories. **Attribution drives profile routing and is not optional** (C-19).
+Map Slack user IDs to `minds/<name>/` directories. **Attribution drives profile routing and is not optional** (D-40). Identity comes only from Slack's verified `user_id` against this static map — no passphrase, no secondary login. Anything off the map is dropped silently.
 
 ### 9.3 Service
 
@@ -484,9 +493,9 @@ Wants=network-online.target
 Type=simple
 User=agent
 EnvironmentFile=/home/agent/.config/mill/env
-WorkingDirectory=/home/agent/workspace/mill-01
+WorkingDirectory=/home/agent/workspace/mill-01/ops/slack-bot
 Environment=PATH=/home/agent/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/agent/.npm-global/bin/pi-chat --config /home/agent/workspace/mill-01/ops/chat.config.json
+ExecStart=/usr/bin/node /home/agent/workspace/mill-01/ops/slack-bot/index.js
 Restart=always
 RestartSec=10
 StandardOutput=append:/home/agent/logs/chat.log
@@ -514,6 +523,22 @@ sudo tee /etc/logrotate.d/mill > /dev/null <<'EOF'
 }
 EOF
 ```
+
+---
+
+# Part 9b — Command implementations
+
+**Do not start until Part 9 is confirmed working.** Implements `docs/COMMANDS.md`
+against the transport built in Part 9.
+
+**Build order:** `/attack` first — it is the only command that creates an
+idea, and every other command operates on one that already exists. Then the
+brainstorm-shaped commands, lower stakes individually: `/think`, `/cross`,
+`/blindspot`, `/themes`. Then `/test`, which drives the Part 11 research
+pass. **`/audit` last** — its JSON validation and the D-33 web-only-caps-at-
+`narrow` enforcement (C-07 in `docs/COMMANDS.md`) is the most load-bearing
+code in the system, and every command before it exists to feed that gate
+correctly.
 
 ---
 

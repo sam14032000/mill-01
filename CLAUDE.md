@@ -2,6 +2,7 @@
 
 @docs/DECISIONS.md
 @docs/runbook.md
+@docs/COMMANDS.md
 
 `docs/EVAL.md` is the monthly review protocol — deliberately **not** imported.
 Layer 3 of that protocol must run in a fresh session with no build context,

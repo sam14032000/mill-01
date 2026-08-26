@@ -453,3 +453,17 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 **Why silent-drop, not an error reply.** An error message to an unrecognized `user_id` confirms to that sender that the bot exists and is listening — surface area this system doesn't need. Founders only ever touch Slack (no SSH, no keys, no server access), so the allowlist is the entire access-control boundary; it fails closed by default (unknown IDs produce no effect) rather than failing open or leaking its own existence.
 
 **Revisit when:** a fourth founder joins, or Slack's `user_id` stops being a reliable verified identity (e.g., a shared-workspace or guest-account edge case surfaces).
+
+---
+
+### D-41 · The command layer was unspecified until docs/COMMANDS.md
+
+**Decision.** `docs/COMMANDS.md` is now the application spec for what each slash command does — prompt content, context assembly, file writes, failure handling — and is imported into `CLAUDE.md`.
+
+**Why this needed recording.** Every design pass from v1.0 onward described `/think`, `/cross`, `/blindspot`, `/attack`, `/test`, `/audit`, `/proto` and `/themes` by name and by what they were *for* (runbook.md Stages 2–6), but never by what a session should actually send to a model or write to disk. That gap was invisible as long as `pi-chat` was believed to supply the control surface wholesale — D-03's original text called it *"the entire control surface is a chat bot."* Once D-39 established that no such package exists for Slack, the missing layer became load-bearing: something has to generate these prompts, and until `docs/COMMANDS.md` existed nothing said what.
+
+**Consequence, not a new decision.** This isn't a new design choice so much as the debt coming due on D-03's incorrect premise. Recorded here so a future session doesn't wonder why the command layer looks hand-specified while everything above it in the stack was chosen by comparison and benchmark.
+
+**Build order (per docs/COMMANDS.md, build-guide.md Part 9b):** `/attack` first, since it's the only command that creates an idea and every other command operates on one that already exists. Then `/think`, `/cross`, `/blindspot`, `/themes` — the brainstorm-shaped commands, lower stakes individually. Then `/test`, which drives the research pass. `/audit` last, deliberately — its JSON validation and the D-33 web-only-caps-at-narrow enforcement (C-07 in COMMANDS.md) is the most load-bearing code in the system, and everything before it exists to feed that gate correctly.
+
+**Revisit when:** never — this entry stays as the record of how the gap arose, even after the spec is fully implemented.
