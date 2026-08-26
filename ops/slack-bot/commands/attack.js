@@ -8,6 +8,10 @@ const { callFlash } = require("../llm");
 const { generateIdeaId, createIdea } = require("../ideas");
 const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
+const { geminiFlashCost } = require("../pricing");
+
+const MODEL = "flash-fast";
+const STAGE = "attack";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
@@ -66,6 +70,10 @@ function parseAttackResponse(responseText) {
 // amendment). max_tokens raised to 4096: thinking tokens are drawn from
 // the same output budget, and a low value can leave nothing for the
 // visible answer even at low thinking level.
+//
+// tokensIn/tokensOut/wallClockS accumulate across both attempts if a
+// retry happens, so telemetry (and cost) reflect everything actually
+// spent on this invocation, not just the last call.
 async function runAttack({ founder, ideaText }) {
 	const profile = readProfile(founder);
 	const messages = [
@@ -78,17 +86,53 @@ async function runAttack({ founder, ideaText }) {
 	];
 
 	let responseText = "";
-	let usage;
 	let parsed = null;
+	let tokensIn = 0;
+	let tokensOut = 0;
+	let wallClockS = 0;
+
 	for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-		({ content: responseText, usage } = await callFlash(messages, {
-			model: "flash-fast",
+		const t0 = Date.now();
+		const { content, usage } = await callFlash(messages, {
+			model: MODEL,
 			maxTokens: 4096,
-		}));
+		});
+		wallClockS += (Date.now() - t0) / 1000;
+		tokensIn += usage?.prompt_tokens ?? 0;
+		tokensOut += usage?.completion_tokens ?? 0;
+
+		responseText = content;
 		parsed = parseAttackResponse(responseText);
 	}
 
-	return { responseText, usage, parsed };
+	return { responseText, tokensIn, tokensOut, wallClockS, parsed };
+}
+
+// docs/EVAL.md Layer 2 schema. cache_hit_ratio is always 0.0 for now --
+// LiteLLM's /chat/completions response for this route exposes no
+// cached-token field to compute a real ratio from (checked directly:
+// prompt_tokens_details only has text_tokens), so this isn't a
+// measurement, it's an honest placeholder until that data exists.
+// verdict/evidence_basis are null -- not applicable outside the audit
+// and research stages. status/reason_code follow docs/COMMANDS.md's own
+// telemetry section ("Emit on failure too, with status: failed and a
+// reason").
+function buildTelemetryEvent({ founder, ideaId, tokensIn, tokensOut, wallClockS, status, reasonCode }) {
+	return {
+		founder,
+		stage: STAGE,
+		idea_id: ideaId ?? null,
+		model: MODEL,
+		tokens_in: tokensIn,
+		tokens_out: tokensOut,
+		cache_hit_ratio: 0.0,
+		cost_usd: geminiFlashCost({ tokensIn, tokensOut }),
+		wall_clock_s: Math.round(wallClockS * 1000) / 1000,
+		verdict: null,
+		evidence_basis: null,
+		reason_code: reasonCode ?? null,
+		status,
+	};
 }
 
 async function handleAttackCommand({ command, ack, client }) {
@@ -119,17 +163,19 @@ async function handleAttackCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { usage, parsed } = await runAttack({ founder, ideaText });
-		const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens;
+		const { tokensIn, tokensOut, wallClockS, parsed } = await runAttack({ founder, ideaText });
 
 		if (!parsed) {
-			emit({
-				command: "attack",
-				founder,
-				status: "failed",
-				reason: "no ASSUMPTION: or TOO_VAGUE: line after retry",
-				reasoning_tokens: reasoningTokens,
-			});
+			emit(
+				buildTelemetryEvent({
+					founder,
+					tokensIn,
+					tokensOut,
+					wallClockS,
+					status: "failed",
+					reasonCode: "no_assumption_or_too_vague_line",
+				}),
+			);
 			if (millChannel) {
 				await client.chat.postMessage({
 					channel: millChannel,
@@ -143,13 +189,16 @@ async function handleAttackCommand({ command, ack, client }) {
 			// Refusal path: no retry (the model already returned a
 			// definite answer on this attempt), no idea created. Post
 			// the line as-is per docs/COMMANDS.md.
-			emit({
-				command: "attack",
-				founder,
-				status: "refused",
-				reason: "too_vague",
-				reasoning_tokens: reasoningTokens,
-			});
+			emit(
+				buildTelemetryEvent({
+					founder,
+					tokensIn,
+					tokensOut,
+					wallClockS,
+					status: "refused",
+					reasonCode: "too_vague",
+				}),
+			);
 			if (millChannel) {
 				await client.chat.postMessage({
 					channel: millChannel,
@@ -174,13 +223,16 @@ async function handleAttackCommand({ command, ack, client }) {
 			(reason) => console.error(`git commit/push failed for idea ${id}: ${reason}`),
 		);
 
-		emit({
-			command: "attack",
-			founder,
-			idea_id: id,
-			status: "ok",
-			reasoning_tokens: reasoningTokens,
-		});
+		emit(
+			buildTelemetryEvent({
+				founder,
+				ideaId: id,
+				tokensIn,
+				tokensOut,
+				wallClockS,
+				status: "ok",
+			}),
+		);
 
 		if (millChannel) {
 			await client.chat.postMessage({
@@ -190,12 +242,21 @@ async function handleAttackCommand({ command, ack, client }) {
 		}
 	} catch (err) {
 		console.error("attack command failed:", err);
-		emit({
-			command: "attack",
-			founder,
-			status: "failed",
-			reason: String(err?.message || err),
-		});
+		// tokensIn/tokensOut/wallClockS aren't available here -- the
+		// exception can come from inside callFlash before it returns
+		// usage. 0 is the honest default: we don't know what the
+		// provider actually billed on a failed call, and can't invent a
+		// number for it.
+		emit(
+			buildTelemetryEvent({
+				founder,
+				tokensIn: 0,
+				tokensOut: 0,
+				wallClockS: 0,
+				status: "failed",
+				reasonCode: "model_call_failed",
+			}),
+		);
 		if (millChannel) {
 			await client.chat
 				.postMessage({
