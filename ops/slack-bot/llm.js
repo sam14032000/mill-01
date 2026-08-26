@@ -21,11 +21,28 @@ const REQUEST_TIMEOUT_MS = 120_000;
 // research) -- never unspecified. D-10 is absolute regardless: audit
 // (Fable 5, MILL_AUDIT_KEY) is never called from here.
 //
+// Research and interactive commands also split budgets (D-23 amendment,
+// docs/DECISIONS.md): a single research pass costs roughly as much as
+// 250 interactive exchanges, so sharing one key's daily cap would let
+// one /test starve every founder's brainstorming for the rest of the
+// day. mill-flash is scoped to flash-fast only; mill-research is scoped
+// to flash only. Keyed off the model name here, not left to the caller
+// to get right, so it's structurally impossible to route a call through
+// the wrong budget.
+const KEY_ENV_BY_MODEL = {
+	"flash-fast": "MILL_FLASH_KEY",
+	flash: "MILL_RESEARCH_KEY",
+};
+
 // Gemini 3.x rejects temperature/top_p/top_k -- deliberately not
 // exposed as options here so no caller can accidentally send them.
-async function callFlash(messages, { model = "flash", maxTokens = 4096 } = {}) {
-	const key = process.env.MILL_FLASH_KEY;
-	if (!key) throw new Error("MILL_FLASH_KEY not set");
+async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = {}) {
+	const keyEnvVar = KEY_ENV_BY_MODEL[model];
+	if (!keyEnvVar) {
+		throw new Error(`callFlash: no key mapping for model "${model}"`);
+	}
+	const key = process.env[keyEnvVar];
+	if (!key) throw new Error(`${keyEnvVar} not set`);
 
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

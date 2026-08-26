@@ -297,11 +297,29 @@ volumes:
 
 ```yaml
 model_list:
+  # Interactive commands (D-08 amendment). Gemini 3.x bills internal
+  # reasoning as output tokens and defaults to thinking_level "high"
+  # when unspecified -- that default is what made every call take
+  # 90-180s+ while building /attack (ops/BUILD-LOG.md has the full
+  # trail). thinking_level (not thinking_budget, not reasoning_effort)
+  # is the Gemini 3.x control. Never leave it unspecified.
+  - model_name: flash-fast
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/GEMINI_API_KEY
+      max_tokens: 8192
+      thinking_level: low
+      drop_params: false
+
+  # Research (Part 11) keeps more reasoning budget -- untested at any
+  # level as of this build, deliberately left alone.
   - model_name: flash
     litellm_params:
       model: gemini/gemini-3.7-flash
       api_key: os.environ/GEMINI_API_KEY
       max_tokens: 8192
+      thinking_level: medium
+      drop_params: false
 
   - model_name: audit
     litellm_params:
@@ -316,6 +334,9 @@ model_list:
       api_key: os.environ/MINIMAX_API_KEY
 
 litellm_settings:
+  # Global default stays true; flash/flash-fast override it per-model
+  # above -- drop_params:true was very likely silently discarding
+  # thinking_level before this was scoped per-entry.
   drop_params: true
   set_verbose: false
   cache: true
@@ -354,16 +375,25 @@ curl -s http://127.0.0.1:4000/health/readiness
 
 ### 7.3 Virtual keys with daily budgets
 
-This is the whole point — provider caps are monthly and trip after an overnight runaway. These reset daily. **The budgets below must actually be daily (`budget_duration: "1d"`) to do that job** — a `30d` duration was shipped here in an earlier build pass despite this section's own prose, found by conformance check C-05 in `docs/EVAL.md` and fixed. The daily amounts are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $60/30 ≈ $2, $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.50 / $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later.
+This is the whole point — provider caps are monthly and trip after an overnight runaway. These reset daily. **The budgets below must actually be daily (`budget_duration: "1d"`) to do that job** — a `30d` duration was shipped here in an earlier build pass despite this section's own prose, found by conformance check C-05 in `docs/EVAL.md` and fixed.
+
+**Interactive and research traffic have different cost profiles and must not share a key or budget.** A single research pass costs roughly as much as 250 interactive exchanges — one `/test` on a shared budget can starve every founder's brainstorming for the rest of the day. `mill-flash` (scoped to `flash-fast` only) and `mill-research` (scoped to `flash` only) are separate keys for this reason, not a naming convenience.
 
 ```bash
 MASTER=$(grep LITELLM_MASTER_KEY .env | cut -d= -f2)
 
-# brainstorm + research + prototype
+# interactive: /attack, /think, /cross, /blindspot, /themes, /proto
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
-  -d '{"key_alias":"mill-flash","models":["flash"],
-       "max_budget":2.50,"budget_duration":"1d",
+  -d '{"key_alias":"mill-flash","models":["flash-fast"],
+       "max_budget":0.50,"budget_duration":"1d",
+       "rpm_limit":60}'
+
+# research: /test only
+curl -s -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"key_alias":"mill-research","models":["flash"],
+       "max_budget":3.00,"budget_duration":"1d",
        "rpm_limit":60}'
 
 # the audit gate — tight, deliberately
@@ -378,6 +408,12 @@ curl -s -X POST http://127.0.0.1:4000/key/generate \
   -d '{"key_alias":"mill-mech","models":["mechanical"],
        "max_budget":0.50,"budget_duration":"1d"}'
 ```
+
+The daily amounts on `mill-audit` and `mill-mech` are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later. `mill-flash`/`mill-research` are sized directly from measured per-command cost (`ops/BUILD-LOG.md`), not from D-23's undifferentiated $60 Gemini line — $0.50/day covers roughly 80+ interactive exchanges at the measured ~$0.006/call ceiling; $3.00/day covers roughly two research passes at ~$1.50 each.
+
+**Application code routes to the correct key automatically, keyed off model name** (`ops/slack-bot/llm.js`), so a caller can't accidentally put a `/test` call on the interactive budget or vice versa by getting the key wrong.
+
+**LiteLLM's daily budget window resets at UTC midnight — 05:30 IST, not a rolling 24 hours from key creation.** Confirmed directly via `/key/info`'s `budget_reset_at` field. An evening exhaustion (e.g. 8pm IST) blocks that key until 5:30am IST the next day, not a few hours later — worth knowing before treating a "budget exceeded" error at night as a quick wait.
 
 Save the returned keys to `~/.config/mill/env`. **Everything downstream points at `http://127.0.0.1:4000` and uses these, never a provider key directly** (conformance check C-04).
 
@@ -468,6 +504,7 @@ SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 LITELLM_BASE_URL=http://127.0.0.1:4000
 MILL_FLASH_KEY=sk-...
+MILL_RESEARCH_KEY=sk-...
 MILL_AUDIT_KEY=sk-...
 FOUNDER_SAKSHAM=U01ABC
 FOUNDER_AMISHA=U02DEF
@@ -640,7 +677,12 @@ OUT   = REPO / "ideas" / sys.argv[1]
 ASSUMPTION = sys.argv[2]
 
 os.environ["OPENAI_API_BASE"] = os.environ["LITELLM_BASE_URL"]
-os.environ["OPENAI_API_KEY"]  = os.environ["MILL_FLASH_KEY"]
+# mill-research, not mill-flash: research and interactive traffic have
+# separate keys and budgets (Part 7.3) precisely because a research pass
+# costs roughly as much as 250 interactive exchanges. mill-flash is
+# scoped to flash-fast only and would 403 against the flash model this
+# script needs.
+os.environ["OPENAI_API_KEY"]  = os.environ["MILL_RESEARCH_KEY"]
 os.environ["DOC_PATH"] = str(FIELD)
 
 async def main():
