@@ -167,3 +167,11 @@ dropped silently: no reply, no capture.
   its 24% budget share.
 - When adding a structural decision, add an entry to `DECISIONS.md` in the
   existing format. Never delete an entry — mark it superseded.
+- **Any change made directly against live config (LiteLLM, systemd, cron,
+  Docker) must update the corresponding `build-guide.md` section in the
+  same commit.** Four drift instances happened before this rule was
+  written — a live edit made to fix something urgent, with the guide
+  updated later or not at all. `build-guide.md` is what the next
+  from-scratch build follows; a guide that quietly stops matching the
+  running system is worse than no guide, because it looks authoritative
+  right up until someone acts on the wrong line.

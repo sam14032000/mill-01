@@ -722,44 +722,21 @@ Two things to add after the report is written:
 
 # Part 12 — Cron and healthcheck
 
-`~/workspace/mill-01/ops/healthcheck.sh`:
+`~/workspace/mill-01/ops/healthcheck.sh` — **budget-warning half only, already built and running.** `/global/spend/report` is LiteLLM Enterprise-only and 402s on the open-source build used here; per-key `/key/info` (master-key-authenticated) is what actually works, confirmed directly. Disk/memory/service-status checks below are **not yet implemented** — this section only covers what's real. Whoever adds those should extend the same script rather than write a second one.
 
-```bash
-#!/usr/bin/env bash
-set -uo pipefail
-source /home/agent/.config/mill/env
+The real script queries all four keys' `spend`/`max_budget` via `/key/info`, and posts to `#mill-ideas` (channel id from `SLACK_CHANNEL_MILL`, not a hardcoded `#mill`) the first time any key crosses 70% of its daily budget on a given UTC day — the reset window LiteLLM actually uses (Part 7.3). State to avoid re-alerting every 30 minutes once past threshold lives in `~/.cache/mill-healthcheck/<alias>-<date>.alerted`, pruned after 2 days. It runs as a standalone cron job specifically because it's the only thing on the box that needs `LITELLM_MASTER_KEY` — the always-on Slack bot process never holds it, keeping the bot's own credential scope to just the four virtual keys it actually calls. See the script itself for the full implementation; it isn't reproduced here to avoid the two drifting apart, which is exactly the failure this guide keeps finding in itself.
 
-ALERT=""
-DISK=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
-MEM=$(free | awk '/Mem:/ {printf "%.0f", $3/$2*100}')
-
-[ "$DISK" -gt 80 ] && ALERT="$ALERT disk ${DISK}%."
-[ "$MEM"  -gt 90 ] && ALERT="$ALERT mem ${MEM}%."
-systemctl is-active --quiet mill-chat || ALERT="$ALERT chat down."
-docker compose -f /home/agent/stack/litellm/docker-compose.yml ps --status running \
-  | grep -q litellm || ALERT="$ALERT litellm down."
-
-SPEND=$(curl -s -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  http://127.0.0.1:4000/global/spend/report | jq -r '.[0].spend // 0')
-awk -v s="$SPEND" 'BEGIN{exit !(s>8)}' && ALERT="$ALERT spend \$$SPEND today."
-
-if [ -n "$ALERT" ]; then
-  curl -s -X POST https://slack.com/api/chat.postMessage \
-    -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"channel\":\"#mill\",\"text\":\"mill-01:$ALERT\"}"
-fi
-```
+**Still to build:** disk (>80% — 40GB fills faster than you'd expect with Docker layers and node_modules) and memory (>90%) thresholds, and `mill-chat`/LiteLLM service-down checks, all alerting the same way.
 
 ```cron
-*/30 * * * * /home/agent/workspace/mill-01/ops/healthcheck.sh
+*/30 * * * * /home/agent/workspace/mill-01/ops/healthcheck.sh >> /home/agent/logs/healthcheck.log 2>&1
 0 3 * * 0    docker system prune -af --volumes >> /home/agent/logs/cleanup.log 2>&1
 0 3 * * 0    find /home/agent/scratch -mtime +7 -type d -exec rm -rf {} + 2>/dev/null
 30 9 * * 0   /home/agent/venv/bin/python /home/agent/workspace/mill-01/ops/profile_diff.py
 0 2 1 * *    /home/agent/venv/bin/python /home/agent/workspace/mill-01/ops/eval.py
 ```
 
-**Disk threshold is 80%, not 85%** — 40GB fills faster than you expect with Docker layers and node_modules.
+Only the `healthcheck.sh` line is installed and running as of this build. The other four reference scripts (`ops/profile_diff.py`, `ops/eval.py`, the cleanup jobs) aren't built yet — don't add their cron lines until the scripts they call exist.
 
 ---
 
@@ -769,7 +746,7 @@ fi
 - [ ] Hetzner Cloud Firewall port 22 rule **removed**
 - [ ] `tailscale funnel status` shows nothing enabled
 - [ ] `curl 127.0.0.1:4000/health/readiness` returns healthy
-- [ ] All three virtual keys created with budgets; `/global/spend/report` returns
+- [ ] All four virtual keys (`mill-flash`, `mill-research`, `mill-audit`, `mill-mech`) created with daily budgets; `/key/info?key=<key>` returns `spend`/`max_budget` for each — `/global/spend/report` is Enterprise-only and will 402, don't use it
 - [ ] Nothing outside `~/stack/litellm/.env` contains a provider API key — `grep -rIl "sk-ant\|AIza" ~/workspace` returns nothing
 - [ ] Sandbox leak tests from Part 10 all return `clean` / permission denied, and the default-network vs `MILL_SANDBOX_NETWORK=egress` pair behaves as documented (blocked by default, reaches out when opted in)
 - [ ] Slack: a DM to the bot creates a capture file attributed to the right founder
