@@ -473,3 +473,15 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 **Build order (per docs/COMMANDS.md, build-guide.md Part 9b):** `/attack` first, since it's the only command that creates an idea and every other command operates on one that already exists. Then `/think`, `/cross`, `/blindspot`, `/themes` — the brainstorm-shaped commands, lower stakes individually. Then `/test`, which drives the research pass. `/audit` last, deliberately — its JSON validation and the D-33 web-only-caps-at-narrow enforcement (C-07 in COMMANDS.md) is the most load-bearing code in the system, and everything before it exists to feed that gate correctly.
 
 **Revisit when:** never — this entry stays as the record of how the gap arose, even after the spec is fully implemented.
+
+---
+
+### D-42 · Captures are append-only, never edited after commit
+
+**Decision.** Once a capture is written to `minds/<founder>/captures/YYYY-MM-DD.md` and committed, it is never edited or deleted. Corrections, retractions, or second thoughts are new captures, not changes to old ones.
+
+**Why this needed its own entry.** The rule itself was never in question — `runbook.md` Stage 1 ("committed raw, **never edited**") and `CLAUDE.md`'s Conventions ("Commit captures raw and unedited") both state it plainly and have since early versions. What was missing was a D-number to point at. `docs/EVAL.md`'s conformance check C-20 cited `D-25` for this rule — D-25 is "Three founders, $100/month total," unrelated to captures — a mis-citation caught while implementing telemetry against `EVAL.md`. Rather than leave C-20 pointing at nothing or something wrong, this rule gets the entry it should have had from the start.
+
+**Why append-only matters here specifically.** Captures are the raw material profiles and brainstorms are built from (D-26). If they could be edited after the fact, "what a founder actually said on a given day" stops being a fixed thing the system can build trust on — profile evolution (D-30) and any future retrospective on why an idea died would be reasoning about a moving target.
+
+**Revisit when:** never, without an explicit decision that some class of correction needs a different mechanism than a new capture.

@@ -43,7 +43,7 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 | `C-01` | No Fable 5 call originates outside the audit path (D-10) |
 | `C-02` | Fable month-to-date spend ≤ $35 (D-23 tripwire) |
 | `C-03` | No calls to Opus 5, Kimi K3, or any DeepSeek model (D-07, D-09, D-11) |
-| `C-04` | Every model call routes through the LiteLLM proxy — no direct provider `base_url` in any config |
+| `C-04` | Every model call from application code (the Slack bot, `ops/`) routes through the LiteLLM proxy — no direct provider `base_url` in the bot's own config or source. **Scope excludes `~/stack/litellm/config.yaml` itself** — LiteLLM's own `model_list` entries legitimately carry provider `api_base` (e.g. `mechanical`'s MiniMax endpoint); that's LiteLLM routing to a provider, not application code bypassing it. Checking the wrong layer here false-positives on day one. |
 | `C-05` | Per-key daily budgets configured and non-null in LiteLLM |
 
 ### Gate integrity
@@ -63,7 +63,7 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 | `C-11` | No `/proto` invocation succeeded without a named assumption (D-29) |
 | `C-12` | No prototype exceeded five touch iterations (D-29) |
 | `C-13` | No profile diff was applied without a recorded approval (D-30) |
-| `C-14` | No founder's raw captures readable outside their own DM channel (D-31) |
+| `C-14` | Every capture in `minds/<founder>/captures/` is present in the shared repo and correctly attributed to its founder (D-38). **Supersedes** the original wording (`No founder's raw captures readable outside their own DM channel (D-31)`) — D-31 was superseded by D-38 before this check was ever implemented, and the old wording would fail against the system's deliberate, agreed-on behavior: captures arrive privately by DM but are readable by all three founders once committed. Caught while implementing telemetry against this file, before C-14 had a script behind it — recorded so the wrong version doesn't get built by a session that only reads the check text. |
 
 ### Isolation
 
@@ -81,7 +81,7 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 | Check | Passes if |
 |---|---|
 | `C-19` | Every capture carries a founder attribution |
-| `C-20` | No capture file has been modified after its commit (D-25: captures are raw) |
+| `C-20` | No capture file has been modified after its commit (D-42: captures are append-only) |
 | `C-21` | Every structural change in the last month has a corresponding DECISIONS entry |
 | `C-22` | No DECISIONS entry was deleted — superseded entries still present |
 

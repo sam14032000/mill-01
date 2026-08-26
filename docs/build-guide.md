@@ -45,7 +45,7 @@ Brave, Serper, Exa or Tavily. Free tier is fine to start. SearXNG self-hosting i
 
 1. `api.slack.com/apps` → **Create New App** → From scratch → name it `Mill`, pick your workspace
 2. Note the **App ID**. Tokens come in Part 9.
-3. Create channels: `#mill`, `#research`, `#graveyard`
+3. Create channels: `#mill-ideas`, `#research`, `#graveyard`
 
 ### 0.5 GitHub
 
@@ -354,7 +354,7 @@ curl -s http://127.0.0.1:4000/health/readiness
 
 ### 7.3 Virtual keys with daily budgets
 
-This is the whole point — provider caps are monthly and trip after an overnight runaway. These reset daily.
+This is the whole point — provider caps are monthly and trip after an overnight runaway. These reset daily. **The budgets below must actually be daily (`budget_duration: "1d"`) to do that job** — a `30d` duration was shipped here in an earlier build pass despite this section's own prose, found by conformance check C-05 in `docs/EVAL.md` and fixed. The daily amounts are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $60/30 ≈ $2, $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.50 / $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later.
 
 ```bash
 MASTER=$(grep LITELLM_MASTER_KEY .env | cut -d= -f2)
@@ -363,20 +363,20 @@ MASTER=$(grep LITELLM_MASTER_KEY .env | cut -d= -f2)
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"key_alias":"mill-flash","models":["flash"],
-       "max_budget":60,"budget_duration":"30d",
+       "max_budget":2.50,"budget_duration":"1d",
        "rpm_limit":60}'
 
 # the audit gate — tight, deliberately
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"key_alias":"mill-audit","models":["audit"],
-       "max_budget":35,"budget_duration":"30d",
+       "max_budget":2.00,"budget_duration":"1d",
        "rpm_limit":5}'
 
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"key_alias":"mill-mech","models":["mechanical"],
-       "max_budget":10,"budget_duration":"30d"}'
+       "max_budget":0.50,"budget_duration":"1d"}'
 ```
 
 Save the returned keys to `~/.config/mill/env`. **Everything downstream points at `http://127.0.0.1:4000` and uses these, never a provider key directly** (conformance check C-04).
@@ -565,6 +565,20 @@ WORKDIR /scratch
 set -euo pipefail
 SCRATCH="$(mktemp -d /home/agent/scratch/proto-XXXXXX)"
 
+# D-06: network egress allowlisted, not open by default. Default is
+# `none` -- full isolation, no egress at all. A prototype that names a
+# specific external dependency (e.g. testing whether an API returns
+# usable data) opts in explicitly per run:
+#   MILL_SANDBOX_NETWORK=egress ~/stack/sandbox/run.sh '...'
+# `egress` is a named Docker network created once during setup below --
+# this is the boundary between "no network" and "network," made an
+# explicit per-run choice rather than a default. It is not yet a
+# per-host allowlist (nothing here restricts *what* the egress network
+# can reach) -- that's a real gap, left for whoever builds Part 10 to
+# close before a prototype with the egress network actually runs
+# unattended, not something to treat as already solved by this default.
+NETWORK="${MILL_SANDBOX_NETWORK:-none}"
+
 docker run --rm -i \
   --name "proto-$(basename "$SCRATCH")" \
   --user 10001:10001 \
@@ -573,6 +587,7 @@ docker run --rm -i \
   -v "$SCRATCH":/scratch:rw \
   --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 \
   --cap-drop ALL --security-opt no-new-privileges \
+  --network "$NETWORK" \
   --env-file /dev/null \
   mill-sandbox:latest \
   bash -lc "$*"
@@ -584,6 +599,7 @@ echo "artifacts: $SCRATCH"
 mkdir -p ~/scratch
 chmod +x ~/stack/sandbox/run.sh
 docker build -t mill-sandbox:latest ~/stack/sandbox
+docker network create egress   # opt-in network for Part 10's run.sh; not restricted to any allowlist yet
 ```
 
 **Verify by hand — do not accept the agent's word:**
@@ -592,9 +608,11 @@ docker build -t mill-sandbox:latest ~/stack/sandbox
 ~/stack/sandbox/run.sh 'env | grep -i -E "key|token|secret" && echo LEAK || echo clean'
 ~/stack/sandbox/run.sh 'ls /home/agent 2>&1 | head'
 ~/stack/sandbox/run.sh 'cat /home/agent/.config/mill/env 2>&1 | head'
+~/stack/sandbox/run.sh 'curl -s --max-time 3 https://example.com >/dev/null && echo LEAKED-NETWORK || echo clean'
+MILL_SANDBOX_NETWORK=egress ~/stack/sandbox/run.sh 'curl -s --max-time 3 https://example.com >/dev/null && echo reaches-network || echo BLOCKED-UNEXPECTEDLY'
 ```
 
-Expect `clean` and permission errors. Anything else, stop and fix before a prototype ever runs.
+Expect `clean` and permission errors on the first three, `clean` (not `LEAKED-NETWORK`) on the fourth with the default network, and `reaches-network` on the fifth with `MILL_SANDBOX_NETWORK=egress` opted in. Anything else, stop and fix before a prototype ever runs.
 
 ---
 
@@ -711,9 +729,9 @@ fi
 - [ ] `curl 127.0.0.1:4000/health/readiness` returns healthy
 - [ ] All three virtual keys created with budgets; `/global/spend/report` returns
 - [ ] Nothing outside `~/stack/litellm/.env` contains a provider API key — `grep -rIl "sk-ant\|AIza" ~/workspace` returns nothing
-- [ ] Sandbox leak tests from Part 10 all return `clean` / permission denied
+- [ ] Sandbox leak tests from Part 10 all return `clean` / permission denied, and the default-network vs `MILL_SANDBOX_NETWORK=egress` pair behaves as documented (blocked by default, reaches out when opted in)
 - [ ] Slack: a DM to the bot creates a capture file attributed to the right founder
-- [ ] `/think` returns in `#mill`
+- [ ] `/think` returns in `#mill-ideas`
 - [ ] `/proto` **refuses** without a named assumption
 - [ ] Research pass produces a report with `evidence_basis` set correctly
 - [ ] Audit with web-only evidence **cannot** return `proceed`
