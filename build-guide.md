@@ -1,0 +1,704 @@
+# Build Guide v3 — The Mill
+
+**Companion to:** `runbook.md`, `DECISIONS.md`
+**Target:** Hetzner CX23 running Pi, Slack control surface, LiteLLM budget enforcement, isolated prototype sandbox
+**Time:** ~30 min manual bootstrap, then a half-day driving Claude Code
+
+> **Untested.** Written without network access — nothing here has been executed. The shell, systemd and Docker parts are conventional and low-risk. Anything Pi- or pi-chat-specific must be checked against `pi --help` and the project docs; those are the commands most likely to have moved.
+
+**Split of work (D-22):**
+
+| Parts | Who |
+|---|---|
+| 0–2 | **You, by hand.** Bootstrap up to the point Claude Code can exist |
+| 3 | Handoff |
+| 4–12 | Claude Code, driven from your phone |
+| 13 | You, verifying |
+
+---
+
+# Part 0 — Accounts
+
+Do this from your phone. Nothing needs a terminal.
+
+### 0.1 Hetzner
+
+Sign up at `hetzner.com/cloud`. **Start this today** — new accounts sometimes need ID verification before provisioning, which can add a day.
+
+Create a project called `mill`.
+
+### 0.2 Model providers
+
+| Provider | For | Notes |
+|---|---|---|
+| Google AI Studio | Gemini 3.7 Flash | `aistudio.google.com`. Intro pricing ends 31 Dec 2026 |
+| Anthropic Console | Fable 5 | Separate **workspace** for Fable so its spend is isolated (D-23) |
+| MiniMax | M3, mechanical | Optional at launch |
+
+Set console spend caps now: Google $60, Anthropic-Fable workspace $35, MiniMax $10.
+
+### 0.3 Search provider
+
+Brave, Serper, Exa or Tavily. Free tier is fine to start. SearXNG self-hosting is deferred — build the paid path first.
+
+### 0.4 Slack
+
+1. `api.slack.com/apps` → **Create New App** → From scratch → name it `Mill`, pick your workspace
+2. Note the **App ID**. Tokens come in Part 9.
+3. Create channels: `#mill`, `#research`, `#graveyard`
+
+### 0.5 GitHub
+
+Private repo. You'll add a deploy key in Part 8.
+
+**Upload your docs now** — `CLAUDE.md` at root, and `docs/runbook.md`, `docs/DECISIONS.md`, `docs/EVAL.md`. Use GitHub's mobile web upload. Claude Code must read the decision record *before* it starts building, or it builds against its own defaults.
+
+---
+
+# Part 1 — Provision (manual)
+
+### 1.1 SSH key on your phone
+
+Termux:
+```bash
+pkg update && pkg install openssh
+ssh-keygen -t ed25519 -C "phone-primary"
+cat ~/.ssh/id_ed25519.pub
+```
+
+Termius: **Keychain → New Key**. Either way, copy the public key.
+
+### 1.2 Add it to Hetzner
+
+Project → **Security → SSH Keys → Add**.
+
+### 1.3 Create the server
+
+| Field | Value |
+|---|---|
+| Location | **Falkenstein (FSN1)** |
+| Image | **Ubuntu 24.04** |
+| Type | Shared vCPU → x86 → **CX23** (2 vCPU, 4GB, 40GB) |
+| Public IPv4 | **Yes** (+€0.50) |
+| Public IPv6 | Yes |
+| SSH key | The one above |
+| Volumes | None |
+| Firewall | Create: inbound **TCP 22** only |
+| Backups | **Enable** (+20%) |
+| Name | `mill-01` |
+
+~€7/month all in.
+
+### 1.4 Connect
+
+```bash
+ssh root@YOUR_IP
+```
+
+---
+
+# Part 2 — Base hardening (manual — do not delegate)
+
+### 2.1 User
+
+```bash
+apt update && apt upgrade -y
+
+adduser --disabled-password --gecos "" agent
+usermod -aG sudo agent
+
+mkdir -p /home/agent/.ssh
+cp /root/.ssh/authorized_keys /home/agent/.ssh/
+chown -R agent:agent /home/agent/.ssh
+chmod 700 /home/agent/.ssh
+chmod 600 /home/agent/.ssh/authorized_keys
+
+echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
+chmod 440 /etc/sudoers.d/agent
+```
+
+### 2.2 SSH lockdown — BY HAND, ALWAYS (D-22)
+
+```bash
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+systemctl restart ssh
+```
+
+**Open a second session and confirm `ssh agent@IP` works before closing this one.**
+
+Never let an agent touch this file. A malformed edit plus a restart locks you out of a box only reachable by SSH.
+
+### 2.3 Swap and basics
+
+```bash
+fallocate -l 4G /swapfile && chmod 600 /swapfile
+mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+apt install -y fail2ban unattended-upgrades git tmux
+systemctl enable --now fail2ban
+```
+
+### 2.4 Node 24
+
+```bash
+su - agent
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs
+node --version   # v24.x
+
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
+```
+
+---
+
+# Part 3 — Hand off to Claude Code
+
+```bash
+npm install -g @anthropic-ai/claude-code
+mkdir -p ~/workspace && cd ~/workspace
+git clone git@github.com:YOU/mill.git   # or https + PAT for now
+cd mill
+
+tmux new -s cc
+claude
+```
+
+Inside Claude Code:
+
+```
+claude remote-control --name "mill-01"
+```
+
+**tmux is not optional** — the session dies with your SSH connection otherwise, and your phone backgrounds the app constantly.
+
+Now open the Claude app on your phone and connect. First instruction:
+
+> Read CLAUDE.md and docs/DECISIONS.md before doing anything. Then work through docs/build-guide.md Parts 4 onward, stopping at the end of each part for confirmation.
+
+---
+
+# Part 4 — Tailscale
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --ssh
+tailscale ip -4
+```
+
+Install Tailscale on your phone, same account.
+
+Once you've confirmed `ssh agent@100.x.x.x` works over the tailnet, **go back to the Hetzner Cloud Firewall and delete the inbound port 22 rule.** SSH then exists only on the tailnet.
+
+Never enable `tailscale funnel` (D-04).
+
+---
+
+# Part 5 — Docker
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker agent
+newgrp docker
+docker run --rm hello-world
+```
+
+Constrain the daemon so a runaway container can't eat the box:
+
+```bash
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "default-ulimits": { "nofile": { "Name": "nofile", "Soft": 4096, "Hard": 8192 } }
+}
+EOF
+sudo systemctl restart docker
+```
+
+---
+
+# Part 6 — Pi
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi --version
+```
+
+Record the exact version in the repo README.
+
+Pi runs with the full permissions of the launching user — it ships no permission system (D-06). It is installed here as the orchestrator; **working prototypes never execute in this context**, only inside the container from Part 10.
+
+---
+
+# Part 7 — LiteLLM (budget enforcement)
+
+This is the piece that makes overnight spend impossible rather than merely capped monthly.
+
+### 7.1 Stack
+
+```bash
+mkdir -p ~/stack/litellm && cd ~/stack/litellm
+```
+
+`docker-compose.yml`:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    environment:
+      DATABASE_URL: postgresql://litellm:${PG_PASSWORD}@postgres:5432/litellm
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+
+volumes:
+  pgdata:
+```
+
+`config.yaml`:
+
+```yaml
+model_list:
+  - model_name: flash
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/GEMINI_API_KEY
+      max_tokens: 8192
+
+  - model_name: audit
+    litellm_params:
+      model: anthropic/claude-fable-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 16384
+
+  - model_name: mechanical
+    litellm_params:
+      model: openai/MiniMax-M3
+      api_base: https://api.minimax.io/v1
+      api_key: os.environ/MINIMAX_API_KEY
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+```
+
+### 7.2 Secrets — you populate these, not the agent
+
+```bash
+cd ~/stack/litellm
+cat > .env <<'EOF'
+PG_PASSWORD=
+LITELLM_MASTER_KEY=sk-
+LITELLM_SALT_KEY=
+GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
+MINIMAX_API_KEY=
+EOF
+chmod 600 .env
+```
+
+Fill this in over SSH yourself. **There is no reason a build agent needs your Fable key in its context.**
+
+```bash
+docker compose up -d
+curl -s http://127.0.0.1:4000/health/readiness
+```
+
+### 7.3 Virtual keys with daily budgets
+
+This is the whole point — provider caps are monthly and trip after an overnight runaway. These reset daily.
+
+```bash
+MASTER=$(grep LITELLM_MASTER_KEY .env | cut -d= -f2)
+
+# brainstorm + research + prototype
+curl -s -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"key_alias":"mill-flash","models":["flash"],
+       "max_budget":60,"budget_duration":"30d",
+       "rpm_limit":60}'
+
+# the audit gate — tight, deliberately
+curl -s -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"key_alias":"mill-audit","models":["audit"],
+       "max_budget":35,"budget_duration":"30d",
+       "rpm_limit":5}'
+
+curl -s -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"key_alias":"mill-mech","models":["mechanical"],
+       "max_budget":10,"budget_duration":"30d"}'
+```
+
+Save the returned keys to `~/.config/mill/env`. **Everything downstream points at `http://127.0.0.1:4000` and uses these, never a provider key directly** (conformance check C-04).
+
+Spend at any time:
+
+```bash
+curl -s -H "Authorization: Bearer $MASTER" \
+  http://127.0.0.1:4000/global/spend/report | jq
+```
+
+---
+
+# Part 8 — Repo
+
+```bash
+cd ~/workspace/mill
+
+mkdir -p minds/{amit,priya,rohan}/captures
+mkdir -p minds/shared ideas evals telemetry ops runners
+touch minds/shared/{themes.md,dynamics.md}
+
+for f in minds/*/; do touch "$f/profile.md" "$f/graveyard.md"; done
+```
+
+Deploy key:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/github_deploy -N ""
+cat ~/.ssh/github_deploy.pub   # add to GitHub → Settings → Deploy keys, write access
+
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.ssh/github_deploy
+  IdentitiesOnly yes
+EOF
+```
+
+`.gitignore`:
+
+```
+.env
+*.key
+node_modules/
+__pycache__/
+```
+
+---
+
+# Part 9 — Slack
+
+### 9.1 App config
+
+At `api.slack.com/apps` → your app:
+
+**Socket Mode** → enable. This avoids inbound webhooks entirely, which matters because your firewall has no open ports.
+
+**OAuth & Permissions** → Bot Token Scopes:
+`app_mentions:read`, `channels:history`, `channels:read`, `chat:write`, `commands`, `files:read`, `im:history`, `im:read`, `im:write`, `users:read`
+
+**Event Subscriptions** → enable → subscribe to `message.im`, `message.channels`, `app_mention`
+
+**Slash Commands** — create each with a placeholder request URL (Socket Mode ignores it):
+`/think`, `/cross`, `/blindspot`, `/attack`, `/test`, `/audit`, `/proto`, `/themes`
+
+**Install to Workspace.** Collect:
+- Bot User OAuth Token (`xoxb-…`)
+- App-Level Token with `connections:write` (`xapp-…`)
+
+### 9.2 Wire pi-chat
+
+```bash
+npm install -g @earendil-works/pi-chat   # verify exact package name against docs
+```
+
+Add to `~/.config/mill/env`:
+
+```
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+LITELLM_BASE_URL=http://127.0.0.1:4000
+MILL_FLASH_KEY=sk-...
+MILL_AUDIT_KEY=sk-...
+FOUNDER_AMIT=U01ABC
+FOUNDER_PRIYA=U02DEF
+FOUNDER_ROHAN=U03GHI
+```
+
+```bash
+chmod 600 ~/.config/mill/env
+```
+
+Map Slack user IDs to `minds/<name>/` directories. **Attribution drives profile routing and is not optional** (C-19).
+
+### 9.3 Service
+
+```bash
+sudo tee /etc/systemd/system/mill-chat.service > /dev/null <<'EOF'
+[Unit]
+Description=Mill Slack bot
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+EnvironmentFile=/home/agent/.config/mill/env
+WorkingDirectory=/home/agent/workspace/mill
+Environment=PATH=/home/agent/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/agent/.npm-global/bin/pi-chat --config /home/agent/workspace/mill/ops/chat.config.json
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/agent/logs/chat.log
+StandardError=append:/home/agent/logs/chat.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+mkdir -p ~/logs
+sudo systemctl daemon-reload
+sudo systemctl enable --now mill-chat
+```
+
+Log rotation:
+
+```bash
+sudo tee /etc/logrotate.d/mill > /dev/null <<'EOF'
+/home/agent/logs/*.log {
+  weekly
+  rotate 8
+  compress
+  missingok
+  copytruncate
+}
+EOF
+```
+
+---
+
+# Part 10 — Prototype sandbox (D-06)
+
+**The one component whose job is to contain a misbehaving agent. Verify it yourself.**
+
+`~/stack/sandbox/Dockerfile`:
+
+```dockerfile
+FROM node:24-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git python3 python3-pip ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -m -u 10001 proto
+USER proto
+WORKDIR /scratch
+```
+
+`~/stack/sandbox/run.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SCRATCH="$(mktemp -d /home/agent/scratch/proto-XXXXXX)"
+
+docker run --rm -i \
+  --name "proto-$(basename "$SCRATCH")" \
+  --user 10001:10001 \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+  -v "$SCRATCH":/scratch:rw \
+  --memory 1g --memory-swap 1g --cpus 1 --pids-limit 256 \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --env-file /dev/null \
+  mill-sandbox:latest \
+  bash -lc "$*"
+
+echo "artifacts: $SCRATCH"
+```
+
+```bash
+mkdir -p ~/scratch
+chmod +x ~/stack/sandbox/run.sh
+docker build -t mill-sandbox:latest ~/stack/sandbox
+```
+
+**Verify by hand — do not accept the agent's word:**
+
+```bash
+~/stack/sandbox/run.sh 'env | grep -i -E "key|token|secret" && echo LEAK || echo clean'
+~/stack/sandbox/run.sh 'ls /home/agent 2>&1 | head'
+~/stack/sandbox/run.sh 'cat /home/agent/.config/mill/env 2>&1 | head'
+```
+
+Expect `clean` and permission errors. Anything else, stop and fix before a prototype ever runs.
+
+---
+
+# Part 11 — GPT Researcher
+
+Hybrid mode is D-33 natively: web sources plus the founders' field notes as local documents.
+
+```bash
+sudo apt install -y python3-venv
+python3 -m venv ~/venv && source ~/venv/bin/activate
+pip install gpt-researcher
+```
+
+`~/workspace/mill/ops/research.py`:
+
+```python
+import asyncio, json, os, sys
+from datetime import datetime
+from pathlib import Path
+from gpt_researcher import GPTResearcher
+
+REPO = Path("/home/agent/workspace/mill")
+FIELD = REPO / "ideas" / sys.argv[1] / "field"   # founder-pasted notes
+OUT   = REPO / "ideas" / sys.argv[1]
+ASSUMPTION = sys.argv[2]
+
+os.environ["OPENAI_API_BASE"] = os.environ["LITELLM_BASE_URL"]
+os.environ["OPENAI_API_KEY"]  = os.environ["MILL_FLASH_KEY"]
+os.environ["DOC_PATH"] = str(FIELD)
+
+async def main():
+    has_field = FIELD.exists() and any(FIELD.iterdir())
+
+    r = GPTResearcher(
+        query=ASSUMPTION,
+        report_type="research_report",     # NOT "deep" — see note below
+        report_source="hybrid" if has_field else "web",
+    )
+    await r.conduct_research()
+    report = await r.write_report()
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    (OUT / f"research-{stamp}.md").write_text(report)
+
+    meta = {
+        "assumption": ASSUMPTION,
+        "evidence_basis": "both" if has_field else "web-only",
+        "sources": r.get_source_urls(),
+        "ts": stamp,
+    }
+    (OUT / f"research-{stamp}.json").write_text(json.dumps(meta, indent=2))
+    print(json.dumps(meta))
+
+asyncio.run(main())
+```
+
+> **Do not set `report_type="deep"`.** Benchmark evidence shows increased search depth consistently degrades factual accuracy while citation metrics stay flat — an information-overload effect. Shallow passes are the accuracy-preserving choice, not just the cheap one.
+
+Two things to add after the report is written:
+
+1. **Citation re-check (D-20)** — re-fetch a sample of `sources` and confirm each supports the claim citing it. Decompose into sub-questions rather than asking holistically.
+2. **Gap output (D-33)** — when `evidence_basis` is `web-only`, emit three questions that would resolve the assumption and the kind of person to ask.
+
+---
+
+# Part 12 — Cron and healthcheck
+
+`~/workspace/mill/ops/healthcheck.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -uo pipefail
+source /home/agent/.config/mill/env
+
+ALERT=""
+DISK=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
+MEM=$(free | awk '/Mem:/ {printf "%.0f", $3/$2*100}')
+
+[ "$DISK" -gt 80 ] && ALERT="$ALERT disk ${DISK}%."
+[ "$MEM"  -gt 90 ] && ALERT="$ALERT mem ${MEM}%."
+systemctl is-active --quiet mill-chat || ALERT="$ALERT chat down."
+docker compose -f /home/agent/stack/litellm/docker-compose.yml ps --status running \
+  | grep -q litellm || ALERT="$ALERT litellm down."
+
+SPEND=$(curl -s -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  http://127.0.0.1:4000/global/spend/report | jq -r '.[0].spend // 0')
+awk -v s="$SPEND" 'BEGIN{exit !(s>8)}' && ALERT="$ALERT spend \$$SPEND today."
+
+if [ -n "$ALERT" ]; then
+  curl -s -X POST https://slack.com/api/chat.postMessage \
+    -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"channel\":\"#mill\",\"text\":\"mill-01:$ALERT\"}"
+fi
+```
+
+```cron
+*/30 * * * * /home/agent/workspace/mill/ops/healthcheck.sh
+0 3 * * 0    docker system prune -af --volumes >> /home/agent/logs/cleanup.log 2>&1
+0 3 * * 0    find /home/agent/scratch -mtime +7 -type d -exec rm -rf {} + 2>/dev/null
+30 9 * * 0   /home/agent/venv/bin/python /home/agent/workspace/mill/ops/profile_diff.py
+0 2 1 * *    /home/agent/venv/bin/python /home/agent/workspace/mill/ops/eval.py
+```
+
+**Disk threshold is 80%, not 85%** — 40GB fills faster than you expect with Docker layers and node_modules.
+
+---
+
+# Part 13 — Commissioning (you, by hand)
+
+- [ ] `ssh agent@100.x.x.x` works over Tailscale
+- [ ] Hetzner Cloud Firewall port 22 rule **removed**
+- [ ] `tailscale funnel status` shows nothing enabled
+- [ ] `curl 127.0.0.1:4000/health/readiness` returns healthy
+- [ ] All three virtual keys created with budgets; `/global/spend/report` returns
+- [ ] Nothing outside `~/stack/litellm/.env` contains a provider API key — `grep -rIl "sk-ant\|AIza" ~/workspace` returns nothing
+- [ ] Sandbox leak tests from Part 10 all return `clean` / permission denied
+- [ ] Slack: a DM to the bot creates a capture file attributed to the right founder
+- [ ] `/think` returns in `#mill`
+- [ ] `/proto` **refuses** without a named assumption
+- [ ] Research pass produces a report with `evidence_basis` set correctly
+- [ ] Audit with web-only evidence **cannot** return `proceed`
+- [ ] `docker compose down && up -d` — LiteLLM keys and spend survive
+- [ ] **Reboot the server.** Confirm chat bot and LiteLLM come back unaided
+
+That last one matters more than it looks. A stack that doesn't survive a reboot isn't a background system — it's a session you happen to have left open.
+
+---
+
+## After commissioning
+
+Run the loop for a month, then execute `docs/EVAL.md`. Layer 3 of that protocol must run in a **fresh session with no build context** — otherwise the thing that built the system is grading its own work.
