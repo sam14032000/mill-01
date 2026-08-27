@@ -719,12 +719,14 @@ The real script queries all four keys' `spend`/`max_budget` via `/key/info`, and
 ```cron
 */30 * * * * /home/agent/workspace/mill-01/ops/healthcheck.sh >> /home/agent/logs/healthcheck.log 2>&1
 0 3 * * 0    docker system prune -af --volumes >> /home/agent/logs/cleanup.log 2>&1
-0 3 * * 0    find /home/agent/scratch -mtime +7 -type d -exec rm -rf {} + 2>/dev/null
-30 9 * * 0   /home/agent/venv/bin/python /home/agent/workspace/mill-01/ops/profile_diff.py
-0 2 1 * *    /home/agent/venv/bin/python /home/agent/workspace/mill-01/ops/eval.py
+5 3 * * 0    find /home/agent/scratch -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + >> /home/agent/logs/cleanup.log 2>&1
 ```
 
-Only the `healthcheck.sh` line is installed and running as of this build. The other four reference scripts (`ops/profile_diff.py`, `ops/eval.py`, the cleanup jobs) aren't built yet — don't add their cron lines until the scripts they call exist.
+Both cleanup lines are installed and running as of this build. `docker system prune` runs unprivileged — `agent` is in the `docker` group (confirmed via `getent group docker` and a live `docker system df`; a stale shell session can look otherwise since group membership is only picked up on new login, which is exactly the state a cron-spawned process always starts from), matching `~/stack/sandbox/run.sh`'s own unprivileged `docker run` (Part 10) — no sudoers entry needed or added. The scratch prune targets top-level entries only (`-mindepth 1 -maxdepth 1`), matching the `proto-<id>` directory names `/proto` actually creates there, not the `-type d` glob originally sketched (which would silently skip stray files).
+
+**Weekly profile evolution is not a cron job.** It originally was sketched as `ops/profile_diff.py` on a `30 9 * * 0` line, but D-30's approve/reject flow needs Socket Mode's persistent Slack connection, which only the always-on `mill-chat` process holds — a one-shot cron script would need its own bot connection just to post two buttons and wait. Built instead as `ops/slack-bot/weekly-scheduler.js`, an in-process interval inside `mill-chat` that checks a UTC day/hour window (Sunday 04:00 UTC = 09:30 IST, no DST) every 5 minutes and fires `ops/slack-bot/profile-evolution.js`'s `runWeeklyProfileEvolution()` once per week (tracked via an ISO-week marker file, so a restart mid-window can't double-fire). That function generates a `flash-fast` diff per active founder's `profile.md` plus one shared `dynamics.md` diff, and posts each to Slack with Approve/Reject buttons (DM for a profile diff, `#mill-ideas` for the shared one, per D-27's framing of `dynamics.md` as everyone's file). Approving is the only code path that writes the proposed content — `ops/slack-bot/index.js`'s `profile_diff_approve` action handler, which only runs on an explicit human click; rejecting just deletes the pending diff and logs the outcome. Directly tested (not just started and assumed working): a real `flash-fast` call against sparse data correctly resolves to "no diff proposed" rather than crashing (Gemini 3.x can reason over a near-empty prompt and legitimately emit no visible text — `finish_reason: "stop"`, not the previously-seen `"length"` reasoning-budget-exhaustion case — caught in `profile-evolution.js`'s `callFlashForDiff`, not in `llm.js`, since every other command correctly still needs an empty reply to be a hard, surfaced error); a second run against a real capture produced a correctly-shaped unified diff for `profile.md`.
+
+`ops/eval.py` (the monthly EVAL.md Layer 3 review) still doesn't exist and has no cron line — out of scope for this build; D-EVAL's Layer 3 explicitly wants a fresh session with no build context, which a cron-invoked script wired into this repo's history would defeat.
 
 ---
 

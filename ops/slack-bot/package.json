@@ -12,6 +12,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@slack/bolt": "^5.0.0"
+    "@slack/bolt": "^5.0.0",
+    "diff": "^9.0.0"
   }
 }

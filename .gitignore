@@ -5,3 +5,5 @@ node_modules/
 __pycache__/
 scratch/
 telemetry/*.jsonl
+minds/*/.pending-diffs/
+minds/shared/.pending-diffs/

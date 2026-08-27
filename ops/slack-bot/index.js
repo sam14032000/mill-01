@@ -18,6 +18,8 @@ const { handleTestCommand } = require("./commands/test");
 const { handleAuditCommand } = require("./commands/audit");
 const { handleProtoCommand } = require("./commands/proto");
 const { handleThreadMessage } = require("./thread-wait");
+const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
+const { startWeeklyScheduler } = require("./weekly-scheduler");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -84,6 +86,22 @@ function downloadFile(url, destPath) {
 	});
 }
 
+// D-30: never auto-applied -- these are the only two entry points that
+// write a model-proposed profile.md/dynamics.md change, and both
+// require an explicit human button click to reach them at all.
+app.action("profile_diff_approve", async ({ ack, action, body, client }) => {
+	await ack();
+	await handleDiffDecision({ action, body, client }).catch((err) =>
+		console.error("profile_diff_approve failed:", err),
+	);
+});
+app.action("profile_diff_reject", async ({ ack, action, body, client }) => {
+	await ack();
+	await handleDiffDecision({ action, body, client }).catch((err) =>
+		console.error("profile_diff_reject failed:", err),
+	);
+});
+
 app.message(async ({ message, client }) => {
 	// A pending /test field-evidence wait takes priority over anything
 	// else a message could be -- if consumed here, it's not a capture
@@ -147,6 +165,14 @@ app.message(async ({ message, client }) => {
 	startBatchCommitLoop((reason) => {
 		console.error(`batch commit failed: ${reason}`);
 	});
+
+	// Sunday 09:30 IST (04:00 UTC), D-30: proposes profile/dynamics diffs,
+	// never applies them -- see profile-evolution.js and the
+	// profile_diff_approve/reject action handlers above.
+	startWeeklyScheduler(
+		() => runWeeklyProfileEvolution(app.client),
+		(reason) => console.error(`weekly profile evolution failed: ${reason}`),
+	);
 
 	// Reload the allowlist/channel map from disk on SIGHUP, so adding a
 	// founder (or fixing a channel id) later is just editing

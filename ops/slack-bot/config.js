@@ -32,6 +32,7 @@ const CHANNEL_KEYS = {
 };
 
 let allowlist = Object.freeze({});
+let userIdByFounder = Object.freeze({});
 let channels = Object.freeze({});
 
 function parseEnvFile(filePath) {
@@ -84,6 +85,11 @@ function load() {
 		active.push(founder);
 	}
 	allowlist = Object.freeze(newAllowlist);
+	const newReverse = {};
+	for (const [userId, founder] of Object.entries(newAllowlist)) {
+		newReverse[founder] = userId;
+	}
+	userIdByFounder = Object.freeze(newReverse);
 
 	const newChannels = {};
 	for (const [envKey, name] of Object.entries(CHANNEL_KEYS)) {
@@ -111,10 +117,25 @@ function founderForUserId(userId) {
 	return allowlist[userId] || null;
 }
 
+function userIdForFounder(founder) {
+	return userIdByFounder[founder] || null;
+}
+
+function activeFounders() {
+	return Object.keys(userIdByFounder);
+}
+
 function channelId(name) {
 	return channels[name] || null;
 }
 
 load();
 
-module.exports = { load, founderForUserId, channelId, ENV_FILE };
+module.exports = {
+	load,
+	founderForUserId,
+	userIdForFounder,
+	activeFounders,
+	channelId,
+	ENV_FILE,
+};
