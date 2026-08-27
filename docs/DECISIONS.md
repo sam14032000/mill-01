@@ -566,3 +566,20 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **Requires** the `channels:manage` Slack scope (added in the projects phase).
 
 **Revisit when:** never, without an explicit decision to flatten the structure again.
+
+---
+
+### D-48 · No static host; two sandbox network profiles
+
+**Decision.** There is no static hosting provider (no Cloudflare Pages / Netlify, no `STATIC_HOST_TOKEN`). Every prototype — frontend or backend — is built unmounted and becomes reachable only by taking the single always-up ngrok slot on port 3200 via an explicit **Mount** (build-guide-projects Part 18). The Docker sandbox has **two distinct network profiles**, not one toggle:
+
+- **build profile** — used while `/proto` generates and prepares an artifact, including any `npm install`. Egress allowlist: `registry.npmjs.org` only.
+- **mount profile** — used when a prototype is mounted and publicly reachable through ngrok. Egress: **deny-all plus DNS**. No package installs happen at mount time, so nothing else is needed.
+
+**Why no static host.** It's another account, another token to rotate, another free-tier limit to track, and another deploy path to debug from a phone — to save the ngrok slot for backend prototypes. Frontend prototypes are occasional under D-24/D-29; queuing them through the one ngrok slot is acceptable and keeps the surface small. Contention on the slot is handled by the take-over flow in Part 18.5, not by adding infrastructure.
+
+**Why two profiles.** A mounted, LLM-written app that is publicly reachable (behind basic-auth, on a box holding the API keys) is exactly what D-06's egress allowlist guards. It has no legitimate reason to reach anything but DNS, so it gets deny-all-plus-DNS. The build step genuinely needs the npm registry and nothing else. Collapsing these into one "egress" network (the pre-D-48 state) meant the mount profile was as open as the build profile — `iptables DOCKER-USER` now enforces each separately. **C-17 must pass** once Part 18 is built; it can no longer stay failing (it was the binary none/egress toggle that made it fail).
+
+**Amends D-06** (which said "network egress allowlisted" without distinguishing build from run) and the Part 10 `run.sh` design (single `egress` network).
+
+**Revisit when:** frontend prototypes become frequent enough that the single ngrok slot is a real bottleneck — at which point reconsider a static host, comparing current free tiers fresh.

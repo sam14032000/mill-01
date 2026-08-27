@@ -18,7 +18,7 @@ const { handleTestCommand } = require("./commands/test");
 const { handleAuditCommand } = require("./commands/audit");
 const { handleProtoCommand } = require("./commands/proto");
 const { handleChatCommand } = require("./commands/chat");
-const { handleSearchCommand } = require("./commands/search");
+const { handleFindCommand } = require("./commands/find");
 const { handleThreadMessage } = require("./thread-wait");
 const { handleChatTurn } = require("./chat-turn");
 const chatSession = require("./chat-session");
@@ -75,7 +75,7 @@ app.command("/proto", handleProtoCommand);
 app.command("/blindspot", handleBlindspotCommand);
 app.command("/themes", handleThemesCommand);
 app.command("/chat", handleChatCommand);
-app.command("/search", handleSearchCommand);
+app.command("/find", handleFindCommand);
 
 for (const command of STUBBED_COMMANDS) {
 	app.command(command, async ({ ack, command: cmd }) => {

@@ -219,6 +219,16 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 ---
 
+### `/chat <topic>` — projects phase (see `docs/PROJECTS.md`)
+
+Opens a disposable thinking thread in `#chats`; plain replies are conversational turns with running context. Nothing is stored unless promoted. `flash-fast`.
+
+### `/find <query>` — projects phase (see `docs/PROJECTS.md`)
+
+Surface web lookup (1–3 Tavily queries, `flash-fast` summary) posted inline. **Never evidence** — carries a not-evidence footer, is visually distinct from a research report, and on promotion transcribes as conversation, never as research. `/search` is a Slack-reserved name, hence `/find`. Only `/test` produces something an audit can rule on.
+
+---
+
 ## Profile evolution — weekly cron, not a command
 
 Sunday 09:30. Per founder: reads the week's captures, their graveyard, and current `profile.md`.

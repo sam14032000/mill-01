@@ -43,7 +43,7 @@ A founder DMs Mill, or runs `/chat <topic>`. The bot opens a thread in `#chats` 
 |---|---|
 | `/think` `/cross` `/blindspot` `/themes` | Full behaviour |
 | `/attack` | Produces the assumption. Creates **no** idea — see below |
-| `/search <query>` | New. Surface web search, 1–3 queries, summarised inline |
+| `/find <query>` | New. Surface web search, 1–3 queries, summarised inline (`/search` is reserved by Slack) |
 | Plain messages | Conversational brainstorming in-thread |
 
 **Session context** is keyed on `thread_ts` and holds the running conversation, the founder's profile, and recent captures. It does not persist to the repo.
@@ -54,11 +54,11 @@ Returns the strongest case against plus the `ASSUMPTION:` line, exactly as speci
 
 This is the intended path into a project: think, attack, promote.
 
-### `/search` — surface only
+### `/find` — surface only
 
 1–3 Tavily queries, results summarised in-thread. No report file, no citation re-check, no `evidence_basis`.
 
-**It is never evidence.** Output must be visually distinct from a research report and must carry a footer saying so. If a chat is later promoted, `/search` results are transcribed as conversation, never as research. Only `/test` produces evidence an audit can rule on.
+**It is never evidence.** Output must be visually distinct from a research report and must carry a footer saying so. If a chat is later promoted, `/find` results are transcribed as conversation, never as research. Only `/test` produces evidence an audit can rule on.
 
 This distinction is load-bearing. Confusing surface search with research is how a `proceed` verdict gets built on three headlines.
 
@@ -261,7 +261,7 @@ PDF and images go to Gemini natively. `.docx`/`.xlsx` need conversion. Text and 
 
 ## Build order
 
-**P1 — Chat tier.** `#chats`, `/chat`, per-thread sessions, `/search`, the nightly capture job. Brainstorm commands work here already; this is mostly routing.
+**P1 — Chat tier.** `#chats`, `/chat`, per-thread sessions, `/find`, the nightly capture job. Brainstorm commands work here already; this is mostly routing.
 
 **P2 — Promotion.** The button, triggered prompts, transcript capture, idea creation. Project channels can wait — promote into the current flat structure first.
 

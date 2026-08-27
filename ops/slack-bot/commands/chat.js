@@ -41,7 +41,7 @@ async function handleChatCommand({ command, ack, client }) {
 			text:
 				`*Chat — ${topic}*\n` +
 				`<@${command.user_id}>, think out loud in this thread. ` +
-				`\`/search\` for a surface web lookup, \`/attack\` for the case against. ` +
+				`\`/find\` for a surface web lookup, \`/attack\` for the case against. ` +
 				`Nothing here is saved unless you start a project from it.`,
 		});
 

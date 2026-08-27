@@ -140,7 +140,7 @@ function getOrCreateStageSession({ project, threadTs, channel, speakerUserId, sp
 	return session;
 }
 
-// Slash commands don't carry thread_ts, so a `/search` or `/attack` run
+// Slash commands don't carry thread_ts, so a `/find` or `/attack` run
 // from #chats can't be tied to a thread by the payload. Fall back to the
 // founder's most recently created, unpromoted session in that channel --
 // in practice that's the one they're actively in.

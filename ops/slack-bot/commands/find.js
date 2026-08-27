@@ -9,13 +9,13 @@ const { findLatestSessionForUser, addTurn } = require("../chat-session");
 const { withPromoteButton } = require("../promote-button");
 
 const MODEL = "flash-fast";
-const STAGE = "search";
+const STAGE = "find";
 
 // PROJECTS.md 14.5 / build-guide-projects 14.5: surface web search, 1-3
 // queries, summarised inline. NOT evidence -- no report file, no citation
 // re-check, no evidence_basis. Output must be visually distinct from a
 // research report and carry a footer saying so. This distinction is
-// load-bearing: /search masquerading as research routes around the
+// load-bearing: /find masquerading as research routes around the
 // audit's web-only cap.
 const NOT_EVIDENCE_FOOTER =
 	"\n\n---\n> 🔎 _Surface search, not research. No sources were verified and this is *not evidence*. " +
@@ -51,7 +51,7 @@ async function planQueries(topic) {
 	}
 }
 
-async function runSearch(topic) {
+async function runFind(topic) {
 	const queries = await planQueries(topic);
 	const t0 = Date.now();
 	const hits = await search(queries);
@@ -97,7 +97,7 @@ async function runSearch(topic) {
 	};
 }
 
-async function handleSearchCommand({ command, ack, client }) {
+async function handleFindCommand({ command, ack, client }) {
 	const founder = founderForUserId(command.user_id);
 	if (!founder) {
 		await ack(); // D-40
@@ -106,7 +106,7 @@ async function handleSearchCommand({ command, ack, client }) {
 
 	const topic = (command.text || "").trim();
 	if (!topic) {
-		await ack({ response_type: "ephemeral", text: "`/search` needs a query: `/search <what to look up>`" });
+		await ack({ response_type: "ephemeral", text: "`/find` needs a query: `/find <what to look up>`" });
 		return;
 	}
 
@@ -122,7 +122,7 @@ async function handleSearchCommand({ command, ack, client }) {
 	const dest = command.channel_id || channelId("mill");
 
 	try {
-		const r = await runSearch(topic);
+		const r = await runFind(topic);
 
 		const post = { channel: dest, text: r.body };
 		if (session) {
@@ -132,7 +132,7 @@ async function handleSearchCommand({ command, ack, client }) {
 		await client.chat.postMessage(post);
 
 		if (session) {
-			addTurn(session, { role: "user", text: `/search ${topic}`, userId: command.user_id });
+			addTurn(session, { role: "user", text: `/find ${topic}`, userId: command.user_id });
 			addTurn(session, { role: "assistant", text: r.body });
 		}
 
@@ -151,20 +151,20 @@ async function handleSearchCommand({ command, ack, client }) {
 			}),
 		);
 	} catch (err) {
-		console.error("search command failed:", err);
+		console.error("find command failed:", err);
 		emit(
 			buildEvalEvent({
 				stage: STAGE,
 				model: MODEL,
 				founder,
 				status: "failed",
-				reasonCode: "search_failed",
+				reasonCode: "find_failed",
 			}),
 		);
 		await client.chat
-			.postMessage({ channel: dest, text: `\`/search\` failed: ${err?.message || err}` })
+			.postMessage({ channel: dest, text: `\`/find\` failed: ${err?.message || err}` })
 			.catch(() => {});
 	}
 }
 
-module.exports = { handleSearchCommand, runSearch };
+module.exports = { handleFindCommand, runFind };

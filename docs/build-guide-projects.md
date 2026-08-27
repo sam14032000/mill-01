@@ -47,10 +47,6 @@ You have the endpoint. Collect:
 
 Confirm your plan allows a persistent agent session. Free tier has historically permitted only one simultaneous session, which is enough for the single-endpoint design but not more.
 
-## 14.0.4 Static host (frontend-only prototypes)
-
-Cloudflare Pages or Netlify free tier. Create the account and generate a deploy token. Verify current free-tier limits before committing — they change.
-
 ## 14.0.5 Secrets
 
 ```bash
@@ -64,8 +60,7 @@ NGROK_AUTHTOKEN=
 NGROK_DOMAIN=
 PROTO_BASIC_AUTH_USER=mill
 PROTO_BASIC_AUTH_PASS=
-STATIC_HOST_TOKEN=
-SLACK_CHANNEL_CHATS=#chats
+SLACK_CHANNEL_CHATS=<channel id, C…>
 ```
 
 Generate the basic-auth password with `openssl rand -hex 12`. Save it to your password manager — you'll share it alongside prototype URLs.
@@ -82,7 +77,7 @@ tmux attach -t cc
 
 > Read docs/PROJECTS.md and add it to CLAUDE.md imports. Then work through docs/build-guide-projects.md starting at Part 14. Stop at the end of each part, run its verification block, and report raw output before continuing. Do not proceed past a failed check.
 >
-> Prerequisites done: channels:manage added and app reinstalled, #chats created, ngrok and static-host secrets in ~/.config/mill/env.
+> Prerequisites done: channels:manage added and app reinstalled, #chats created, ngrok secrets in ~/.config/mill/env. No static host — all prototypes go through the ngrok slot (D-48).
 
 ---
 
@@ -116,17 +111,17 @@ Do not collapse these paths.
 
 ## 14.4 Commands in chat
 
-`/think`, `/cross`, `/blindspot`, `/themes`, `/search`.
+`/think`, `/cross`, `/blindspot`, `/themes`, `/find`.
 
 **`/attack` writes nothing here.** Returns the case against plus the `ASSUMPTION:` line, then presents the promote button pre-filled with that assumption. No idea, no `state.json`, no directory.
 
-## 14.5 `/search`
+## 14.5 `/find`  (`/search` is reserved by Slack)
 
 1–3 Tavily queries, summarised in-thread. No report file, no citation re-check, no `evidence_basis`.
 
 **It is never evidence.** Visually distinct from a research report, with a footer saying so. On promotion it transcribes as conversation, never as research.
 
-This is load-bearing: `/search` masquerading as research routes straight around the audit's web-only cap, and that's how a `proceed` gets built on three headlines.
+This is load-bearing: `/find` masquerading as research routes straight around the audit's web-only cap, and that's how a `proceed` gets built on three headlines.
 
 ## 14.6 Compaction
 
@@ -147,7 +142,7 @@ Append each founder's own messages from unpromoted chats to their captures file.
 - 5-turn chat retains context
 - a second concurrent chat does not bleed into the first
 - compaction fires at turn 30 and preserves a number stated at turn 3
-- /search output carries its not-evidence footer
+- /find output carries its not-evidence footer
 - /attack creates nothing on disk (confirm with git status and ls ideas/)
 - a DM still produces a capture, not a conversational reply
 ```
@@ -324,7 +319,7 @@ When nothing is mounted, the tunnel serves a plain "no prototype mounted" page. 
 
 Separate acts.
 
-`/proto <id> <assumption>` **builds only.** Frontend-only prototypes deploy to the static host and post a public URL directly — they never occupy the slot. Backend prototypes are built and left unmounted.
+`/proto <id> <assumption>` **builds only.** Every prototype — frontend or backend — is built and left unmounted; there is no static host (D-48). A prototype becomes reachable only by taking the single ngrok slot via **Mount**.
 
 ## 18.5 Mount / dismount
 
@@ -369,7 +364,6 @@ An LLM wrote this code and your API keys are on the same box.
 ## Verify Part 18
 
 ```
-- a frontend prototype returns a working static-host URL without mounting
 - a backend prototype mounts, is reachable, and prompts for basic auth
 - the unmounted tunnel serves the placeholder, not a 502
 - auto-dismount fires at 30 min; explicit 2h honoured; 12h rejected
@@ -409,7 +403,7 @@ After reboot: bot answers a DM, LiteLLM healthy, ngrok tunnel up, cron intact.
 ## End-to-end, by hand
 
 1. `/chat` — a real idea, 5+ conversational turns
-2. `/search` — confirm the not-evidence footer
+2. `/find` — confirm the not-evidence footer
 3. `/attack` — assumption with a number and a named alternative
 4. **Promote** — check `origin-chat.md` has every turn
 5. Upload a document — check it commits and indexes

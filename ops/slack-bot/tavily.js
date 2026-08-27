@@ -1,8 +1,8 @@
 "use strict";
 
-// Direct Tavily search for /search (build-guide-projects Part 14.5).
+// Direct Tavily search for /find (build-guide-projects Part 14.5).
 // ops/research.py drives Tavily through GPT Researcher; the chat-tier
-// /search is a shallow, inline lookup and doesn't need that machinery --
+// /find is a shallow, inline lookup and doesn't need that machinery --
 // 1-3 queries, basic depth, a handful of results each.
 //
 // This is NOT evidence (PROJECTS.md 14.5): the caller is responsible for
