@@ -730,6 +730,20 @@ Both cleanup lines are installed and running as of this build. `docker system pr
 
 ---
 
+# Part 12b — Conformance script (EVAL.md Layer 1)
+
+`ops/conformance.py` implements all 22 checks from `docs/EVAL.md`'s Layer 1 table, C-01 through C-22. No cron line — run by hand (`python3 ops/conformance.py`) whenever a conformance read is wanted; EVAL.md's own cadence is monthly, alongside Layer 3. Not `ops/eval.py`, the name EVAL.md's Layer 3 cron sketch used — that name is reserved for the fresh-session judgement pass, which doesn't exist yet and shouldn't be confused with this deterministic one.
+
+Every check is a grep, a file read, a git command, or an HTTP call to LiteLLM's own `/key/info` and `/spend/logs` endpoints (master-key-authenticated, same pattern `healthcheck.sh` already uses) — never a model call, per EVAL.md's "do not ask a model what a script can prove." Needs the `docker` group active in its shell (same as the weekly cleanup cron and `run.sh` itself) for C-17's `docker network inspect`/`iptables` check; a freshly-spawned process (cron, new SSH session) has this, an already-open shell from before the group was granted may not.
+
+**Real findings from the first run, not hypothetical:**
+
+- **C-17 genuinely fails.** The `egress` Docker network `run.sh` uses for network-enabled prototypes is a plain bridge with no `DOCKER-USER` iptables rule restricting what it can reach — confirmed directly (`docker network inspect egress`, `iptables -L DOCKER-USER -n`), matching what `run.sh`'s own comment already says (Part 10): the none/egress choice is a binary toggle, not a per-host allowlist. A real, already-acknowledged gap — close it before any working prototype actually needs `MILL_SANDBOX_NETWORK=egress` unattended.
+- **This system never invokes Pi.** Checked directly (`grep` across `ops/` for any `pi -p`/`spawn("pi")`/RPC usage — none). D-03 named Pi as the harness and CLAUDE.md's pitfalls table says `pi -p --mode json` for scripted runs, RPC for the Slack bot — but every command handler and `ops/research.py` call LiteLLM's `/chat/completions` directly over HTTP, bypassing Pi entirely. Pi is installed (Part 6) but has never been wired into the running system as anything more than orchestrator scaffolding. C-18 passes on its literal wording (no Pi invocation *outside* a container, because there's no Pi invocation at all) but that technicality papers over the larger fact. Not fixed here — this is exactly the kind of thing CLAUDE.md says to raise with the founders rather than resolve unilaterally, since D-03 is a structural decision and its revisit condition ("Pi's security posture changes materially, or a maintained harness ships equivalent extensibility with sandboxing built in") hasn't been argued either way here.
+- **`eval-event.js`'s `buildEvalEvent` mis-prices every non-Gemini telemetry event.** It always calls `geminiFlashCost()` regardless of the `model` field passed in, so every `stage: "audit"` telemetry line (Fable 5, ~$1.60/call per D-10) is logged with Gemini's $0.75/$3.75-per-M rates instead of Fable's actual cost — silently wrong, not just imprecise (checked directly: LiteLLM's own `/spend/logs` shows real per-call Fable spend around $0.035-$0.04 for a trivial test prompt, using LiteLLM's correct built-in Anthropic pricing, which the `x-litellm-response-cost` response header also exposes per-call and could replace the hardcoded Gemini-only calculator entirely). Not fixed here, since it touches every command's telemetry call site — flagged because EVAL.md Layer 2's derived metrics (cost per idea killed, D-24's core metric) depend on `cost_usd` being right, and this bug means audit-stage cost has been wrong since Part 9b. C-02 sidesteps it by reading LiteLLM's `/spend/logs` directly rather than trusting telemetry's `cost_usd` for Fable spend, which is why C-02 passes correctly despite this bug.
+
+---
+
 # Part 13 — Commissioning (you, by hand)
 
 - [ ] `ssh agent@100.x.x.x` works over Tailscale
