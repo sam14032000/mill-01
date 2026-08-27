@@ -183,3 +183,13 @@ dropped silently: no reply, no capture.
   from-scratch build follows; a guide that quietly stops matching the
   running system is worse than no guide, because it looks authoritative
   right up until someone acts on the wrong line.
+- **Every periodic or background component emits a log line on every run,
+  pass or fail** — one `[<utc>] <name> ran — <summary>` line, not silence
+  on success. An empty log must mean "never ran", never "ran fine". Add a
+  conformance check that the line is fresh (see C-24).
+- **Any fix to an alerting path is verified by forcing the condition** —
+  point the check at a stale file, drop a budget below spend, stop the
+  service — and confirming the alert actually arrives. Never mark an
+  alerting fix done on code inspection alone. Six silent failures surfaced
+  during the build, all the same shape: something stopped working and said
+  nothing. These two rules exist to make that shape loud.

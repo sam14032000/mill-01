@@ -37,13 +37,23 @@ async function commitAndPush(paths, message, onFailure) {
 	}
 	if (!status.stdout.trim()) return false;
 
-	const add = await run("git", ["add", ...paths]);
+	// Stage and commit ONLY these paths, explicitly. `git add <paths>`
+	// scopes what gets staged; `git commit -- <paths>` scopes what gets
+	// committed even if something else is already in the index. Without
+	// the pathspec on `commit`, a bare `git commit -m` records the entire
+	// staged index -- so anything a founder happens to have `git add`ed
+	// while working in the same clone (constant during the projects
+	// phase) gets committed by the bot under a "captures: batch commit"
+	// message. Both halves are needed: `add` picks up new untracked
+	// files under the paths (e.g. a fresh ideas/<id>/), `commit -- paths`
+	// fences everything else out.
+	const add = await run("git", ["add", "--", ...paths]);
 	if (add.error) {
 		await reportGitFailure(onFailure, `add failed: ${add.error.message}`);
 		return false;
 	}
 
-	const commit = await run("git", ["commit", "-m", message]);
+	const commit = await run("git", ["commit", "-m", message, "--", ...paths]);
 	if (commit.error) {
 		await reportGitFailure(onFailure, `commit failed: ${commit.error.message}`);
 		return false;
@@ -62,7 +72,13 @@ async function commitAndPush(paths, message, onFailure) {
 		await reportGitFailure(onFailure, `fetch failed, commit is local only: ${fetch.error.message}`);
 		return false;
 	}
-	const rebase = await run("git", ["rebase", "origin/main"]);
+	// --autostash: a founder working in the same clone will usually have
+	// unstaged edits in flight, and `git rebase` refuses to run against a
+	// dirty tree. Autostash pockets those edits, rebases our commit onto
+	// origin/main, and re-applies them. A pop conflict (different paths,
+	// so very unlikely) leaves the edits safely in the stash and surfaces
+	// below rather than being lost.
+	const rebase = await run("git", ["rebase", "--autostash", "origin/main"]);
 	if (rebase.error) {
 		await run("git", ["rebase", "--abort"]);
 		await reportGitFailure(
