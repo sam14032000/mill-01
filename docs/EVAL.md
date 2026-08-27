@@ -95,6 +95,14 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 
 **Why this exists.** `cost_usd` used to be computed from `tokens_in`/`tokens_out` via a hardcoded Gemini-only price table applied to every model indiscriminately — every `stage: "audit"` (Fable 5) event was silently priced at Gemini's rate instead of Fable's actual cost, roughly 13x under, on the line D-24's headline metric (cost per idea killed) depends on most, since audits are ~73% of real spend. Found while building `ops/conformance.py`'s C-02 check, which sidestepped the bug by reading LiteLLM's `/spend/logs` directly rather than trusting telemetry. Fixed at the source (`llm.js`/`audit-llm.js` now read LiteLLM's own `x-litellm-response-cost` response header, real per-model cost, not an estimate) and backfilled into already-logged events — `C-23` exists so a regression (someone reintroducing an estimated `cost_usd` instead of a measured one) fails a script instead of waiting to be noticed the same way this one was.
 
+### Observability
+
+| Check | Passes if |
+|---|---|
+| `C-24` | `~/logs/healthcheck.log` has a fresh `[<utc>] healthcheck ran …` line within the last 24h |
+
+**Why this exists.** `ops/healthcheck.sh` (budget / service-down / heartbeat-stale / disk alerts) emitted nothing on a healthy run, so an empty log was indistinguishable from the cron job having silently stopped — and with it every alert it carries. This was the sixth "component fails without emitting anything" instance found during the build. The script now logs one status line every invocation regardless of outcome; `C-24` fails if that line goes missing or stale.
+
 ---
 
 # Layer 2 — Telemetry

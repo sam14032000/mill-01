@@ -732,13 +732,48 @@ def check_c23():
     )
 
 
+# ---------------------------------------------------------------------
+# Observability (C-24)
+# ---------------------------------------------------------------------
+
+HEALTHCHECK_LOG = Path("/home/agent/logs/healthcheck.log")
+_HC_STAMP = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\]")
+
+
+def check_c24():
+    # ops/healthcheck.sh emits exactly one "[<utc>] healthcheck ran ..."
+    # line every cron invocation (every 30 min), pass or fail. If that
+    # line is missing or stale, the healthcheck itself has silently
+    # stopped -- which is how the budget/service/disk/heartbeat alerts it
+    # carries would all go dark without anyone noticing (the pattern this
+    # check exists to break).
+    desc = "healthcheck.sh has logged a run in the last 24h"
+    if not HEALTHCHECK_LOG.exists():
+        return Result("C-24", desc, False, f"{HEALTHCHECK_LOG} does not exist -- healthcheck.sh has never logged a run")
+    stamps = []
+    try:
+        for line in HEALTHCHECK_LOG.read_text(errors="replace").splitlines():
+            m = _HC_STAMP.match(line)
+            if m:
+                stamps.append(datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc))
+    except OSError as err:
+        return Result("C-24", desc, False, f"could not read {HEALTHCHECK_LOG}: {err}")
+    if not stamps:
+        return Result("C-24", desc, False, f"{HEALTHCHECK_LOG} has no parseable '[<utc>] healthcheck ran' line")
+    newest = max(stamps)
+    age_h = (datetime.now(timezone.utc) - newest).total_seconds() / 3600
+    if age_h > 24:
+        return Result("C-24", desc, False, f"most recent healthcheck run was {age_h:.1f}h ago ({newest.isoformat()}) -- cron job may have stopped")
+    return Result("C-24", desc, True, f"most recent run {age_h:.1f}h ago ({newest.isoformat()}), {len(stamps)} run line(s) in the log")
+
+
 CHECKS = [
     check_c01, check_c02, check_c03, check_c04, check_c05,
     check_c06, check_c07, check_c08, check_c09, check_c10,
     check_c11, check_c12, check_c13, check_c14,
     check_c15, check_c16, check_c17, check_c18,
     check_c19, check_c20, check_c21, check_c22,
-    check_c23,
+    check_c23, check_c24,
 ]
 
 

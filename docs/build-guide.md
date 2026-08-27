@@ -509,9 +509,13 @@ LITELLM_BASE_URL=http://127.0.0.1:4000
 MILL_FLASH_KEY=sk-...
 MILL_RESEARCH_KEY=sk-...
 MILL_AUDIT_KEY=sk-...
+MILL_MECH_KEY=sk-...
 FOUNDER_SAKSHAM=U01ABC
 FOUNDER_AMISHA=U02DEF
 FOUNDER_VAIBHAV=U03GHI
+SLACK_CHANNEL_MILL=C...
+SLACK_CHANNEL_RESEARCH=C...
+SLACK_CHANNEL_GRAVEYARD=C...
 ```
 
 ```bash
@@ -519,6 +523,8 @@ chmod 600 ~/.config/mill/env
 ```
 
 Map Slack user IDs to `minds/<name>/` directories. **Attribution drives profile routing and is not optional** (D-40). Identity comes only from Slack's verified `user_id` against this static map — no passphrase, no secondary login. Anything off the map is dropped silently.
+
+**`SLACK_CHANNEL_*` must be channel IDs (`C…`/`G…`), not `#names`.** `chat.postMessage` still resolves a `#name`, but `conversations.*` calls don't, and name resolution breaks silently on a channel rename. `config.js` logs a warning at startup for any value that isn't ID-shaped. To get an ID from a name without the `channels:read` scope: `chat.postMessage` to the `#name` and read `.channel` off the response (delete the message after). Blank `FOUNDER_*` entries are fine — that founder just isn't onboarded yet.
 
 ### 9.3 Service
 
@@ -549,6 +555,21 @@ mkdir -p ~/logs
 sudo systemctl daemon-reload
 sudo systemctl enable --now mill-chat
 ```
+
+**Wedge recovery (`socket-health.js`).** A half-open Socket Mode connection
+leaves the process `active` while silently dropping inbound events —
+`Restart=always` never fires because nothing exits. `socket-health.js`
+(started from `index.js` after `app.start()`) turns three conditions into a
+non-zero `process.exit`, so `RestartSec=10` rebuilds the connection:
+websocket pong stale > 90s; more than 3 consecutive pings with no pong; or
+no inbound Slack event for 15 min *and* a live `auth.test` probe also fails.
+It also maintains `~/logs/mill-chat.heartbeat` (rewritten on every inbound
+event and every 60s), which Part 12's healthcheck alerts on when stale.
+Thresholds are env-overridable (`MILL_SOCKET_PONG_STALE_MS`,
+`MILL_SOCKET_SILENCE_MS`, `MILL_SOCKET_MAX_PING_MISSES`,
+`MILL_HEARTBEAT_FILE`). `index.js` also logs one `[inbound]` line per
+dispatched Slack request (shape only, no message content) — permanent,
+since its absence is what made the 2026-08-27 wedge undiagnosable.
 
 Log rotation:
 
@@ -713,11 +734,14 @@ pip install gpt-researcher
 
 # Part 12 — Cron and healthcheck
 
-`~/workspace/mill-01/ops/healthcheck.sh` — **budget-warning half only, already built and running.** `/global/spend/report` is LiteLLM Enterprise-only and 402s on the open-source build used here; per-key `/key/info` (master-key-authenticated) is what actually works, confirmed directly. Disk/memory/service-status checks below are **not yet implemented** — this section only covers what's real. Whoever adds those should extend the same script rather than write a second one.
+`~/workspace/mill-01/ops/healthcheck.sh` runs from cron every 30 min and does four checks, each alerting `#mill-ideas` (channel id from `SLACK_CHANNEL_MILL`) at most once per condition per clock-hour:
 
-The real script queries all four keys' `spend`/`max_budget` via `/key/info`, and posts to `#mill-ideas` (channel id from `SLACK_CHANNEL_MILL`, not a hardcoded `#mill`) the first time any key crosses 70% of its daily budget on a given UTC day — the reset window LiteLLM actually uses (Part 7.3). State to avoid re-alerting every 30 minutes once past threshold lives in `~/.cache/mill-healthcheck/<alias>-<date>.alerted`, pruned after 2 days. It runs as a standalone cron job specifically because it's the only thing on the box that needs `LITELLM_MASTER_KEY` — the always-on Slack bot process never holds it, keeping the bot's own credential scope to just the four virtual keys it actually calls. See the script itself for the full implementation; it isn't reproduced here to avoid the two drifting apart, which is exactly the failure this guide keeps finding in itself.
+1. **Per-key daily budget** over 70% (D-23) — `spend`/`max_budget` via `/key/info` (`/global/spend/report` is LiteLLM Enterprise-only and 402s here). Reset window is UTC midnight (Part 7.3).
+2. **`mill-chat.service` not `active`** — `systemctl is-active`.
+3. **`~/logs/mill-chat.heartbeat` stale > 10 min** — `socket-health.js` rewrites it every inbound event and every 60s, so staleness means the bot is wedged even if systemd still shows it running (belt-and-braces against `socket-health.js`'s own exit triggers missing).
+4. **Root filesystem** over 85%.
 
-**Still to build:** disk (>80% — 40GB fills faster than you'd expect with Docker layers and node_modules) and memory (>90%) thresholds, and `mill-chat`/LiteLLM service-down checks, all alerting the same way.
+**Every run appends one `[<utc>] healthcheck ran — …` line to `~/logs/healthcheck.log`, pass or fail.** Silent success is how the earlier version hid whether it was running at all; `ops/conformance.py` C-24 now asserts that line is fresh. Alert de-dup state lives in `~/.cache/mill-healthcheck/<key>-<hourbucket>.alerted`, pruned after 2 days. It runs standalone (not in the bot) because it's the only thing on the box that holds `LITELLM_MASTER_KEY` (sourced from `~/stack/litellm/.env`) — the bot's env never does. Full implementation is in the script, not reproduced here, per the drift convention.
 
 ```cron
 */30 * * * * /home/agent/workspace/mill-01/ops/healthcheck.sh >> /home/agent/logs/healthcheck.log 2>&1
@@ -735,7 +759,7 @@ Both cleanup lines are installed and running as of this build. `docker system pr
 
 # Part 12b — Conformance script (EVAL.md Layer 1)
 
-`ops/conformance.py` implements all 22 checks from `docs/EVAL.md`'s Layer 1 table, C-01 through C-22. No cron line — run by hand (`python3 ops/conformance.py`) whenever a conformance read is wanted; EVAL.md's own cadence is monthly, alongside Layer 3. Not `ops/eval.py`, the name EVAL.md's Layer 3 cron sketch used — that name is reserved for the fresh-session judgement pass, which doesn't exist yet and shouldn't be confused with this deterministic one.
+`ops/conformance.py` implements the `docs/EVAL.md` Layer 1 checks, C-01 through C-24 (C-23 telemetry-cost accuracy and C-24 healthcheck-log freshness were added after the original C-01..C-22 table). No cron line — run by hand (`python3 ops/conformance.py`) whenever a conformance read is wanted; EVAL.md's own cadence is monthly, alongside Layer 3. Not `ops/eval.py`, the name EVAL.md's Layer 3 cron sketch used — that name is reserved for the fresh-session judgement pass, which doesn't exist yet and shouldn't be confused with this deterministic one.
 
 Every check is a grep, a file read, a git command, or an HTTP call to LiteLLM's own `/key/info` and `/spend/logs` endpoints (master-key-authenticated, same pattern `healthcheck.sh` already uses) — never a model call, per EVAL.md's "do not ask a model what a script can prove." Needs the `docker` group active in its shell (same as the weekly cleanup cron and `run.sh` itself) for C-17's `docker network inspect`/`iptables` check; a freshly-spawned process (cron, new SSH session) has this, an already-open shell from before the group was granted may not.
 

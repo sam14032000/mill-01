@@ -20,6 +20,7 @@ const { handleProtoCommand } = require("./commands/proto");
 const { handleThreadMessage } = require("./thread-wait");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
+const { startSocketHealth } = require("./socket-health");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -33,6 +34,24 @@ const app = new App({
 	token: process.env.SLACK_BOT_TOKEN,
 	appToken: process.env.SLACK_APP_TOKEN,
 	socketMode: true,
+});
+
+// Inbound-event log, kept permanently. Before this line there was zero
+// logging of what Slack delivered, which is why the 2026-08-27 wedge
+// (socket alive, events silently dropped) could not be diagnosed without
+// live instrumentation. One line per dispatched request; no message
+// content, only shape (type, channel kind, user, text length).
+app.use(async ({ body, next }) => {
+	try {
+		const t = body?.type || body?.event?.type || "?";
+		const ev = body?.event || {};
+		console.log(
+			`[inbound] type=${t} event_type=${ev.type || "-"} subtype=${ev.subtype || "-"} channel_type=${ev.channel_type || "-"} channel=${ev.channel || body?.channel_id || "-"} user=${ev.user || body?.user_id || "-"} command=${body?.command || "-"} text_len=${(ev.text || body?.text || "").length}`,
+		);
+	} catch (err) {
+		console.log(`[inbound] (failed to introspect): ${err.message}`);
+	}
+	await next();
 });
 
 // All eight slash commands defined in Slack app config (Part 9.1) are
@@ -161,6 +180,11 @@ app.message(async ({ message, client }) => {
 (async () => {
 	await app.start();
 	console.log("mill-chat: Slack bot connected (Socket Mode)");
+
+	// Turn a wedged Socket Mode connection into a dead process so systemd
+	// (Restart=always) rebuilds it -- see socket-health.js for the full
+	// rationale (2026-08-27 reboot: socket alive, events silently dropped).
+	startSocketHealth({ app });
 
 	startBatchCommitLoop((reason) => {
 		console.error(`batch commit failed: ${reason}`);

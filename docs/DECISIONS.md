@@ -509,3 +509,15 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **Cost of keeping Pi installed with no job.** None functional — it wasn't in any request path — but it was a dependency and an attack-surface line with no offsetting benefit, and its presence in `docs/build-guide.md`/`CLAUDE.md`/`runbook.md` was actively misleading about what the running system does, which is its own kind of cost (see the drift convention this file's header describes). Removed for that reason as much as for tidiness.
 
 **Revisit when:** never, without an explicit decision that some future stage needs agentic tool-use, multi-step planning, or filesystem/process access beyond a single model call plus the existing Docker sandbox — the shape of job a harness is actually for, and the shape nothing in this system currently has.
+
+---
+
+### D-44 · A wedged Slack connection must become a dead process
+
+**Decision.** `ops/slack-bot/socket-health.js` monitors the Socket Mode connection and calls `process.exit(1)` — letting systemd's `Restart=always`/`RestartSec=10` rebuild it — on any of: websocket pong stale >90s, >3 consecutive pings with no pong, or no inbound Slack event for 15 min *and* a live `auth.test` probe failing. It also maintains `~/logs/mill-chat.heartbeat` (rewritten every inbound event and every 60s), which `ops/healthcheck.sh` alerts on when stale.
+
+**Why this needed recording.** On 2026-08-27 the box rebooted and the bot reconnected into a half-open WebSocket. The process stayed `active` for ~5 hours: inbound `message.im` events were silently dropped (captures written by founders in that window are lost — Slack does not redeliver `message` events indefinitely) while Slack retried slash-command deliveries, producing duplicate `#mill-ideas` posts. `Restart=always` never fired because the process never exited. `@slack/socket-mode`'s own auto-reconnect logs the pong failure but did not recover here.
+
+**The principle.** For a single-process, phone-only-operated system with no human watching logs, "process alive but not doing its job" is a worse failure mode than "process dead," because only the second one triggers recovery. Health checks that can't distinguish the two are close to useless. Every long-running component should convert its own unrecoverable-but-silent states into a non-zero exit, and emit a heartbeat something else can alert on.
+
+**Revisit when:** the thresholds prove wrong in practice (spurious restarts on a healthy-but-idle connection, or a real wedge that slips past all three triggers) — tune via the `MILL_SOCKET_*` env vars first, change the design only if tuning can't fix it.

@@ -21,10 +21,12 @@ const FOUNDER_KEYS = {
 	FOUNDER_VAIBHAV: "vaibhav",
 };
 
-// Channel IDs come from env, never hardcoded -- #mill collided with the
-// bot's own name in the actual workspace, so the channel is #mill-ideas;
-// keeping the id in config instead of the source means a rename never
-// requires a code change.
+// Channel IDs come from env, never hardcoded. Stored as Slack IDs
+// (C0BSWSKRGG1 …), not #names: name resolution is deprecated, breaks
+// silently on a channel rename, and isn't accepted by conversations.*
+// APIs. (#mill collided with the bot's own name in the workspace, so the
+// human-facing channel is #mill-ideas — but that name never appears
+// here.)
 const CHANNEL_KEYS = {
 	SLACK_CHANNEL_MILL: "mill",
 	SLACK_CHANNEL_RESEARCH: "research",
@@ -93,7 +95,19 @@ function load() {
 
 	const newChannels = {};
 	for (const [envKey, name] of Object.entries(CHANNEL_KEYS)) {
-		if (vars[envKey]) newChannels[name] = vars[envKey];
+		const value = vars[envKey];
+		if (!value) continue;
+		// Channels are stored as IDs (C…/G…), never #names. Slack's
+		// chat.postMessage still resolves a #name, but conversations.*
+		// calls (and healthcheck.sh's future ones) need the ID, and name
+		// resolution silently breaks on a rename. Warn rather than reject
+		// -- a #name still works well enough to not take the bot down.
+		if (!/^[CG][A-Z0-9]{6,}$/.test(value)) {
+			console.error(
+				`config: ${envKey}=${value} does not look like a Slack channel ID (expected C… or G…) — resolve it to an ID in ~/.config/mill/env`,
+			);
+		}
+		newChannels[name] = value;
 	}
 	channels = Object.freeze(newChannels);
 
