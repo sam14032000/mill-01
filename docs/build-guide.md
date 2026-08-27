@@ -698,6 +698,12 @@ FIELD = REPO / "ideas" / sys.argv[1] / "field"   # founder-pasted notes
 OUT   = REPO / "ideas" / sys.argv[1]
 ASSUMPTION = sys.argv[2]
 
+# No OpenAI account, ever. OPENAI_API_BASE / OPENAI_API_KEY are not
+# OpenAI credentials -- they are the fixed variable names the
+# OpenAI-compatible client GPT Researcher uses under the hood, and
+# that's the standard, LiteLLM-recommended way to point *any*
+# OpenAI-compatible client at a non-OpenAI server. Renaming these two
+# would break the integration; nothing here ever talks to OpenAI.
 os.environ["OPENAI_API_BASE"] = os.environ["LITELLM_BASE_URL"]
 # mill-research, not mill-flash: research and interactive traffic have
 # separate keys and budgets (Part 7.3) precisely because a research pass
@@ -705,6 +711,26 @@ os.environ["OPENAI_API_BASE"] = os.environ["LITELLM_BASE_URL"]
 # scoped to flash-fast only and would 403 against the flash model this
 # script needs.
 os.environ["OPENAI_API_KEY"]  = os.environ["MILL_RESEARCH_KEY"]
+
+# GPT Researcher's own defaults (FAST_LLM=openai:gpt-4o-mini,
+# SMART_LLM=openai:gpt-4.1, STRATEGIC_LLM=openai:o4-mini) are real
+# OpenAI model names -- redirecting OPENAI_API_BASE to our proxy does
+# NOT make these resolve; our config.yaml's model_list only has
+# flash-fast/flash/audit/mechanical. Left unset, every call would 400
+# against a model our proxy doesn't have, regardless of the correct key
+# routing above. Must be set explicitly to match.
+os.environ["FAST_LLM"] = "openai:flash"
+os.environ["SMART_LLM"] = "openai:flash"
+os.environ["STRATEGIC_LLM"] = "openai:flash"
+# EMBEDDING has the same problem and is NOT resolved here -- GPT
+# Researcher uses embeddings for local-document ranking (the "hybrid"
+# field-notes mode this script relies on) and its default
+# (openai:text-embedding-3-small) has no equivalent in config.yaml at
+# all, unlike FAST_LLM/SMART_LLM which at least have a real model to
+# redirect to. Whoever builds this needs to either add an embedding
+# model to LiteLLM's config or pick a different embedding path before
+# `report_source="hybrid"` can be trusted to work end-to-end.
+
 os.environ["DOC_PATH"] = str(FIELD)
 
 async def main():
@@ -734,6 +760,8 @@ asyncio.run(main())
 ```
 
 > **Do not set `report_type="deep"`.** Benchmark evidence shows increased search depth consistently degrades factual accuracy while citation metrics stay flat — an information-overload effect. Shallow passes are the accuracy-preserving choice, not just the cheap one.
+
+> **Blocker, checked before building rather than after: this script has no working retriever yet.** GPT Researcher's `RETRIEVER` defaults to `tavily` (confirmed against its own source), which requires `TAVILY_API_KEY` -- not set anywhere in this deployment, and Part 0.3 never actually settled on a search provider from its Brave/Serper/Exa/Tavily options, just listed them. Left unset, `conduct_research()` will fail outright, not degrade gracefully. Pick a provider from Part 0.3, sign up for a free-tier key, set `RETRIEVER` and the matching key env var (e.g. `RETRIEVER=brave` + `BRAVE_API_KEY`) before running this for real. `duckduckgo` needs no signup at all and is a reasonable way to unblock building the rest of this script while a real provider decision is pending, but a free/unranked retriever is a real quality tradeoff, not a substitute for choosing one.
 
 Two things to add after the report is written:
 
