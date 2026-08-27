@@ -1,0 +1,16 @@
+{
+  "id": "0552",
+  "state": "open",
+  "founder": "saksham",
+  "created_at": "2026-08-27T21:16:47.027Z",
+  "updated_at": "2026-08-27T21:16:47.027Z",
+  "origin": "chat",
+  "origin_chat_ts": "P40",
+  "has_assumption": true,
+  "assumption": "At least 20% of dual-income Bangalore households currently paying >=349/2L to iD Fresh will switch to a 1499/month 8L subscription.",
+  "channel_id": null,
+  "threads": {},
+  "parent": null,
+  "children": [],
+  "touch_count": 0
+}
