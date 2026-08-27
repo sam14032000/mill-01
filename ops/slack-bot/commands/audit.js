@@ -15,7 +15,7 @@ const {
 	nowIso,
 } = require("../ideas");
 const { commitAndPush } = require("../git");
-const { commandDestination } = require("../chat-session");
+const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
@@ -188,7 +188,10 @@ async function handleAuditCommand({ command, ack, client }) {
 		return;
 	}
 
-	const id = (command.text || "").trim();
+	// Project channel (16.3): id from the channel, verdict into the Audit
+	// stage thread.
+	const pdest = commandDestination(command);
+	const id = pdest.project ? pdest.project.id : (command.text || "").trim();
 	if (!id) {
 		await ack({ response_type: "ephemeral", text: "`/audit` needs an idea id: `/audit <id>`" });
 		return;
@@ -204,8 +207,17 @@ async function handleAuditCommand({ command, ack, client }) {
 
 	await ack();
 
-	const researchChannel = channelId("research");
 	const graveyardChannel = channelId("graveyard");
+	let researchChannel;
+	let auditThreadTs;
+	if (pdest.project) {
+		await ensureStageThread(client, pdest);
+		researchChannel = pdest.channel;
+		auditThreadTs = pdest.threadTs; // Audit stage thread
+	} else {
+		researchChannel = channelId("research");
+		auditThreadTs = null; // set from research.json.slack_thread_ts below
+	}
 	if (!researchChannel) {
 		console.error("SLACK_CHANNEL_RESEARCH not configured — /audit cannot post its result anywhere");
 		return;
@@ -240,7 +252,7 @@ async function handleAuditCommand({ command, ack, client }) {
 	if (research.json.research_stub !== false) {
 		await client.chat.postMessage({
 			channel: researchChannel,
-			thread_ts: research.json.slack_thread_ts,
+			thread_ts: auditThreadTs || research.json.slack_thread_ts,
 			text: `\`/audit\` refuses to rule on \`${id}\`: no research has run — the report on file is a stub (Part 11's research pipeline isn't built). No verdict.`,
 		});
 		emit(
@@ -281,7 +293,7 @@ async function handleAuditCommand({ command, ack, client }) {
 			);
 			await client.chat.postMessage({
 				channel: researchChannel,
-				thread_ts: research.json.slack_thread_ts,
+				thread_ts: auditThreadTs || research.json.slack_thread_ts,
 				text: `\`/audit\` failed for \`${id}\`: the model didn't return a valid verdict after one retry. No verdict posted.`,
 			});
 			return;
@@ -347,7 +359,7 @@ async function handleAuditCommand({ command, ack, client }) {
 		}
 		await client.chat.postMessage({
 			channel: researchChannel,
-			thread_ts: research.json.slack_thread_ts,
+			thread_ts: auditThreadTs || research.json.slack_thread_ts,
 			text: lines.join("\n"),
 		});
 

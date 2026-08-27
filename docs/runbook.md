@@ -70,9 +70,11 @@ minds/
 | Channel | Purpose |
 |---|---|
 | DM to the bot | Private captures — one per founder |
-| `#mill-ideas` | Brainstorm, cross, blindspot. Shared. |
-| `#research` | Research reports and audit verdicts, threaded |
-| `#graveyard` | Kill verdicts. Read it monthly. |
+| `#chats` | Chat-tier sessions, one thread each (`docs/PROJECTS.md`) |
+| `#mill-ideas` | Lobby: brainstorm in chats, promotion announcements, `/themes` |
+| `#idea-<id>-<slug>` | One per promoted project; Research reports and Audit verdicts live in its stage threads |
+| `#research` | **Retired (D-47 / PROJECTS.md).** Reports moved into each project's Research thread. Pre-projects ideas with no channel still fall back here. |
+| `#graveyard` | Kill verdicts across all projects. Read it monthly. |
 
 Raw captures stay in DMs by default. Profiles, themes and dynamics are shared. Half-formed 2am thoughts are not always things people want read.
 
@@ -120,7 +122,7 @@ Then the pass runs:
 
 That last step is the cheap guard against the failure that actually kills founders. You would rather kill a good idea on weak evidence than build for six months on a hallucinated confirmation.
 
-Report posts to `#research` as a thread. Notification on completion.
+Report posts to the project's **Research** stage thread (`#idea-<id>-<slug>`). Notification on completion. (Pre-projects ideas with no channel fall back to `#research`, now retired for new work — D-47.)
 
 ---
 

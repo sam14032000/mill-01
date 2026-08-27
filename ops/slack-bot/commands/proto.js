@@ -9,7 +9,7 @@ const { callFlash } = require("../llm");
 const { ideaExists, readState, updateState, IDEAS_DIR } = require("../ideas");
 const { runInSandbox } = require("../sandbox");
 const { commitAndPush } = require("../git");
-const { commandDestination } = require("../chat-session");
+const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
@@ -103,16 +103,28 @@ async function handleProtoCommand({ command, ack, client }) {
 		return;
 	}
 
+	// Project channel (16.3): id from the channel, the whole argument is
+	// the assumption, output into the Prototype stage thread.
+	const pdest = commandDestination(command);
 	const text = (command.text || "").trim();
-	const spaceIdx = text.indexOf(" ");
-	const id = spaceIdx === -1 ? text : text.slice(0, spaceIdx);
-	const assumption = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+	let id;
+	let assumption;
+	if (pdest.project) {
+		id = pdest.project.id;
+		assumption = text;
+	} else {
+		const spaceIdx = text.indexOf(" ");
+		id = spaceIdx === -1 ? text : text.slice(0, spaceIdx);
+		assumption = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+	}
 
-	// Refuses if: no assumption argument (D-29).
+	// Refuses if: no named assumption (D-29).
 	if (!id || !assumption) {
 		await ack({
 			response_type: "ephemeral",
-			text: "`/proto` refuses without a named assumption: `/proto <id> <assumption>`",
+			text: pdest.project
+				? "`/proto` refuses without a named assumption: `/proto <assumption>`"
+				: "`/proto` refuses without a named assumption: `/proto <id> <assumption>`",
 		});
 		return;
 	}
@@ -135,7 +147,13 @@ async function handleProtoCommand({ command, ack, client }) {
 
 	await ack();
 
-	const millChannel = channelId("mill");
+	let millChannel = channelId("mill");
+	let protoThreadTs;
+	if (pdest.project) {
+		await ensureStageThread(client, pdest);
+		millChannel = pdest.channel; // post into the project channel...
+		protoThreadTs = pdest.threadTs; // ...Prototype stage thread
+	}
 	if (!millChannel) {
 		console.error("SLACK_CHANNEL_MILL not configured — /proto cannot post its result anywhere");
 	}
@@ -147,7 +165,7 @@ async function handleProtoCommand({ command, ack, client }) {
 	if (touchCount >= TOUCH_CAP) {
 		if (millChannel) {
 			await client.chat.postMessage({
-				channel: millChannel,
+				channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
 				text: "Touch cap reached. Either this assumption was answered three touches ago, or you've decided to build this — which is a different conversation with a different budget.",
 			});
 		}
@@ -185,7 +203,7 @@ async function handleProtoCommand({ command, ack, client }) {
 			);
 			if (millChannel) {
 				await client.chat.postMessage({
-					channel: millChannel,
+					channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
 					text: `\`/proto\` failed for \`${id}\`: the model didn't return a parseable artifact after one retry.`,
 				});
 			}
@@ -259,7 +277,7 @@ async function handleProtoCommand({ command, ack, client }) {
 			lines.push("_This was the fifth touch — the next /proto on this idea will be refused._");
 		}
 		if (millChannel) {
-			await client.chat.postMessage({ channel: millChannel, text: lines.join("\n\n") });
+			await client.chat.postMessage({ channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}), text: lines.join("\n\n") });
 		}
 	} catch (err) {
 		console.error("proto command failed:", err);
@@ -275,7 +293,7 @@ async function handleProtoCommand({ command, ack, client }) {
 		if (millChannel) {
 			await client.chat
 				.postMessage({
-					channel: millChannel,
+					channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
 					text: `\`/proto\` failed for \`${id}\`: ${err?.message || err}`,
 				})
 				.catch(() => {});

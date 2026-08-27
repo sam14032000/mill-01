@@ -10,7 +10,7 @@ const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { waitForThreadReply } = require("../thread-wait");
-const { commandDestination } = require("../chat-session");
+const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
 
 const MODEL = "flash"; // research keeps thinking_level: medium (D-08 amendment), mill-research key
@@ -39,9 +39,14 @@ function timestamp() {
 // proceeds web-only. Returns evidence_basis is NOT decided here --
 // Phase 2 combines this with whatever web evidence exists (currently
 // none, see runPhase2) to land on the final basis.
-async function runFieldEvidencePhase({ client, researchChannel, founderUserId, id }) {
+async function runFieldEvidencePhase({ client, researchChannel, founderUserId, id, parentThreadTs }) {
+	// In a project channel, the field-evidence prompt goes into the
+	// Research stage thread (16.3); in the flat #research channel it opens
+	// its own thread. Either way the founder's reply and the report chain
+	// off `threadTs`.
 	const posted = await client.chat.postMessage({
 		channel: researchChannel,
+		...(parentThreadTs ? { thread_ts: parentThreadTs } : {}),
 		text: FIELD_PROMPT,
 	});
 	const threadTs = posted.ts;
@@ -201,7 +206,11 @@ async function handleTestCommand({ command, ack, client }) {
 		return;
 	}
 
-	const id = (command.text || "").trim();
+	// Project channel (16.3): idea id comes from the channel, not the
+	// argument, and everything posts into the Research stage thread.
+	const pdest = commandDestination(command);
+	const id = pdest.project ? pdest.project.id : (command.text || "").trim();
+
 	if (!id) {
 		await ack({
 			response_type: "ephemeral",
@@ -220,7 +229,15 @@ async function handleTestCommand({ command, ack, client }) {
 
 	await ack();
 
-	const researchChannel = channelId("research");
+	let researchChannel;
+	let parentThreadTs;
+	if (pdest.project) {
+		await ensureStageThread(client, pdest);
+		researchChannel = pdest.channel;
+		parentThreadTs = pdest.threadTs;
+	} else {
+		researchChannel = channelId("research");
+	}
 	if (!researchChannel) {
 		console.error("SLACK_CHANNEL_RESEARCH not configured — /test cannot post anywhere");
 		return;
@@ -231,7 +248,8 @@ async function handleTestCommand({ command, ack, client }) {
 		if (!assumption) {
 			await client.chat.postMessage({
 				channel: researchChannel,
-				text: `\`/test\` failed for idea \`${id}\`: no assumption found in idea.md.`,
+				...(parentThreadTs ? { thread_ts: parentThreadTs } : {}),
+				text: `\`/test\` failed for idea \`${id}\`: no assumption found in idea.md. Run \`/attack\` in Brainstorm first.`,
 			});
 			return;
 		}
@@ -241,6 +259,7 @@ async function handleTestCommand({ command, ack, client }) {
 			researchChannel,
 			founderUserId: command.user_id,
 			id,
+			parentThreadTs,
 		});
 
 		const { evidenceBasis, reportMd, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runResearchPass({

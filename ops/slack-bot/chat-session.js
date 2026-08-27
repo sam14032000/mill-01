@@ -22,6 +22,8 @@ const { callFlash } = require("./llm");
 const { readProfile, readCaptures, hasProfile } = require("./context");
 const { channelId } = require("./config");
 const { withPromoteButton } = require("./promote-button");
+const { findIdeaByChannel, updateState } = require("./ideas");
+const { COMMAND_STAGE, repostAnchors } = require("./project-channel");
 
 const STORE_DIR =
 	process.env.MILL_CHAT_STORE_DIR ||
@@ -98,6 +100,44 @@ function createSession({ threadTs, channel, ownerUserId, ownerFounder, topic }) 
 
 function getSession(threadTs) {
 	return threadTs ? sessions.get(threadTs) || null : null;
+}
+
+// Project stage threads (16.3): a plain message in a project channel's
+// Brainstorm/Research/etc. thread is a conversational turn scoped to
+// THAT thread. Each stage thread gets its own session keyed on its ts,
+// so research findings in the Research thread never bleed into a
+// Brainstorm reply in the same channel. Returns null if the message
+// isn't in a recognised stage thread.
+function getOrCreateStageSession({ project, threadTs, channel, speakerUserId, speakerFounder }) {
+	if (!project || !project.threads) return null;
+	const entry = Object.entries(project.threads).find(([, ts]) => ts === threadTs);
+	if (!entry) return null;
+	const stage = entry[0];
+
+	let session = sessions.get(threadTs);
+	if (session) return session;
+
+	session = {
+		threadTs,
+		channel,
+		kind: "project",
+		ideaId: project.id,
+		stage,
+		ownerUserId: speakerUserId,
+		ownerFounder: project.founder || speakerFounder,
+		topic: project.assumption
+			? `${stage} thread for idea ${project.id}. Assumption under test: ${project.assumption}`
+			: `${stage} thread for idea ${project.id} (no assumption set yet)`,
+		turns: [],
+		summary: null,
+		compactedThrough: 0,
+		flushedThrough: 0,
+		promoted: true, // a promoted idea -- nightly chat-capture skips it
+		createdAt: Date.now(),
+	};
+	sessions.set(threadTs, session);
+	persist(session);
+	return session;
 }
 
 // Slash commands don't carry thread_ts, so a `/search` or `/attack` run
@@ -265,6 +305,24 @@ function commandDestination(command) {
 			inChat: true,
 		};
 	}
+
+	// Project channel (Part 16.3): every command posts into its stage
+	// thread, keyed on thread_ts. If the stage thread_ts is missing/stale
+	// the caller (postCommandResult / ensureStageThread) reposts anchors
+	// rather than ever posting to channel root.
+	const project = command.channel_id ? findIdeaByChannel(command.channel_id) : null;
+	if (project) {
+		const stage = COMMAND_STAGE[command.command] || "brainstorm";
+		return {
+			channel: command.channel_id,
+			threadTs: project.threads ? project.threads[stage] : undefined,
+			session: null,
+			inChat: false,
+			project,
+			stage,
+		};
+	}
+
 	return {
 		channel: command.channel_id || millChannel,
 		threadTs: undefined,
@@ -273,11 +331,34 @@ function commandDestination(command) {
 	};
 }
 
+// Ensures a project stage thread exists; reposts all anchors and
+// persists the fresh map into state.json if it's missing (16.3: never
+// post to channel root). Mutates `dest.threadTs` and returns it.
+async function ensureStageThread(client, dest) {
+	if (!dest.project || dest.threadTs) return dest.threadTs;
+	const fresh = await repostAnchors({
+		client,
+		channel: dest.channel,
+		assumption: dest.project.assumption,
+	});
+	try {
+		updateState(dest.project.id, { threads: fresh });
+	} catch (err) {
+		console.error(`ensureStageThread: state update failed for ${dest.project.id}: ${err.message}`);
+	}
+	dest.project.threads = fresh;
+	dest.threadTs = fresh[dest.stage] || fresh.brainstorm;
+	return dest.threadTs;
+}
+
 // Posts a command's result to the resolved destination, threading it and
 // recording it as session turns when the command ran inside a #chats
 // session. `invocation` is the raw command text ("/think foo") recorded
 // as the user turn.
 async function postCommandResult(client, dest, { text, invocation, userId }) {
+	// Project channel: make sure the stage thread exists before posting.
+	if (dest.project && !dest.threadTs) await ensureStageThread(client, dest);
+
 	const msg = { channel: dest.channel, text };
 	if (dest.threadTs) msg.thread_ts = dest.threadTs;
 	// 15.1: every bot reply in a chat thread carries the promote button.
@@ -294,8 +375,10 @@ module.exports = {
 	loadAll,
 	createSession,
 	getSession,
+	getOrCreateStageSession,
 	findLatestSessionForUser,
 	commandDestination,
+	ensureStageThread,
 	postCommandResult,
 	addTurn,
 	markPromoted,

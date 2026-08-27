@@ -150,7 +150,7 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 **Phase 2 — the pass.** Runs `ops/research.py` (Part 11). Backgrounded; the bot must not block.
 
-- **Model:** flash via LiteLLM · **Posts to:** `#research` as a thread
+- **Model:** flash via LiteLLM · **Posts to:** the project's **Research** stage thread in `#idea-<id>-<slug>` (Part 16). Pre-projects ideas with no channel fall back to `#research`, retired for new work — D-47.
 - **Report type:** standard, **never `deep`** — depth degrades factual accuracy while citation metrics stay flat
 - **After the report:**
   1. **Citation check (D-20).** Re-fetch a sample of sources; confirm each supports the claim citing it. Decompose into sub-questions rather than judging holistically. Discrepancies appended to the report under `## Citation issues`.
@@ -163,7 +163,7 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 ### `/audit <id>` — the gate
 
 - **Model:** **audit key only** (Fable 5). Never any other command. (D-10)
-- **Posts to:** `#research`, in the research thread
+- **Posts to:** the project's **Audit** stage thread in `#idea-<id>-<slug>` (Part 16). Kills also post to `#graveyard`. Fallback for channel-less ideas: `#research` (retired — D-47).
 - **Context:** `ideas/<id>/idea.md` (assumption only) + latest `research-<stamp>.md`
 - **Explicitly NOT in context:** brainstorm output, `/think` or `/cross` results, the founder's profile, any enthusiasm. (D-28)
 - **System prompt:**
@@ -249,7 +249,7 @@ Emit on failure too, with `"status": "failed"` and a reason. Failures are data.
 | LiteLLM budget exceeded | Post the budget error plainly to the invoking channel. Do not retry, do not fall back to another key. |
 | Model call fails | One retry. Then report, emit telemetry, stop. |
 | Malformed audit JSON | One retry. Then report failure. **Never post an unvalidated verdict.** |
-| Research pass crashes | Post the traceback tail to `#research`. Leave state at `open` so `/test` can re-run. |
+| Research pass crashes | Post the traceback tail to the project's Research thread (or `#research` for channel-less ideas). Leave state at `open` so `/test` can re-run. |
 | Unknown Slack user | Silent ignore. No reply, no file. |
 | Git push fails | Log locally, alert to `#mill-ideas`, keep working. Never block a command on git. |
 

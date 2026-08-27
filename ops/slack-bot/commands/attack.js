@@ -2,12 +2,12 @@
 
 const { founderForUserId, channelId } = require("../config");
 const { callFlash } = require("../llm");
-const { generateIdeaId, createIdea } = require("../ideas");
+const { generateIdeaId, createIdea, setAssumption } = require("../ideas");
 const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile } = require("../context");
-const { findLatestSessionForUser, addTurn } = require("../chat-session");
+const { findLatestSessionForUser, addTurn, commandDestination, ensureStageThread } = require("../chat-session");
 const { withPromoteButton } = require("../promote-button");
 
 const MODEL = "flash-fast";
@@ -192,6 +192,52 @@ async function handleAttackCommand({ command, ack, client }) {
 					wallClockS,
 					status: parsed && parsed.kind !== "too_vague" ? "ok" : parsed ? "refused" : "failed",
 					reasonCode: "chat_no_idea",
+				}),
+			);
+			return;
+		}
+
+		// Project channel (16.3): post to the Brainstorm thread. The idea
+		// already exists -- don't create another. If it has no assumption
+		// yet (promotion didn't carry one), this sets it.
+		const pdest = commandDestination(command);
+		if (pdest.project) {
+			await ensureStageThread(client, pdest);
+			let out;
+			if (!parsed) {
+				out = "`/attack` couldn't produce a falsifiable assumption after one retry.";
+			} else if (parsed.kind === "too_vague") {
+				out = `TOO_VAGUE: ${parsed.detail}`;
+			} else {
+				const already = pdest.project.has_assumption;
+				if (!already) setAssumption(pdest.project.id, parsed.assumption);
+				out =
+					`${parsed.caseText}\n\n*Assumption:* ${parsed.assumption}\n\n` +
+					(already
+						? "_This project already has an assumption on file; not overwriting it._"
+						: `_Set as the assumption for \`${pdest.project.id}\`. \`/test\` in the Research thread next._`);
+				if (!already) {
+					await commitAndPush(
+						[`ideas/${pdest.project.id}`],
+						`idea ${pdest.project.id}: assumption set via /attack by ${founder}`,
+						(reason) => console.error(`git commit/push failed for ${pdest.project.id}: ${reason}`),
+					);
+				}
+			}
+			await client.chat.postMessage({ channel: pdest.channel, thread_ts: pdest.threadTs, text: out });
+			emit(
+				buildEvalEvent({
+					stage: STAGE,
+					model: MODEL,
+					founder,
+					ideaId: pdest.project.id,
+					tokensIn,
+					tokensOut,
+					costUsd,
+					cacheHitRatio,
+					wallClockS,
+					status: parsed && parsed.kind !== "too_vague" ? "ok" : parsed ? "refused" : "failed",
+					reasonCode: "project_attack",
 				}),
 			);
 			return;

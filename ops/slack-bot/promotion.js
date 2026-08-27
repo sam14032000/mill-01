@@ -14,6 +14,7 @@ const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
 const { fullTranscript, markPromoted } = require("./chat-session");
 const { PROMOTE_ACTION_ID, withPromoteButton } = require("./promote-button");
+const { createProjectChannel } = require("./project-channel");
 
 // Pull the assumption out of a chat: the last /attack the founder ran in
 // this session posted "*Assumption:* ..." as an assistant turn (see
@@ -77,17 +78,34 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 	const topic = session.topic;
 
 	// --- everything fallible happens BEFORE anything is written to disk ---
+	// (PROJECTS.md failure table: "Channel creation fails during promotion
+	// -> Do not create the idea. A half-promoted idea is worse than none.")
 	const transcript = fullTranscript(session);
 	const assumption = extractAssumption(session);
 	const summary = await summarizeChat(session);
 
-	// Part 16 will create the project channel here. Until then, flat
-	// structure (15.3 step 3). The test seam simulates that step failing.
-	if (_simulateFailure) {
-		throw new Error("simulated project-channel creation failure");
-	}
-
 	const id = generateIdeaId();
+
+	let project;
+	try {
+		if (_simulateFailure) throw new Error("simulated project-channel creation failure");
+		project = await createProjectChannel({
+			id,
+			sourceText: assumption || topic,
+			assumption,
+			client,
+		});
+	} catch (err) {
+		console.error(`promotion: project channel creation failed for ${id}: ${err?.data?.error || err.message}`);
+		await client.chat
+			.postMessage({
+				channel: chatsChannel,
+				thread_ts: session.threadTs,
+				text: `_Couldn't create the project channel (${err?.data?.error || err.message}). Nothing was created — your chat is untouched. Try promoting again._`,
+			})
+			.catch(() => {});
+		return { ok: false, reason: "channel_creation_failed" };
+	}
 
 	try {
 		promoteIdea({
@@ -98,19 +116,19 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 			originChatMd: transcript,
 			originChatTs: session.threadTs,
 			summary,
+			channelId: project.channelId,
+			threads: project.threads,
 		});
 	} catch (err) {
-		// Nothing partial: promoteIdea writes all three files or the dir
-		// simply isn't usable. Report and bail without marking promoted.
 		console.error(`promotion: promoteIdea failed for ${id}: ${err.message}`);
 		await client.chat
 			.postMessage({
 				channel: chatsChannel,
 				thread_ts: session.threadTs,
-				text: `_Couldn't promote this chat: ${err.message}. Nothing was created; try again._`,
+				text: `_Couldn't finish promoting: ${err.message}. The project channel <#${project.channelId}> exists but the idea record didn't write — tell someone._`,
 			})
 			.catch(() => {});
-		return { ok: false, reason: "promote_idea_failed" };
+		return { ok: false, reason: "promote_idea_failed", channelId: project.channelId };
 	}
 
 	await commitAndPush(
@@ -123,19 +141,26 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 
 	const assumptionLine = assumption
 		? `*Assumption:* ${assumption}`
-		: "_No assumption yet — run `/attack` then `/test` in the project._";
+		: "_No assumption yet — run `/attack` in Brainstorm, then `/test`._";
 
-	// 15.3 step 4/5: seed + announce. Project channel + Brainstorm thread
-	// arrive in Part 16; for now the seed goes to #mill-ideas.
+	// 15.3 step 4: seed the Brainstorm thread with the origin-chat summary
+	// and a link back to the chat.
+	await client.chat
+		.postMessage({
+			channel: project.channelId,
+			thread_ts: project.threads.brainstorm,
+			text:
+				`*Seeded from a chat by ${founder}.*\n\n${summary}\n\n${assumptionLine}\n\n` +
+				`Full origin chat: <https://slack.com/app_redirect?channel=${session.channel}&message_ts=${session.threadTs}|jump to the thread> · transcript at \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,
+		})
+		.catch((err) => console.error(`promotion: brainstorm seed failed: ${err?.data?.error || err.message}`));
+
+	// 15.3 step 5: announce in #mill-ideas and link the new channel.
 	if (millChannel) {
 		await client.chat
 			.postMessage({
 				channel: millChannel,
-				text:
-					`*New project \`${id}\`* — ${topic || "(untitled)"}\n` +
-					`_promoted from a chat by ${founder}_\n\n` +
-					`${summary}\n\n${assumptionLine}\n\n` +
-					`Origin chat transcript: \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,
+				text: `*New project* <#${project.channelId}> \`${id}\` — promoted from a chat by ${founder}. ${assumptionLine}`,
 			})
 			.catch((err) => console.error(`promotion: #mill-ideas post failed: ${err.message}`));
 	}
@@ -144,12 +169,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 		.postMessage({
 			channel: chatsChannel,
 			thread_ts: session.threadTs,
-			text:
-				`✅ Promoted to project \`${id}\`. The full transcript is saved to \`ideas/${id}/origin-chat.md\`. ` +
-				(assumption
-					? "The assumption from `/attack` carried over."
-					: "No assumption yet — `/attack` then `/test` inside the project.") +
-				(millChannel ? " Announced in <#" + millChannel + ">." : ""),
+			text: `✅ Promoted to <#${project.channelId}> (\`${id}\`). Full transcript saved. ${assumption ? "The `/attack` assumption carried over." : "Run `/attack` then `/test` in the project."}`,
 		})
 		.catch(() => {});
 
@@ -164,7 +184,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 		}),
 	);
 
-	return { ok: true, id, assumption };
+	return { ok: true, id, assumption, channelId: project.channelId, threads: project.threads };
 }
 
 // 15.2: /test, /proto, /audit run from #chats hit a chat's ceiling.

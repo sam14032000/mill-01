@@ -550,3 +550,19 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **Cost effect.** The runbook's $3/month "Mechanical" line folds into the buffer. No capability lost — `flash-fast` (Gemini 3.7 Flash, `thinking_level: low`) handles the ~150-word summary + key-figures extraction that indexing needs.
 
 **Revisit when:** a genuine high-volume mechanical workload appears (bulk classification over thousands of items, where `flash-fast`'s per-call cost actually adds up) — at which point compare current cheap models fresh, don't assume MiniMax.
+
+---
+
+### D-47 · Per-project channels; `#research` retired
+
+**Decision.** A promoted idea gets its own Slack channel, `#idea-<id>-<slug>`, with five stage anchor threads (Brainstorm, Research, Audit, Prototype, Documents) whose `thread_ts` are stored in `ideas/<id>/state.json`. Every command run in a project channel posts into its stage thread; context is keyed on `thread_ts`, never on channel, so the four conversations in one channel don't bleed into each other. `#research` is **retired** — research reports and audit verdicts now live in each project's Research and Audit threads. `#graveyard` (cross-project kill feed) and `#mill-ideas` (lobby: chat brainstorm, promotion announcements, `/themes`) stay.
+
+**Supersedes** the flat `#mill-ideas` / `#research` layout in D-05's table and `runbook.md`. `docs/PROJECTS.md` is the spec for the channel/thread structure, the same way `docs/COMMANDS.md` (D-41) is the spec for command behaviour.
+
+**Why.** Documents (D-... Part 17) need somewhere to live, and a flat `#research` with every idea's reports interleaved doesn't scale past a handful of live ideas. One channel per idea makes the graveyard browsable (archived channels, D-... Part 18.1) and gives each stage its own conversational context.
+
+**Compatibility.** Pre-projects ideas that have no `channel_id` (e.g. `be67`) still fall back to the flat `#research` channel, which is why the env var and channel aren't deleted. New work never uses it.
+
+**Requires** the `channels:manage` Slack scope (added in the projects phase).
+
+**Revisit when:** never, without an explicit decision to flatten the structure again.

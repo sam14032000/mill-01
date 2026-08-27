@@ -11,27 +11,45 @@ const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
 const {
 	getSession,
+	getOrCreateStageSession,
 	addTurn,
 	buildContextMessages,
 	maybeCompact,
 } = require("./chat-session");
 const { withPromoteButton } = require("./promote-button");
+const { findIdeaByChannel } = require("./ideas");
 
 const MODEL = "flash-fast";
 const STAGE = "chat";
 
 async function handleChatTurn({ message, client }) {
-	// Must be in a #chats thread that has a session.
 	if (message.bot_id) return false;
-	if (message.channel !== channelId("chats")) return false;
 	if (!message.thread_ts) return false;
 
-	const session = getSession(message.thread_ts);
+	const inChats = message.channel === channelId("chats");
+	const project = inChats ? null : findIdeaByChannel(message.channel);
+	if (!inChats && !project) return false;
+
+	const speakerFounder = message.user ? founderForUserId(message.user) : null;
+
+	// A #chats thread must already have a session (created by /chat). A
+	// project stage thread gets a session lazily, keyed on that thread's
+	// ts, so each stage's conversation is isolated (16.3).
+	const session = inChats
+		? getSession(message.thread_ts)
+		: getOrCreateStageSession({
+				project,
+				threadTs: message.thread_ts,
+				channel: message.channel,
+				speakerUserId: message.user,
+				speakerFounder,
+			});
 	if (!session) return false;
 
-	// 15.2 triggered prompt: an upload in a chat can't be stored. Never
-	// silently drop it -- offer the button.
-	if (message.subtype === "file_share" || (message.files && message.files.length)) {
+	// Uploads: only #chats offers the promote-button nudge (15.2).
+	// Project channels handle file_shared for real (Part 17), so leave
+	// those alone here.
+	if (inChats && (message.subtype === "file_share" || (message.files && message.files.length))) {
 		const text =
 			"I can't store files in a chat — start a project and I'll keep it with the idea.";
 		await client.chat
@@ -98,7 +116,9 @@ async function handleChatTurn({ message, client }) {
 		channel: message.channel,
 		thread_ts: session.threadTs,
 		text: replyText,
-		blocks: withPromoteButton(replyText, session.threadTs), // 15.1
+		// 15.1: promote button on chat replies only -- a project stage
+		// thread is already a project.
+		...(session.kind === "project" ? {} : { blocks: withPromoteButton(replyText, session.threadTs) }),
 	});
 
 	// Compaction (14.6) after the turn is recorded and answered.
@@ -117,16 +137,17 @@ async function handleChatTurn({ message, client }) {
 
 	emit(
 		buildEvalEvent({
-			stage: STAGE,
+			stage: session.kind === "project" ? "project_turn" : STAGE,
 			model: MODEL,
 			founder: session.ownerFounder,
+			ideaId: session.ideaId || null,
 			tokensIn: usage?.prompt_tokens ?? 0,
 			tokensOut: usage?.completion_tokens ?? 0,
 			costUsd,
 			cacheHitRatio: cacheHit ? 1 : 0,
 			wallClockS,
 			status: "ok",
-			reasonCode: "turn",
+			reasonCode: session.stage ? `stage_${session.stage}` : "turn",
 		}),
 	);
 	return true;

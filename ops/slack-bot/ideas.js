@@ -81,7 +81,7 @@ function createIdea({ id, founder, originText, caseText, assumption }) {
 // `open` with the assumption unset and /test is told it needs one.
 // Writes idea.md, origin-chat.md (the FULL transcript -- promoting late
 // must lose nothing), and state.json.
-function promoteIdea({ id, founder, topic, assumption, originChatMd, originChatTs, summary }) {
+function promoteIdea({ id, founder, topic, assumption, originChatMd, originChatTs, summary, channelId = null, threads = {} }) {
 	const dir = path.join(IDEAS_DIR, id);
 	fs.mkdirSync(dir, { recursive: true });
 	const ts = nowIso();
@@ -125,8 +125,8 @@ function promoteIdea({ id, founder, topic, assumption, originChatMd, originChatT
 		// pre-filled /attack assumption is visible in state without parsing
 		// markdown -- build-guide-projects 15 verification checks state.json.
 		assumption: assumption || null,
-		channel_id: null, // Part 16 fills this
-		threads: {}, // Part 16 fills this
+		channel_id: channelId,
+		threads, // { brainstorm, research, audit, prototype, documents }
 		parent: null,
 		children: [],
 		touch_count: 0,
@@ -142,6 +142,22 @@ function readState(id) {
 	} catch {
 		return null;
 	}
+}
+
+// Reverse lookup: which idea owns this Slack channel (Part 16 routing).
+// Returns the state object (with `id`) or null.
+function findIdeaByChannel(channelId) {
+	let dirs;
+	try {
+		dirs = fs.readdirSync(IDEAS_DIR);
+	} catch {
+		return null;
+	}
+	for (const id of dirs) {
+		const st = readState(id);
+		if (st && st.channel_id && st.channel_id === channelId) return st;
+	}
+	return null;
 }
 
 function readIdeaMd(id) {
@@ -166,6 +182,22 @@ function readAssumption(id) {
 // Finds the most recent research-<stamp>.{md,json} pair for an idea
 // (a founder can /test the same idea more than once). Returns null if
 // none exists yet.
+// Sets/replaces the assumption on an existing idea (e.g. /attack run in
+// a project's Brainstorm thread when promotion didn't carry one). Updates
+// both idea.md's "## Assumption" section and state.json.
+function setAssumption(id, assumption) {
+	const dir = path.join(IDEAS_DIR, id);
+	const mdPath = path.join(dir, "idea.md");
+	let md = fs.readFileSync(mdPath, "utf8");
+	if (/## Assumption\n\n[\s\S]*?(?=\n## |\n*$)/.test(md)) {
+		md = md.replace(/(## Assumption\n\n)[\s\S]*?(?=\n## |\n*$)/, `$1${assumption}\n`);
+	} else {
+		md = `${md.replace(/\n*$/, "")}\n\n## Assumption\n\n${assumption}\n`;
+	}
+	fs.writeFileSync(mdPath, md, "utf8");
+	updateState(id, { assumption, has_assumption: true });
+}
+
 function readLatestResearch(id) {
 	const dir = path.join(IDEAS_DIR, id);
 	let files;
@@ -206,6 +238,8 @@ module.exports = {
 	generateIdeaId,
 	createIdea,
 	promoteIdea,
+	findIdeaByChannel,
+	setAssumption,
 	readState,
 	readIdeaMd,
 	readAssumption,
