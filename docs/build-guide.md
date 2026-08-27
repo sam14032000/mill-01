@@ -677,7 +677,7 @@ Expect `clean` and permission errors on the first three, `clean` (not `LEAKED-NE
 
 # Part 11 — GPT Researcher
 
-Hybrid mode is D-33 natively: web sources plus the founders' field notes as local documents.
+**Built and verified with a real pass.** Hybrid mode is D-33's actual mechanism (web sources plus the founders' field notes as local documents), not something to route around — confirmed working, not just configured. Full implementation is `ops/research.py` in the repo; not reproduced here in full to avoid exactly the kind of drift this build kept finding in itself (CLAUDE.md's Conventions). What follows is the reasoning behind the non-obvious parts.
 
 ```bash
 sudo apt install -y python3-venv
@@ -685,88 +685,26 @@ python3 -m venv ~/venv && source ~/venv/bin/activate
 pip install gpt-researcher
 ```
 
-`~/workspace/mill-01/ops/research.py`:
+**Known packaging bug in `gpt-researcher==0.16.0` (the current PyPI release as of this build): `gpt_researcher/actions/query_processing.py` uses `Any`/`List`/`Dict` in a function signature before importing them** -- a `NameError` on first import, not something specific to this deployment. Already fixed on the project's `master` branch (imports moved above the function that needs them) but not yet released to PyPI. Rather than install from git master and risk pulling in other unreleased instability, the same one-line reordering was applied directly to the installed copy:
 
-```python
-import asyncio, json, os, sys
-from datetime import datetime
-from pathlib import Path
-from gpt_researcher import GPTResearcher
-
-REPO = Path("/home/agent/workspace/mill-01")
-FIELD = REPO / "ideas" / sys.argv[1] / "field"   # founder-pasted notes
-OUT   = REPO / "ideas" / sys.argv[1]
-ASSUMPTION = sys.argv[2]
-
-# No OpenAI account, ever. OPENAI_API_BASE / OPENAI_API_KEY are not
-# OpenAI credentials -- they are the fixed variable names the
-# OpenAI-compatible client GPT Researcher uses under the hood, and
-# that's the standard, LiteLLM-recommended way to point *any*
-# OpenAI-compatible client at a non-OpenAI server. Renaming these two
-# would break the integration; nothing here ever talks to OpenAI.
-os.environ["OPENAI_API_BASE"] = os.environ["LITELLM_BASE_URL"]
-# mill-research, not mill-flash: research and interactive traffic have
-# separate keys and budgets (Part 7.3) precisely because a research pass
-# costs roughly as much as 250 interactive exchanges. mill-flash is
-# scoped to flash-fast only and would 403 against the flash model this
-# script needs.
-os.environ["OPENAI_API_KEY"]  = os.environ["MILL_RESEARCH_KEY"]
-
-# GPT Researcher's own defaults (FAST_LLM=openai:gpt-4o-mini,
-# SMART_LLM=openai:gpt-4.1, STRATEGIC_LLM=openai:o4-mini) are real
-# OpenAI model names -- redirecting OPENAI_API_BASE to our proxy does
-# NOT make these resolve; our config.yaml's model_list only has
-# flash-fast/flash/audit/mechanical. Left unset, every call would 400
-# against a model our proxy doesn't have, regardless of the correct key
-# routing above. Must be set explicitly to match.
-os.environ["FAST_LLM"] = "openai:flash"
-os.environ["SMART_LLM"] = "openai:flash"
-os.environ["STRATEGIC_LLM"] = "openai:flash"
-# EMBEDDING has the same problem and is NOT resolved here -- GPT
-# Researcher uses embeddings for local-document ranking (the "hybrid"
-# field-notes mode this script relies on) and its default
-# (openai:text-embedding-3-small) has no equivalent in config.yaml at
-# all, unlike FAST_LLM/SMART_LLM which at least have a real model to
-# redirect to. Whoever builds this needs to either add an embedding
-# model to LiteLLM's config or pick a different embedding path before
-# `report_source="hybrid"` can be trusted to work end-to-end.
-
-os.environ["DOC_PATH"] = str(FIELD)
-
-async def main():
-    has_field = FIELD.exists() and any(FIELD.iterdir())
-
-    r = GPTResearcher(
-        query=ASSUMPTION,
-        report_type="research_report",     # NOT "deep" — see note below
-        report_source="hybrid" if has_field else "web",
-    )
-    await r.conduct_research()
-    report = await r.write_report()
-
-    stamp = datetime.now().strftime("%Y%m%d-%H%M")
-    (OUT / f"research-{stamp}.md").write_text(report)
-
-    meta = {
-        "assumption": ASSUMPTION,
-        "evidence_basis": "both" if has_field else "web-only",
-        "sources": r.get_source_urls(),
-        "ts": stamp,
-    }
-    (OUT / f"research-{stamp}.json").write_text(json.dumps(meta, indent=2))
-    print(json.dumps(meta))
-
-asyncio.run(main())
+```bash
+# In ~/venv/lib/python3.12/site-packages/gpt_researcher/actions/query_processing.py,
+# move the five `from ... import` / `import logging` lines that sit after
+# _normalize_sub_queries()'s definition to before it. Re-check when upgrading
+# gpt-researcher -- once a release includes the upstream fix, this step is
+# no longer needed.
 ```
 
-> **Do not set `report_type="deep"`.** Benchmark evidence shows increased search depth consistently degrades factual accuracy while citation metrics stay flat — an information-overload effect. Shallow passes are the accuracy-preserving choice, not just the cheap one.
+`~/workspace/mill-01/ops/research.py` -- key points, not the full listing:
 
-> **Blocker, checked before building rather than after: this script has no working retriever yet.** GPT Researcher's `RETRIEVER` defaults to `tavily` (confirmed against its own source), which requires `TAVILY_API_KEY` -- not set anywhere in this deployment, and Part 0.3 never actually settled on a search provider from its Brave/Serper/Exa/Tavily options, just listed them. Left unset, `conduct_research()` will fail outright, not degrade gracefully. Pick a provider from Part 0.3, sign up for a free-tier key, set `RETRIEVER` and the matching key env var (e.g. `RETRIEVER=brave` + `BRAVE_API_KEY`) before running this for real. `duckduckgo` needs no signup at all and is a reasonable way to unblock building the rest of this script while a real provider decision is pending, but a free/unranked retriever is a real quality tradeoff, not a substitute for choosing one.
-
-Two things to add after the report is written:
-
-1. **Citation re-check (D-20)** — re-fetch a sample of `sources` and confirm each supports the claim citing it. Decompose into sub-questions rather than asking holistically.
-2. **Gap output (D-33)** — when `evidence_basis` is `web-only`, emit three questions that would resolve the assumption and the kind of person to ask.
+- **No OpenAI account, ever.** `OPENAI_API_BASE`/`OPENAI_API_KEY` are the fixed variable names the OpenAI-compatible client GPT Researcher uses internally expects -- that's the standard, LiteLLM-recommended way to point *any* OpenAI-compatible client at a non-OpenAI server. They can't be renamed without breaking the integration; nothing here ever talks to OpenAI. Pointed at `LITELLM_BASE_URL` and `MILL_RESEARCH_KEY` -- not `MILL_FLASH_KEY`, which is scoped to `flash-fast` only and would 403 against the `flash` model this script needs (Part 7.3: research and interactive traffic have separate keys and budgets because a research pass costs roughly as much as 250 interactive exchanges).
+- **`FAST_LLM`/`SMART_LLM`/`STRATEGIC_LLM` set explicitly to `openai:flash`.** GPT Researcher's own defaults are real OpenAI model names (`openai:gpt-4o-mini` etc.) with no equivalent in `config.yaml` -- redirecting the API base alone doesn't fix this; every call would 400 against a model the proxy doesn't have.
+- **`EMBEDDING=openai:embed`.** Same problem as above, for GPT Researcher's local-document ranking (what makes hybrid mode work at all). Fixed by adding an `embed` model to `config.yaml` (`gemini/gemini-embedding-001` -- current model name verified against Google's own docs, not `text-embedding-004`, the older Vertex-path model), scoped to `mill-research`, confirmed directly against the proxy's `/embeddings` endpoint before wiring it in.
+- **`RETRIEVER=tavily`, explicit rather than left to GPT Researcher's default.** Part 0.3 listed Brave/Serper/Exa/Tavily without settling one; the founder settled it as Tavily, and `TAVILY_API_KEY` is in `~/.config/mill/env`. Both currently resolve to the same provider, but setting it explicitly means a future upstream default change can't silently switch providers underneath this build. Plan/quota on file recorded in `ops/BUILD-LOG.md`.
+- **`report_type="research_report"`, never `"deep"`.** Benchmark evidence shows increased search depth consistently degrades factual accuracy while citation metrics stay flat -- an information-overload effect. Shallow passes are the accuracy-preserving choice, not just the cheap one.
+- **Citation re-check (D-20).** Re-fetches a sample of sources (default 3) and asks the `flash` model, per source, to decompose into sub-questions rather than judge holistically, ending in SUPPORTED/UNSUPPORTED/UNCLEAR. Real limitation, stated in the code rather than hidden: GPT Researcher's report is prose, not a structured citation map, so this checks "does this source's content corroborate the report's overall thrust," not "does it support this specific sentence." Discrepancies (including fetch failures -- some sources 403 real re-fetch attempts) are appended under `## Citation issues`.
+- **Gap output (D-33).** Only when `evidence_basis` is `web-only`: one `flash` call asking for three resolving questions and who to ask. Never asserts anything, so it doesn't carry D-20's risk the way a claim would.
+- **`research_stub: false`** in the output JSON, always -- this is the real pipeline, not `ops/slack-bot`'s Phase 2 stub. `/audit`'s `research_stub` gate (built before this existed) will now actually let a real report through.
 
 ---
 
