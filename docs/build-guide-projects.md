@@ -287,19 +287,22 @@ A `kill` verdict archives the channel after posting the verdict. History retaine
 
 No spin-off from a chat — just start another chat.
 
-## 18.3 ngrok service
+## 18.3 ngrok service — **as built**
 
 One static tunnel on port 3200, always up, its own systemd service. **Do not create tunnels dynamically.**
 
-`~/.config/ngrok/ngrok.yml`:
+- **Template, not literal config.** `~/stack/ngrok/ngrok.yml.tmpl` holds the structure with `${...}` placeholders. `~/stack/ngrok/render.sh` sources `~/.config/mill/env` and `envsubst`s it into `~/.config/ngrok/ngrok.yml` (chmod 600). ngrok v3 does **not** reliably interpolate `${VAR}` in its own config, and the authtoken/password must not sit in a template — so the real file is generated at service start.
+- **`mill-ngrok.service`** (`User=agent`): `ExecStartPre=render.sh`, `ExecStart=ngrok start --config ~/.config/ngrok/ngrok.yml proto`, `Restart=always`, logs to `~/logs/ngrok.log`.
+- **traffic-policy syntax was verified** against current ngrok docs (2026-08): `type: basic-auth` under `on_http_request[].actions[].config.credentials: ["user:pass"]`, specified **inline** under `endpoints[].traffic_policy` — `ngrok config check` accepts it. No CLI-flag fallback needed.
+- The rendered file:
 
 ```yaml
 version: "3"
 agent:
-  authtoken: ${NGROK_AUTHTOKEN}
+  authtoken: <from env>
 endpoints:
   - name: proto
-    url: ${NGROK_DOMAIN}
+    url: <NGROK_DOMAIN, a full https:// URL>
     upstream:
       url: 3200
     traffic_policy:
@@ -307,13 +310,14 @@ endpoints:
         - actions:
             - type: basic-auth
               config:
+                realm: "mill prototype"
                 credentials:
-                  - "${PROTO_BASIC_AUTH_USER}:${PROTO_BASIC_AUTH_PASS}"
+                  - "<user>:<pass>"
 ```
 
-Verify the traffic-policy syntax against current ngrok docs before relying on it — if basic-auth can't be expressed this way, use the CLI flag instead.
+When nothing is mounted, `mill-proto-idle` (a 64 MB container) serves a plain "no prototype mounted" page on 3200. **A shared URL must never 502** — `mount.sh down`/`idle` always restore it.
 
-When nothing is mounted, the tunnel serves a plain "no prototype mounted" page. **A shared URL must never 502.**
+⚠️ **The `NGROK_AUTHTOKEN` handed over (`ep_…`, ~30 chars) is not a valid ngrok agent authtoken** — that's an API-key/endpoint-token format. A real agent authtoken is ~49 chars, no prefix, from dashboard.ngrok.com/get-started/your-authtoken. The service is built and disabled until the correct token lands in `~/.config/mill/env`.
 
 ## 18.4 Build vs mount
 
@@ -347,13 +351,15 @@ curl -s http://localhost:4040/api/tunnels | jq '.tunnels[] | {public_url, addr: 
 
 **Never report a prototype live on assumption.**
 
-## 18.8 Guardrails — not optional
+## 18.8 Guardrails — **as built**
 
 An LLM wrote this code and your API keys are on the same box.
 
-- 512MB, 0.5 CPU hard limits
-- No credentials in the container, uid 10001, scratch-only mount
-- **Egress allowlisted. C-17 must now pass** — an unattended app with network access is exactly what it guards. It can no longer stay failing
+- **Two network profiles (D-48), one enforcement point.** `~/stack/sandbox/net-setup.sh` creates `mill-build` (172.30.0.0/24) and `mill-mount` (172.31.0.0/24) and rebuilds the `DOCKER-USER` iptables chain: ESTABLISHED/RELATED RETURN, DNS (udp+tcp 53) RETURN for both, tcp/443 to `104.16.0.0/13` (npm's Cloudflare range) RETURN for **build only**, then a catch-all `-j DROP` for each subnet. `mill-sandbox-net.service` (oneshot, `After=docker.service`) applies it at boot; a `docker.service` drop-in re-applies it after any daemon restart (which flushes `DOCKER-USER`). The old unrestricted `egress` network is deleted.
+- **Verified positively, not "no error":** from inside a `mill-mount` container, `socket.create_connection(("1.1.1.1",443))` → *timeout*, `example.com:443` → *Network unreachable*, `93.184.216.34:80` → *timeout*; `socket.gethostbyname("example.com")` → *resolves*, `1.1.1.1:53` → *connects*. From `mill-build`: `registry.npmjs.org:443` → *connects*, `1.1.1.1:443` → *fails*, `example.com:80` → *fails*.
+- 512 MB / 0.5 CPU, `--pids-limit 128`, uid 10001, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--read-only` + `--tmpfs /tmp`, scratch-only `:ro` mount, `--env-file /dev/null` (+ only `-e PORT=8080`, not a credential).
+- **C-17 rewritten and passing** — it now asserts `DOCKER-USER` has a catch-all DROP for each sandbox subnet and no non-DNS accept for `mill-mount`. C-15/C-16 extended to cover `mount.sh` as well as `run.sh`.
+- `~/stack/sandbox/refresh-npm-allowlist.sh` is the tripwire for npm moving off Cloudflare (re-resolves `registry.npmjs.org`, warns if any IP falls outside the allowed range).
 
 ## 18.9 DECISIONS
 

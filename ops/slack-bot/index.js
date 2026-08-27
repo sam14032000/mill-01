@@ -14,6 +14,7 @@ const { handleThinkCommand } = require("./commands/think");
 const { handleCrossCommand } = require("./commands/cross");
 const { handleBlindspotCommand } = require("./commands/blindspot");
 const { handleThemesCommand } = require("./commands/themes");
+const { handleSpinoffCommand } = require("./commands/spinoff");
 const { handleTestCommand } = require("./commands/test");
 const { handleAuditCommand } = require("./commands/audit");
 const { handleProtoCommand } = require("./commands/proto");
@@ -25,6 +26,8 @@ const chatSession = require("./chat-session");
 const { PROMOTE_ACTION_ID } = require("./promote-button");
 const { promoteChat } = require("./promotion");
 const { handleProjectUpload } = require("./documents");
+const mountMod = require("./mount");
+const { readState } = require("./ideas");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
@@ -74,6 +77,7 @@ app.command("/audit", handleAuditCommand);
 app.command("/proto", handleProtoCommand);
 app.command("/blindspot", handleBlindspotCommand);
 app.command("/themes", handleThemesCommand);
+app.command("/spinoff", handleSpinoffCommand);
 app.command("/chat", handleChatCommand);
 app.command("/find", handleFindCommand);
 
@@ -155,6 +159,51 @@ app.action(PROMOTE_ACTION_ID, async ({ ack, body, client }) => {
 	);
 });
 
+// --- Prototype mount slot (Part 18.5) -------------------------------
+function mountCtx(body, id) {
+	const st = readState(id);
+	return {
+		client: app.client,
+		channel: body.channel?.id || st?.channel_id,
+		threadTs: st?.threads?.prototype,
+	};
+}
+app.action("proto_mount", async ({ ack, body }) => {
+	await ack();
+	const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
+	const byUserId = body.user?.id;
+	const byFounder = founderForUserId(byUserId);
+	if (!byFounder || !id) return;
+	await mountMod
+		.mount({ id, touchN: Number(touchN), byFounder, minutes: Number(min), ...mountCtx(body, id) })
+		.catch((e) => console.error("proto_mount failed:", e));
+});
+app.action("proto_dismount", async ({ ack, body }) => {
+	await ack();
+	const id = body.actions?.[0]?.value;
+	if (id) await mountMod.dismount({ id, reason: "manual", ...mountCtx(body, id) }).catch((e) => console.error("proto_dismount failed:", e));
+});
+app.action("proto_extend", async ({ ack, body }) => {
+	await ack();
+	const id = body.actions?.[0]?.value;
+	if (id) await mountMod.extend({ id, ...mountCtx(body, id) }).catch((e) => console.error("proto_extend failed:", e));
+});
+app.action("proto_takeover", async ({ ack, body }) => {
+	await ack();
+	const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
+	const byFounder = founderForUserId(body.user?.id);
+	if (!byFounder || !id) return;
+	const held = mountMod.findMountedIdea();
+	if (held) {
+		await mountMod
+			.dismount({ id: held.id, client: app.client, channel: held.channel_id, threadTs: held.threads?.prototype, reason: `taken over by ${byFounder} for \`${id}\`` })
+			.catch((e) => console.error("takeover dismount failed:", e));
+	}
+	await mountMod
+		.mount({ id, touchN: Number(touchN), byFounder, minutes: Number(min), ...mountCtx(body, id) })
+		.catch((e) => console.error("takeover mount failed:", e));
+});
+
 app.message(async ({ message, client }) => {
 	// A pending /test field-evidence wait takes priority over anything
 	// else a message could be -- if consumed here, it's not a capture
@@ -232,6 +281,13 @@ app.message(async ({ message, client }) => {
 	// Part 14.2/14.7).
 	const restored = chatSession.loadAll();
 	console.log(`chat-session: restored ${restored} session(s) from disk`);
+
+	// Part 18.6: reconcile the mount slot against the actually-running
+	// container, not stale state.json.
+	mountMod
+		.reconcileOnStartup(app.client)
+		.then((r) => console.log(`mount: reconcile -> ${JSON.stringify(r)}`))
+		.catch((e) => console.error(`mount: reconcile failed: ${e.message}`));
 
 	startBatchCommitLoop((reason) => {
 		console.error(`batch commit failed: ${reason}`);

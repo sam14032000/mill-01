@@ -100,6 +100,10 @@
 
 **Non-negotiable.** No credentials reachable from the prototype container. An agent-written script that can read the Fable API key is the failure mode that turns a $24/month line into a four-figure one.
 
+**Amendment (projects phase, Part 18): long-running mount containers.** The original design was one-shot `docker run --rm -i` — build, execute, exit. Part 18 adds a *persistent* container: a mounted prototype runs detached for up to 8 hours behind the ngrok tunnel. The same isolation applies (`--user 10001`, `--cap-drop ALL`, `--read-only`, `--tmpfs /tmp`, scratch-only `:ro` mount, `--env-file /dev/null`, `--memory 512m --cpus 0.5 --pids-limit 128`), plus: it runs on the `mill-mount` network whose DOCKER-USER rules are **deny-all egress except DNS** (D-48, verified positively — a Python socket connect to any off-allowlist host from inside the container fails, DNS still resolves). The build step that runs `npm install` uses a second network, `mill-build`, allowlisted to npm's CDN range only. `egress` (the old single unrestricted network) is removed. On bot restart the mount slot is reconciled against the actually-running container via `mount.sh status`, never trusted from `state.json` alone.
+
+**Still true:** most prototypes are landing pages and markdown, mounted rarely, briefly. The persistent container is the occasional case, and it can reach nothing.
+
 ---
 
 ### D-05 · Slack as the control surface
@@ -164,6 +168,10 @@
 **Decision.** SSH over Tailscale. No inbound ports. No web UI exposed.
 
 **Simplified from v2.** The control surface is Slack and nothing in the stack (the custom bot, LiteLLM) exposes a web UI, so there is nothing to protect — Tailscale serves debugging access only.
+
+**Amendment (projects phase, Part 18): one exception — the ngrok prototype tunnel.** A mounted prototype is reachable from the public internet at `${NGROK_DOMAIN}` on port 3200. This does not reopen the box: ngrok makes an **outbound** connection and no inbound port is opened on the host or the firewall. But it *is* public exposure of LLM-written code running on the machine that holds the API keys, so it is fenced hard: HTTP basic-auth enforced at the ngrok edge (`traffic_policy`, credentials from `~/.config/mill/env`); the container runs on `mill-mount` (deny-all egress + DNS, D-48) as uid 10001 with `--cap-drop ALL`, 512 MB / 0.5 CPU, `--read-only`, scratch-only mount, `--env-file /dev/null`; a single slot; auto-dismount within 8 h max; nothing stays mounted overnight unattended without an explicit extend. When nothing is mounted the tunnel serves a static "no prototype mounted" placeholder — a shared URL must never 502.
+
+**Revisit when:** the basic-auth credential is suspected leaked (rotate `PROTO_BASIC_AUTH_PASS`), or a mounted prototype is found to have reached the network (the D-48 rules failing) — that is a stop-everything event.
 
 ---
 

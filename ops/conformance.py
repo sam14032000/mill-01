@@ -425,66 +425,101 @@ def check_c14():
 # Isolation (C-15 -- C-18)
 # ---------------------------------------------------------------------
 
-RUN_SH = Path.home() / "stack" / "sandbox" / "run.sh"
+SANDBOX_DIR = Path.home() / "stack" / "sandbox"
+RUN_SH = SANDBOX_DIR / "run.sh"
+MOUNT_SH = SANDBOX_DIR / "mount.sh"
+# Every script that does `docker run` for a prototype -- one-shot exec and
+# the persistent mount slot both (Part 18). New runners must be added here.
+CONTAINER_SCRIPTS = [RUN_SH, MOUNT_SH]
+# -e flags that are not credentials: the mount container is told which
+# port to listen on and nothing else.
+ALLOWED_ENV_FLAGS = {"-e PORT=8080", "--env PORT=8080"}
 
 
 def check_c15():
-    if not RUN_SH.exists():
-        return Result("C-15", "Prototype container has no host mount beyond scratch (D-06)", False, f"{RUN_SH} not found")
-    text = RUN_SH.read_text()
-    mounts = re.findall(r"-v\s+\"?([^\"\s]+)\"?:", text)
-    non_scratch = [m for m in mounts if "SCRATCH" not in m]
-    if non_scratch:
-        return Result("C-15", "Prototype container has no host mount beyond scratch (D-06)", False, f"host mount(s) beyond scratch: {non_scratch}")
-    if not mounts:
-        return Result("C-15", "Prototype container has no host mount beyond scratch (D-06)", False, "no -v mount found at all in run.sh -- check the script wasn't refactored")
-    return Result("C-15", "Prototype container has no host mount beyond scratch (D-06)", True, f"only mount is the scratch dir: {mounts}")
+    problems = []
+    checked = []
+    for script in CONTAINER_SCRIPTS:
+        if not script.exists():
+            problems.append(f"{script.name} not found")
+            continue
+        text = script.read_text()
+        mounts = re.findall(r"-v\s+\"?([^\"\s]+)\"?:", text)
+        non_scratch = [m for m in mounts if "SCRATCH" not in m and "$d" not in m and "{d}" not in m]
+        if non_scratch:
+            problems.append(f"{script.name}: host mount(s) beyond scratch: {non_scratch}")
+        elif not mounts:
+            problems.append(f"{script.name}: no -v mount found -- refactored?")
+        else:
+            checked.append(f"{script.name}={mounts}")
+    if problems:
+        return Result("C-15", "Prototype containers mount nothing beyond scratch (D-06)", False, "; ".join(problems))
+    return Result("C-15", "Prototype containers mount nothing beyond scratch (D-06)", True, f"scratch-only mounts: {checked}")
 
 
 def check_c16():
-    if not RUN_SH.exists():
-        return Result("C-16", "No credential env vars reachable from the prototype container (D-06)", False, f"{RUN_SH} not found")
-    text = RUN_SH.read_text()
-    if "--env-file /dev/null" in text or "--env-file=/dev/null" in text:
-        env_flags = re.findall(r"(-e |--env(?!-file)\s)\S+", text)
-        if env_flags:
-            return Result("C-16", "No credential env vars reachable from the prototype container (D-06)", False, f"--env-file /dev/null present but individual -e/--env flags also found: {env_flags}")
-        return Result("C-16", "No credential env vars reachable from the prototype container (D-06)", True, "docker run uses --env-file /dev/null, no individual -e/--env flags -- host env not passed through. Verify by hand quarterly per D-06/EVAL.md; a script can prove the flag is present, not that no future edit removes it.")
-    return Result("C-16", "No credential env vars reachable from the prototype container (D-06)", False, "run.sh does not pass --env-file /dev/null -- host environment may leak into the container")
+    problems = []
+    for script in CONTAINER_SCRIPTS:
+        if not script.exists():
+            problems.append(f"{script.name} not found")
+            continue
+        text = script.read_text()
+        if "--env-file /dev/null" not in text and "--env-file=/dev/null" not in text:
+            problems.append(f"{script.name}: no --env-file /dev/null -- host env may leak")
+            continue
+        env_flags = [f.strip() for f in re.findall(r"(-e\s+\S+|--env(?!-file)\s+\S+)", text)]
+        bad = [f for f in env_flags if f.replace("  ", " ") not in ALLOWED_ENV_FLAGS]
+        if bad:
+            problems.append(f"{script.name}: unexpected -e/--env flag(s): {bad}")
+    if problems:
+        return Result("C-16", "No credential env vars reachable from a prototype container (D-06)", False, "; ".join(problems))
+    return Result(
+        "C-16", "No credential env vars reachable from a prototype container (D-06)", True,
+        "run.sh and mount.sh both use --env-file /dev/null; only -e PORT=8080 is passed (not a credential). Verify by hand quarterly per D-06/EVAL.md.",
+    )
 
 
 def check_c17():
-    # Checked against real Docker/iptables state, not run.sh's own
-    # comment text -- an earlier version of this check grepped for a
-    # specific comment sentence and silently missed it because the
-    # comment line-wraps in the file, which would have made this check
-    # pass on a false premise. The actual claim ("is there a per-host
-    # egress allowlist") is answerable directly: does the network Docker
-    # actually egress through have any DOCKER-USER iptables rule
-    # restricting its destinations.
-    network_check = subprocess.run(
-        ["docker", "network", "inspect", "egress"], capture_output=True, text=True, check=False
+    # Checked against real Docker/iptables state, not script comment text
+    # (an earlier version grepped a comment and passed on a false
+    # premise). Part 18 / D-48: two networks, and DOCKER-USER must both
+    # (a) DROP each sandbox subnet's catch-all and (b) NOT contain a
+    # blanket accept for either subnet.
+    for net in ("mill-build", "mill-mount"):
+        chk = subprocess.run(["docker", "network", "inspect", net], capture_output=True, text=True, check=False)
+        if chk.returncode != 0:
+            return Result("C-17", "Mounted-container egress is deny-all + DNS (D-48)", False, f"'{net}' Docker network not found: {chk.stderr.strip()[:150]}")
+
+    ipt = subprocess.run(["sudo", "-n", "iptables", "-S", "DOCKER-USER"], capture_output=True, text=True, check=False)
+    if ipt.returncode != 0:
+        return Result("C-17", "Mounted-container egress is deny-all + DNS (D-48)", False, f"could not read DOCKER-USER: {ipt.stderr.strip()[:150]} -- unverified, not passing")
+    rules = ipt.stdout.splitlines()
+
+    build_cidr, mount_cidr = "172.30.0.0/24", "172.31.0.0/24"
+    def has(substr_all):
+        return any(all(tok in r for tok in substr_all) for r in rules)
+
+    problems = []
+    # deny-all tail for each sandbox subnet
+    if not has([f"-s {mount_cidr}", "-j DROP"]):
+        problems.append(f"no catch-all DROP for the mount subnet {mount_cidr}")
+    if not has([f"-s {build_cidr}", "-j DROP"]):
+        problems.append(f"no catch-all DROP for the build subnet {build_cidr}")
+    # mount profile must NOT have any accept beyond DNS + established
+    for r in rules:
+        if f"-s {mount_cidr}" in r and ("-j RETURN" in r or "-j ACCEPT" in r):
+            if not ("dport 53" in r or "ESTABLISHED" in r):
+                problems.append(f"mount subnet has a non-DNS accept rule: {r.strip()}")
+    # mount DNS must be permitted (deny-all + *DNS*)
+    if not has([f"-s {mount_cidr}", "dport 53"]):
+        problems.append("mount subnet has no DNS allow rule")
+
+    if problems:
+        return Result("C-17", "Mounted-container egress is deny-all + DNS (D-48)", False, "; ".join(problems))
+    return Result(
+        "C-17", "Mounted-container egress is deny-all + DNS (D-48)", True,
+        f"DOCKER-USER: {mount_cidr} = DNS-only + catch-all DROP; {build_cidr} = DNS + npm 443 + catch-all DROP",
     )
-    if network_check.returncode != 0:
-        return Result("C-17", "Container egress allowlist is present and non-empty", False, f"'egress' Docker network not found: {network_check.stderr.strip()[:200]}")
-    iptables_check = subprocess.run(
-        ["sudo", "-n", "iptables", "-L", "DOCKER-USER", "-n"], capture_output=True, text=True, check=False
-    )
-    if iptables_check.returncode != 0:
-        return Result(
-            "C-17", "Container egress allowlist is present and non-empty", False,
-            f"could not read DOCKER-USER iptables chain to confirm restrictions ({iptables_check.stderr.strip()[:200]}) -- treat as unverified, not passing",
-        )
-    rule_lines = [
-        line for line in iptables_check.stdout.splitlines()
-        if line and not line.startswith("Chain") and not line.startswith("target")
-    ]
-    if not rule_lines:
-        return Result(
-            "C-17", "Container egress allowlist is present and non-empty", False,
-            "the 'egress' Docker network exists but DOCKER-USER has no rules restricting where it can reach -- confirmed a real, already-acknowledged gap (Part 10 build-guide.md), not a false alarm: the network is a plain bridge with no per-host allowlist, only a binary none/egress toggle at the container level.",
-        )
-    return Result("C-17", "Container egress allowlist is present and non-empty", True, f"DOCKER-USER has {len(rule_lines)} restricting rule(s) for egress traffic")
 
 
 def check_c18():

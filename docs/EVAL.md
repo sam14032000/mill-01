@@ -69,12 +69,12 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 
 | Check | Passes if |
 |---|---|
-| `C-15` | Prototype container has no host mount beyond scratch (D-06) |
-| `C-16` | No credential env vars reachable from inside the prototype container (D-06) |
-| `C-17` | Container egress allowlist is present and non-empty |
+| `C-15` | Every prototype-container script (`run.sh`, `mount.sh`) mounts nothing beyond scratch (D-06) |
+| `C-16` | No credential env vars reachable from inside a prototype container — `run.sh` and `mount.sh` both `--env-file /dev/null`, only `-e PORT=8080` allowed (D-06) |
+| `C-17` | Mounted-container egress is deny-all + DNS (D-48): `DOCKER-USER` has a catch-all DROP for both sandbox subnets and no non-DNS accept for `mill-mount` |
 | `C-18` | Pi is never invoked outside its container for working prototypes (D-06) |
 
-`C-16` is the one to verify by hand at least once per quarter, not just by script. An agent-written script that can read the Fable key is how a $24 line becomes four figures.
+`C-16` is the one to verify by hand at least once per quarter, not just by script. An agent-written script that can read the Fable key is how a $24 line becomes four figures. **`C-17` is a structural check** — it proves the DROP rules exist, not that egress is actually blocked; confirm that positively (a socket connect to an off-allowlist host from inside a `mill-mount` container must fail, DNS must still resolve) whenever the network setup changes.
 
 ### Provenance
 

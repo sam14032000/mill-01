@@ -11,6 +11,7 @@ const { runInSandbox } = require("../sandbox");
 const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
+const { DEFAULT_MIN: MOUNT_DEFAULT_MIN } = require("../mount");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -277,7 +278,17 @@ async function handleProtoCommand({ command, ack, client }) {
 			lines.push("_This was the fifth touch — the next /proto on this idea will be refused._");
 		}
 		if (millChannel) {
-			await client.chat.postMessage({ channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}), text: lines.join("\n\n") });
+			const body = lines.join("\n\n");
+			const msg = { channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}), text: body };
+			// 18.4: /proto builds only. In a project, offer a Mount button
+			// for this touch (takes the single ngrok slot).
+			if (pdest.project) {
+				msg.blocks = [
+					{ type: "section", text: { type: "mrkdwn", text: body.slice(0, 2900) } },
+					{ type: "actions", elements: [{ type: "button", action_id: "proto_mount", text: { type: "plain_text", text: `Mount touch ${touchN}` }, value: `${id}::${touchN}::${MOUNT_DEFAULT_MIN}` }] },
+				];
+			}
+			await client.chat.postMessage(msg);
 		}
 	} catch (err) {
 		console.error("proto command failed:", err);

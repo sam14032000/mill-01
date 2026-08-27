@@ -366,8 +366,24 @@ async function handleAuditCommand({ command, ack, client }) {
 		if (verdict.verdict === "kill" && graveyardChannel) {
 			await client.chat.postMessage({
 				channel: graveyardChannel,
-				text: `\`${id}\` killed — ${verdict.strongest_failure_reason}`,
+				text: `\`${id}\` killed — ${verdict.strongest_failure_reason}${pdest.project ? ` (was <#${pdest.project.channel_id}>)` : ""}`,
 			});
+		}
+
+		// 18.1: archive the project channel on a kill, after the verdict is
+		// posted. The verdict stands even if archiving fails.
+		if (verdict.verdict === "kill" && pdest.project?.channel_id) {
+			try {
+				await client.conversations.archive({ channel: pdest.project.channel_id });
+			} catch (archErr) {
+				const why = archErr?.data?.error || archErr?.message || archErr;
+				console.error(`audit: channel archive failed for ${id}: ${why}`);
+				if (graveyardChannel) {
+					await client.chat
+						.postMessage({ channel: graveyardChannel, text: `⚠️ couldn't archive <#${pdest.project.channel_id}> for killed \`${id}\` (${why}) — archive it by hand. The verdict stands.` })
+						.catch(() => {});
+				}
+			}
 		}
 	} catch (err) {
 		console.error("audit command failed:", err);
