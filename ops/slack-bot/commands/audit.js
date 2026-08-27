@@ -145,18 +145,20 @@ async function runAudit({ assumption, researchMd }) {
 	let parsed = null;
 	let tokensIn = 0;
 	let tokensOut = 0;
+	let costUsd = 0;
 	let wallClockS = 0;
 
 	for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
 		const t0 = Date.now();
-		const { content, usage } = await callAudit(messages, { maxTokens: 4096 });
+		const { content, usage, costUsd: callCost } = await callAudit(messages, { maxTokens: 4096 });
 		wallClockS += (Date.now() - t0) / 1000;
 		tokensIn += usage?.prompt_tokens ?? 0;
 		tokensOut += usage?.completion_tokens ?? 0;
+		costUsd += callCost ?? 0;
 		parsed = parseAuditResponse(content);
 	}
 
-	return { parsed, tokensIn, tokensOut, wallClockS };
+	return { parsed, tokensIn, tokensOut, costUsd, wallClockS };
 }
 
 async function handleAuditCommand({ command, ack, client }) {
@@ -236,7 +238,7 @@ async function handleAuditCommand({ command, ack, client }) {
 
 	try {
 		const assumption = readAssumption(id);
-		const { parsed, tokensIn, tokensOut, wallClockS } = await runAudit({
+		const { parsed, tokensIn, tokensOut, costUsd, wallClockS } = await runAudit({
 			assumption,
 			researchMd: research.md,
 		});
@@ -250,6 +252,7 @@ async function handleAuditCommand({ command, ack, client }) {
 					ideaId: id,
 					tokensIn,
 					tokensOut,
+					costUsd,
 					wallClockS,
 					status: "failed",
 					reasonCode: "malformed_verdict_after_retry",
@@ -300,6 +303,7 @@ async function handleAuditCommand({ command, ack, client }) {
 				ideaId: id,
 				tokensIn,
 				tokensOut,
+				costUsd,
 				wallClockS,
 				verdict: verdict.verdict,
 				evidenceBasis: verdict.evidence_basis,

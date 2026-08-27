@@ -76,23 +76,25 @@ async function runAttack({ founder, ideaText }) {
 	let parsed = null;
 	let tokensIn = 0;
 	let tokensOut = 0;
+	let costUsd = 0;
 	let wallClockS = 0;
 
 	for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
 		const t0 = Date.now();
-		const { content, usage } = await callFlash(messages, {
+		const { content, usage, costUsd: callCost } = await callFlash(messages, {
 			model: MODEL,
 			maxTokens: 4096,
 		});
 		wallClockS += (Date.now() - t0) / 1000;
 		tokensIn += usage?.prompt_tokens ?? 0;
 		tokensOut += usage?.completion_tokens ?? 0;
+		costUsd += callCost ?? 0;
 
 		responseText = content;
 		parsed = parseAttackResponse(responseText);
 	}
 
-	return { responseText, tokensIn, tokensOut, wallClockS, parsed };
+	return { responseText, tokensIn, tokensOut, costUsd, wallClockS, parsed };
 }
 
 async function handleAttackCommand({ command, ack, client }) {
@@ -123,7 +125,7 @@ async function handleAttackCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { tokensIn, tokensOut, wallClockS, parsed } = await runAttack({ founder, ideaText });
+		const { tokensIn, tokensOut, costUsd, wallClockS, parsed } = await runAttack({ founder, ideaText });
 
 		if (!parsed) {
 			emit(
@@ -133,6 +135,7 @@ async function handleAttackCommand({ command, ack, client }) {
 					founder,
 					tokensIn,
 					tokensOut,
+					costUsd,
 					wallClockS,
 					status: "failed",
 					reasonCode: "no_assumption_or_too_vague_line",
@@ -158,6 +161,7 @@ async function handleAttackCommand({ command, ack, client }) {
 					founder,
 					tokensIn,
 					tokensOut,
+					costUsd,
 					wallClockS,
 					status: "refused",
 					reasonCode: "too_vague",
@@ -195,6 +199,7 @@ async function handleAttackCommand({ command, ack, client }) {
 				ideaId: id,
 				tokensIn,
 				tokensOut,
+				costUsd,
 				wallClockS,
 				status: "ok",
 			}),
@@ -220,6 +225,7 @@ async function handleAttackCommand({ command, ack, client }) {
 				founder,
 				tokensIn: 0,
 				tokensOut: 0,
+				costUsd: 0,
 				wallClockS: 0,
 				status: "failed",
 				reasonCode: "model_call_failed",

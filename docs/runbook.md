@@ -5,7 +5,7 @@
 **Budget:** $100/month, all in
 **Purpose:** find out whether an idea is worth having, as cheaply and as often as possible
 
-**Changed in 3.0:** harness moved from dsh to Pi. Control surface moved from Telegram to Slack. Research now merges web evidence with field evidence from the founders.
+**Changed in 3.0:** harness moved from dsh to Pi, then Pi removed entirely (D-43) once LiteLLM plus the custom Slack bot were confirmed to already cover every job the harness was chosen for. Control surface moved from Telegram to Slack. Research now merges web evidence with field evidence from the founders.
 
 ---
 
@@ -216,14 +216,14 @@ Slack free tier is adequate. Transcription is gone — Gemini handles audio nati
 | Component | Choice |
 |---|---|
 | Host | 2GB / 1–2 vCPU, 4GB swap |
-| Harness | **Pi** (`@earendil-works/pi-coding-agent`) |
-| Provider layer | `pi-ai` — one API across 20+ providers |
-| Control surface | **Slack**, via `pi-chat` |
-| Sandbox | **Docker — you build this.** Pi ships no permission system. |
+| Harness | **None** (D-43) — every command calls LiteLLM's `/chat/completions` directly |
+| Provider layer | **LiteLLM** — one proxy across every model, swappable via `config.yaml` |
+| Control surface | **Slack**, via a custom Bolt bot (D-39) |
+| Sandbox | **Docker — you build this.** Generated code has no permission system of its own. |
 | Access | Tailscale, SSH only. No web UI to expose. |
 | Memory | git repo |
 
-**The sandbox is on you.** Pi runs with the full permissions of the launching user unless you containerize. Working prototypes execute in a Docker container with no host mount beyond a scratch directory and no credentials in the environment. This is the one thing Pi does not give you for free — see DECISIONS D-06.
+**The sandbox is on you.** Model-generated code runs with the full permissions of whatever executes it unless you containerize. Working prototypes execute in a Docker container with no host mount beyond a scratch directory and no credentials in the environment — see DECISIONS D-06.
 
 **Weekly cron cleanup** of node modules, Docker layers and browser binaries. Disk fills before memory does.
 

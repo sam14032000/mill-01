@@ -1,10 +1,12 @@
 # Build Guide v3 — The Mill
 
 **Companion to:** `runbook.md`, `DECISIONS.md`
-**Target:** Hetzner CX23 running Pi, Slack control surface, LiteLLM budget enforcement, isolated prototype sandbox
+**Target:** Hetzner CX23 running LiteLLM (budget enforcement + model gateway), a custom Slack bot, isolated prototype sandbox
 **Time:** ~30 min manual bootstrap, then a half-day driving Claude Code
 
-> **Untested.** Written without network access — nothing here has been executed. The shell, systemd and Docker parts are conventional and low-risk. Anything Pi- or pi-chat-specific must be checked against `pi --help` and the project docs; those are the commands most likely to have moved.
+> **Untested.** Written without network access — nothing here has been executed. The shell, systemd and Docker parts are conventional and low-risk.
+
+> **Part 6 (Pi) is historical.** This guide originally installed Pi as an orchestrator layer. It was later uninstalled entirely (D-43) once every job it was chosen for turned out to already be owned by LiteLLM, the Slack bot, and Part 10's sandbox. A from-scratch build following this guide today should skip Part 6 — it's kept below only as the record of what was tried and why it turned out unnecessary, per the same never-delete convention `DECISIONS.md` uses.
 
 **Split of work (D-22):**
 
@@ -222,16 +224,16 @@ sudo systemctl restart docker
 
 ---
 
-# Part 6 — Pi
+# Part 6 — Pi · REMOVED, historical only (D-43)
+
+**Skip this on a fresh build.** Originally:
 
 ```bash
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 pi --version
 ```
 
-Record the exact version in the repo README.
-
-Pi runs with the full permissions of the launching user — it ships no permission system (D-06). It is installed here as the orchestrator; **working prototypes never execute in this context**, only inside the container from Part 10.
+Pi was installed as an orchestrator, with the intent that stage scripts and the Slack bot would shell out to it. Neither ever did — every command handler and `ops/research.py` call LiteLLM's `/chat/completions` directly (`ops/slack-bot/llm.js`, `audit-llm.js`), and Part 10's sandbox executes generated code directly without going through Pi either. Once `ops/conformance.py`'s C-18 check confirmed zero `pi -p`/RPC invocations anywhere in the codebase, Pi was uninstalled (`npm uninstall -g @earendil-works/pi-coding-agent`) — see D-03 (superseded) and D-43 for the full reasoning.
 
 ---
 
@@ -466,7 +468,8 @@ __pycache__/
 
 **Scope: wiring only.** Connection lifecycle, D-40 allowlist, channel routing,
 systemd service. No command logic — see Part 9b. `pi-chat` does not support
-Slack (D-03/D-39 corrections); this is a custom bot on the Slack Bolt SDK.
+Slack (D-03/D-39 corrections); this is a custom bot on the Slack Bolt SDK
+that talks to LiteLLM directly, with no Pi in between (D-43).
 
 **Stop and verify before Part 9b.** A DM from an allowlisted founder must
 create a correctly attributed capture file. A DM from anyone else must
@@ -739,7 +742,7 @@ Every check is a grep, a file read, a git command, or an HTTP call to LiteLLM's 
 **Real findings from the first run, not hypothetical:**
 
 - **C-17 genuinely fails.** The `egress` Docker network `run.sh` uses for network-enabled prototypes is a plain bridge with no `DOCKER-USER` iptables rule restricting what it can reach — confirmed directly (`docker network inspect egress`, `iptables -L DOCKER-USER -n`), matching what `run.sh`'s own comment already says (Part 10): the none/egress choice is a binary toggle, not a per-host allowlist. A real, already-acknowledged gap — close it before any working prototype actually needs `MILL_SANDBOX_NETWORK=egress` unattended.
-- **This system never invokes Pi.** Checked directly (`grep` across `ops/` for any `pi -p`/`spawn("pi")`/RPC usage — none). D-03 named Pi as the harness and CLAUDE.md's pitfalls table says `pi -p --mode json` for scripted runs, RPC for the Slack bot — but every command handler and `ops/research.py` call LiteLLM's `/chat/completions` directly over HTTP, bypassing Pi entirely. Pi is installed (Part 6) but has never been wired into the running system as anything more than orchestrator scaffolding. C-18 passes on its literal wording (no Pi invocation *outside* a container, because there's no Pi invocation at all) but that technicality papers over the larger fact. Not fixed here — this is exactly the kind of thing CLAUDE.md says to raise with the founders rather than resolve unilaterally, since D-03 is a structural decision and its revisit condition ("Pi's security posture changes materially, or a maintained harness ships equivalent extensibility with sandboxing built in") hasn't been argued either way here.
+- **This system never invoked Pi — founders' call: remove it rather than wire it in.** Checked directly (`grep` across `ops/` for any `pi -p`/`spawn("pi")`/RPC usage — none). Raised as a finding rather than resolved unilaterally, per CLAUDE.md's rule on structural decisions; the founders' answer was to uninstall Pi and record the harness choice as moot (D-03 marked superseded, D-43 added) rather than retrofit the bot to route through it. `npm uninstall -g @earendil-works/pi-coding-agent` run; Part 6 above marked historical.
 - **`eval-event.js`'s `buildEvalEvent` mis-prices every non-Gemini telemetry event.** It always calls `geminiFlashCost()` regardless of the `model` field passed in, so every `stage: "audit"` telemetry line (Fable 5, ~$1.60/call per D-10) is logged with Gemini's $0.75/$3.75-per-M rates instead of Fable's actual cost — silently wrong, not just imprecise (checked directly: LiteLLM's own `/spend/logs` shows real per-call Fable spend around $0.035-$0.04 for a trivial test prompt, using LiteLLM's correct built-in Anthropic pricing, which the `x-litellm-response-cost` response header also exposes per-call and could replace the hardcoded Gemini-only calculator entirely). Not fixed here, since it touches every command's telemetry call site — flagged because EVAL.md Layer 2's derived metrics (cost per idea killed, D-24's core metric) depend on `cost_usd` being right, and this bug means audit-stage cost has been wrong since Part 9b. C-02 sidesteps it by reading LiteLLM's `/spend/logs` directly rather than trusting telemetry's `cost_usd` for Fable spend, which is why C-02 passes correctly despite this bug.
 
 ---

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """EVAL.md Layer 1 -- conformance. Deterministic checks only, C-01
-through C-22. "Do not ask a model what a script can prove" (EVAL.md) --
+through C-23. "Do not ask a model what a script can prove" (EVAL.md) --
 every check here is a grep, a file read, a git command, or an HTTP call
 to LiteLLM's own API, never a model call.
 
@@ -26,6 +26,7 @@ SLACK_BOT_DIR = OPS_DIR / "slack-bot"
 MINDS_DIR = REPO_ROOT / "minds"
 IDEAS_DIR = REPO_ROOT / "ideas"
 DECISIONS_FILE = REPO_ROOT / "docs" / "DECISIONS.md"
+TELEMETRY_DIR = REPO_ROOT / "telemetry"
 
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://127.0.0.1:4000")
 
@@ -488,20 +489,18 @@ def check_c17():
 
 
 def check_c18():
+    # Pi was uninstalled entirely (D-43) after this check's first run
+    # showed zero invocations anywhere -- see D-03 (superseded) for the
+    # full record. The check stays: it's still meaningful as a guard
+    # against Pi (or a successor harness) getting reintroduced into a
+    # working-prototype's execution path outside Part 10's container.
     hits = grep_files(OPS_DIR, r"\bpi\s+-p\b|spawn\([\"']pi[\"']|execFile\([\"']pi[\"']|require\([\"']pi[\"']\)", (".js", ".py", ".sh"))
-    # Every hit that isn't inside run.sh's own container invocation is a
-    # direct host-side Pi call -- run.sh never shells to `pi` either
-    # (confirmed: run.sh execs `docker run ... mill-sandbox:latest bash
-    # -lc`, not `pi`), so in practice any hit at all outside comments is
-    # worth surfacing, but this codebase currently doesn't invoke Pi from
-    # application code at all (see BUILD-LOG Part 6 -- Pi is installed as
-    # orchestrator scaffolding only, never called by the running system).
     code_hits = [h for h in hits if not h[2].lstrip().startswith(("#", "//", "*"))]
     if code_hits:
         return Result("C-18", "Pi is never invoked outside its container for working prototypes (D-06)", False, f"host-side Pi invocation found: {code_hits[0][0]}:{code_hits[0][1]}")
     return Result(
         "C-18", "Pi is never invoked outside its container for working prototypes (D-06)", True,
-        "no Pi invocation found anywhere in ops/ application code -- trivially satisfies this check, but note the larger fact this masks: the running system never invokes Pi at all (see BUILD-LOG), which is a bigger deviation from D-03 than this check alone can surface.",
+        "no Pi invocation found anywhere in ops/ application code -- Pi is uninstalled entirely as of D-43, so this now passes for the straightforward reason rather than the technicality it passed on before.",
     )
 
 
@@ -605,12 +604,141 @@ def check_c22():
     return Result("C-22", "No DECISIONS entry deleted", True, f"D-{numbers[0]}..D-{numbers[-1]} all present (known non-assigned gap: {sorted(KNOWN_NUMBERING_GAPS)})")
 
 
+# ---------------------------------------------------------------------
+# Telemetry accuracy (C-23)
+# ---------------------------------------------------------------------
+
+# LiteLLM's model_group (not litellm_params.model, e.g. "audit" not
+# "anthropic/claude-fable-5") is what telemetry's own "model" field
+# already matches -- that's the join key, not the underlying provider
+# model name.
+TOLERANCE_ABS_USD = 0.0005
+TOLERANCE_REL = 0.15
+SAMPLE_SIZE = 25
+MATCH_WINDOW_BUFFER_S = 10
+
+# Telemetry events logged before this point used the old hardcoded
+# Gemini-only cost calculator (eval-event.js's buildEvalEvent used to
+# compute cost_usd itself instead of taking it from the caller) and are
+# known-wrong for any non-Gemini model, known-approximate even for
+# Gemini calls, and known-wrong for any stage that sums multiple LLM
+# calls into one event (cross.js's two parallel reads) since the old
+# estimate was computed per-event from summed tokens, not summed from
+# two real per-call LiteLLM costs. The audit-stage instances of this bug
+# were individually corrected by hand in telemetry/2026-08.jsonl,
+# matched against LiteLLM's spend log by exact token count (see
+# ops/BUILD-LOG.md); the rest were deliberately left as historical
+# record rather than backfilled wholesale. C-23 checks accuracy of the
+# fix going forward, not the accuracy of data logged before it existed
+# -- events before this cutoff are excluded from the sample rather than
+# scored against a standard they predate.
+PRICING_FIX_DEPLOYED_AT = "2026-08-27T10:07:12+00:00"
+
+
+def parse_telemetry_ts(ts):
+    return datetime.fromisoformat(ts)
+
+
+def check_c23():
+    if not MASTER_KEY:
+        return Result("C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", False, "LITELLM_MASTER_KEY not available to this script")
+
+    month_file = TELEMETRY_DIR / f"{date.today().strftime('%Y-%m')}.jsonl"
+    if not month_file.exists():
+        return Result("C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", True, f"no telemetry file for this month yet ({month_file.name}) -- nothing to check")
+
+    events = []
+    for line in month_file.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if e.get("status") == "ok" and e.get("model") and e.get("cost_usd", 0) > 0:
+            events.append(e)
+    cutoff = datetime.fromisoformat(PRICING_FIX_DEPLOYED_AT).timestamp()
+    events = [e for e in events if parse_telemetry_ts(e["ts"]).timestamp() >= cutoff]
+    sample = events[-SAMPLE_SIZE:]
+    if not sample:
+        return Result("C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", True, "no cost-bearing telemetry events since the pricing fix was deployed -- nothing to check yet")
+
+    # The aggregated /spend/logs?start_date=...&end_date=... form used by
+    # C-02/C-03 only gives per-day totals, not per-request rows -- need
+    # the raw per-request form here (no date params) to match individual
+    # telemetry events against individual LiteLLM calls.
+    status, rows, err = litellm_get("/spend/logs", MASTER_KEY)
+    if err or not isinstance(rows, list):
+        return Result("C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", False, f"LiteLLM /spend/logs (raw) unreachable or malformed: {err}")
+
+    by_model_group = {}
+    for row in rows:
+        mg = row.get("model_group")
+        st = row.get("startTime")
+        if not mg or not st:
+            continue
+        try:
+            epoch = datetime.fromisoformat(st.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+        by_model_group.setdefault(mg, []).append((epoch, row.get("spend", 0.0)))
+
+    mismatches = []
+    unmatched = 0
+    checked = 0
+    for event in sample:
+        model = event["model"]
+        candidates = by_model_group.get(model, [])
+        if not candidates:
+            unmatched += 1
+            continue
+        # ts is written when the event is emitted, right after the call
+        # (or calls) complete -- so the real call(s) fall somewhere in
+        # [ts - wall_clock_s - buffer, ts + buffer]. Summing every row
+        # in that window handles stages that make more than one real
+        # LLM call per event (cross.js's two parallel founder reads,
+        # attack.js's/proto.js's/audit.js's retry-on-parse-failure), not
+        # just the single-call case -- a fixed single-nearest-row match
+        # would wrongly flag a correctly-summed multi-call event as a
+        # mismatch, since its total genuinely exceeds any one row.
+        event_epoch = parse_telemetry_ts(event["ts"]).timestamp()
+        wall_clock = event.get("wall_clock_s", 0) or 0
+        window_start = event_epoch - wall_clock - MATCH_WINDOW_BUFFER_S
+        window_end = event_epoch + MATCH_WINDOW_BUFFER_S
+        in_window = [spend for epoch, spend in candidates if window_start <= epoch <= window_end]
+        if not in_window:
+            unmatched += 1
+            continue
+        checked += 1
+        logged = event["cost_usd"]
+        real = sum(in_window)
+        tolerance = max(TOLERANCE_ABS_USD, TOLERANCE_REL * real)
+        if abs(logged - real) > tolerance:
+            mismatches.append(f"{event['ts']} stage={event['stage']} model={model}: telemetry cost_usd={logged} vs LiteLLM spend(window sum)={real} across {len(in_window)} row(s) (tolerance {tolerance:.5f})")
+
+    if mismatches:
+        return Result(
+            "C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", False,
+            f"{len(mismatches)}/{checked} sampled event(s) mismatch: {mismatches[:5]}",
+        )
+    if checked == 0:
+        return Result(
+            "C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", False,
+            f"none of {len(sample)} sampled event(s) could be matched to a LiteLLM spend log row within their call window -- can't verify, treated as a failure rather than a silent pass",
+        )
+    return Result(
+        "C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", True,
+        f"{checked}/{len(sample)} sampled event(s) matched within tolerance ({unmatched} unmatched -- likely calls outside this month's LiteLLM retention or clock skew beyond the call window)",
+    )
+
+
 CHECKS = [
     check_c01, check_c02, check_c03, check_c04, check_c05,
     check_c06, check_c07, check_c08, check_c09, check_c10,
     check_c11, check_c12, check_c13, check_c14,
     check_c15, check_c16, check_c17, check_c18,
     check_c19, check_c20, check_c21, check_c22,
+    check_c23,
 ]
 
 

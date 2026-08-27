@@ -76,12 +76,27 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 		throw new Error(`${model} call failed: HTTP ${res.status} ${body.slice(0, 300)}`);
 	}
 
+	// LiteLLM computes real per-model cost itself and returns it in this
+	// header on every response -- ground truth, not a hardcoded price
+	// table (see eval-event.js/pricing.js, which used to guess at cost
+	// from tokens_out using Gemini-only rates and silently mispriced
+	// every other model routed through this same function).
+	const costUsd = Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
+
 	const data = await res.json();
 	const content = data.choices?.[0]?.message?.content;
 	if (typeof content !== "string" || !content.trim()) {
-		throw new Error(`${model} call returned no content`);
+		// Real tokens (often real reasoning cost) were still spent even
+		// when the model emits no visible text -- attach usage/costUsd to
+		// the error so a caller that treats this as a valid outcome (only
+		// profile-evolution.js does, see callFlashForDiff) can still
+		// record accurate spend instead of defaulting to 0.
+		const err = new Error(`${model} call returned no content`);
+		err.usage = data.usage;
+		err.costUsd = costUsd;
+		throw err;
 	}
-	return { content, usage: data.usage };
+	return { content, usage: data.usage, costUsd };
 }
 
 module.exports = { callFlash };

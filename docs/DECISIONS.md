@@ -64,9 +64,11 @@
 
 ## Layer 1 — Infrastructure
 
-### D-03 · Pi as the harness
+### D-03 · Pi as the harness · SUPERSEDED
 
-**Decision.** Pi (`@earendil-works/pi-coding-agent`), MIT licensed. Provider access through `pi-ai`. Slack control surface is custom-built (see D-39) — not through `pi-chat`.
+**Superseded by D-43.** Pi was uninstalled and never wired into the running system as anything more than orchestrator scaffolding — see D-43 for the full record of why the harness choice turned out not to matter. The dsh-vs-Pi comparison below is kept, not deleted: the reasoning that produced it (compare, don't inherit a default; check upstream claims before building on them) is still instructive even though its conclusion no longer drives anything.
+
+**Original decision.** Pi (`@earendil-works/pi-coding-agent`), MIT licensed. Provider access through `pi-ai`. Slack control surface is custom-built (see D-39) — not through `pi-chat`.
 
 **Supersedes:** dsh (DeepSeek Harness), which held this slot for the first two versions.
 
@@ -82,7 +84,7 @@
 
 **Cost of the switch:** see D-06. Pi ships no permission system.
 
-**Revisit when:** Pi's security posture changes materially, or a maintained harness ships equivalent extensibility with sandboxing built in.
+**Revisit when:** Pi's security posture changes materially, or a maintained harness ships equivalent extensibility with sandboxing built in. **Moot as of D-43** — there is no harness in the running system for a revisit to reinstate a replacement into.
 
 ---
 
@@ -92,7 +94,7 @@
 
 **Supersedes** the v1/v2 rule relying on dsh's bwrap + Landlock fail-closed enforcement.
 
-**Why this is now necessary.** Pi has no built-in permission system for filesystem, process, network or credential access, and runs with the full permissions of the launching user unless containerized. Pi documents three patterns — Gondolin micro-VM, Docker, OpenShell. Docker is the pragmatic choice on a 2GB box.
+**Why this is now necessary.** Pi has no built-in permission system for filesystem, process, network or credential access, and runs with the full permissions of the launching user unless containerized. Pi documents three patterns — Gondolin micro-VM, Docker, OpenShell. Docker is the pragmatic choice on a 2GB box. **This decision doesn't depend on Pi's removal (D-43).** `sandbox.js` executes model-generated code directly, with no harness in between either way — the risk this entry addresses (arbitrary generated code running with real permissions) was never actually specific to Pi, only originally framed in Pi's terms because Pi was the assumed executor at the time this was written.
 
 **Why the risk is acceptable.** Under D-24 most prototypes are landing pages and markdown; working prototypes are occasional and small. The blast radius shrank when the design did. Under v1.0's unattended overnight production builds this trade would not have been acceptable.
 
@@ -161,7 +163,7 @@
 
 **Decision.** SSH over Tailscale. No inbound ports. No web UI exposed.
 
-**Simplified from v2.** Pi is CLI-first and the control surface is Slack, so there is no web UI to protect — Tailscale now serves debugging access only.
+**Simplified from v2.** The control surface is Slack and nothing in the stack (the custom bot, LiteLLM) exposes a web UI, so there is nothing to protect — Tailscale serves debugging access only.
 
 ---
 
@@ -259,7 +261,7 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 
 ### D-15 · OpenRouter as failover only
 
-**Decision.** Direct provider APIs primary; OpenRouter registered as secondary through `pi-ai`.
+**Decision.** Direct provider APIs primary; OpenRouter registered as secondary through LiteLLM's own `model_list` (not `pi-ai` — see D-43, that layer never existed in the running system). Not yet built: no OpenRouter entry exists in `~/stack/litellm/config.yaml` as of this build.
 
 **Original rationale, expired.** Going direct preserved DeepSeek's off-peak discount; D-07 removed DeepSeek from the critical path.
 
@@ -438,7 +440,9 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 
 ### D-39 · Custom Bolt bot for Slack, not a pi-chat bridge
 
-**Decision.** The Slack control surface is a small custom bot (Slack Bolt SDK, Socket Mode) that shells out to `pi -p --mode json` per message, not an installed Pi extension.
+**Decision.** The Slack control surface is a small custom bot (Slack Bolt SDK, Socket Mode), not an installed Pi extension.
+
+**Correction (see D-43): it doesn't shell out to `pi -p --mode json` either.** That was the plan when this entry was written, but the bot as actually built calls LiteLLM's `/chat/completions` directly over HTTP (`ops/slack-bot/llm.js`, `audit-llm.js`) — Pi was never wired into the request path at all, not even in the "print mode per message" form this entry originally described. Caught while building `ops/conformance.py`'s C-18 check, which found zero `pi -p` invocations anywhere in `ops/`. The rest of this entry's reasoning (why not adopt a reference bridge) holds regardless of which HTTP client sits behind the bot.
 
 **Why this came up.** D-03 and D-05 originally credited `pi-chat` with Slack support — that claim was wrong (see both entries' corrections). Real Slack bridges for Pi exist once the actual ecosystem was checked: `comsysto/pi-slack-bridge` (a Slack-focused fork) and `tintinweb/pi-messenger-bridge` (its multi-transport parent, Telegram/WhatsApp/Slack/Discord/Matrix). Both were read as reference implementations for their Slack block-splitting and message-length handling before writing this bot's equivalent — neither was adopted.
 
@@ -485,3 +489,23 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 **Why append-only matters here specifically.** Captures are the raw material profiles and brainstorms are built from (D-26). If they could be edited after the fact, "what a founder actually said on a given day" stops being a fixed thing the system can build trust on — profile evolution (D-30) and any future retrospective on why an idea died would be reasoning about a moving target.
 
 **Revisit when:** never, without an explicit decision that some class of correction needs a different mechanism than a new capture.
+
+---
+
+### D-43 · Pi removed — the harness choice was moot
+
+**Decision.** Pi uninstalled entirely (`npm uninstall -g @earendil-works/pi-coding-agent`). Nothing in the running system invokes it. The architecture that actually exists is LiteLLM as the model-agnostic gateway plus a custom Slack Bolt bot that calls LiteLLM's `/chat/completions` directly over HTTP — no harness layer between them.
+
+**Why this is correct, not a regression.** D-03 chose Pi for three things: model-agnosticism (D-17's confidentiality argument — frontier access can vanish by government order, so don't be locked to one provider), a Slack control surface, and prototype execution. All three turned out to be supplied elsewhere, independent of Pi:
+
+- **Model-agnosticism** is what LiteLLM's `model_list` already does — one proxy, swap `litellm_params.model` per entry, no application code cares which provider is behind `flash`, `audit`, or `mechanical`. This was true from Part 7 onward; Pi was never the layer doing this work.
+- **The Slack control surface** was never `pi-chat` to begin with (D-39's correction: that package bridges Discord/Telegram only, never Slack) — it's a bespoke Bolt bot, built without Pi in the loop.
+- **Prototype execution** is Part 10's Docker sandbox (`~/stack/sandbox/run.sh`), which runs generated code directly in a locked-down container. It never shelled out to Pi either.
+
+Once those three jobs were traced to their actual owners, there was no fourth thing left for a harness to do. `ops/conformance.py`'s C-18 check (built to verify "Pi is never invoked outside its container for working prototypes," per D-06) surfaced this directly: grepping the entire `ops/` tree for any `pi -p`, RPC, or `spawn`/`execFile` call to `pi` found zero matches, anywhere, not just outside the container. The check the whole time was testing whether a thing was doing what it was never actually doing.
+
+**What this means for D-03's comparison.** The dsh-vs-Pi reasoning (maturity, runtime modes, provider count) was sound *if* something in this system were going to shell out to a harness. Nothing does. That's not a flaw in the comparison — it's that the question "which harness" stopped being the right question once LiteLLM and a plain HTTP client turned out sufficient for every job Pi was being evaluated for. Recorded as moot, not wrong.
+
+**Cost of keeping Pi installed with no job.** None functional — it wasn't in any request path — but it was a dependency and an attack-surface line with no offsetting benefit, and its presence in `docs/build-guide.md`/`CLAUDE.md`/`runbook.md` was actively misleading about what the running system does, which is its own kind of cost (see the drift convention this file's header describes). Removed for that reason as much as for tidiness.
+
+**Revisit when:** never, without an explicit decision that some future stage needs agentic tool-use, multi-step planning, or filesystem/process access beyond a single model call plus the existing Docker sandbox — the shape of job a harness is actually for, and the shape nothing in this system currently has.

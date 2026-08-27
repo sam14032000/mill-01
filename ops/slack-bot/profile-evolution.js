@@ -104,18 +104,18 @@ async function generateProfileDiff(founder) {
 	];
 
 	const t0 = Date.now();
-	const { content, usage } = await callFlashForDiff(messages);
+	const { content, usage, costUsd } = await callFlashForDiff(messages);
 	const wallClockS = (Date.now() - t0) / 1000;
 	const tokensIn = usage?.prompt_tokens ?? 0;
 	const tokensOut = usage?.completion_tokens ?? 0;
 
 	if (content === null) {
-		return { changed: false, tokensIn, tokensOut, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd: costUsd ?? 0, wallClockS };
 	}
 
 	const newContent = content.trim();
 	if (newContent === currentProfile.trim()) {
-		return { changed: false, tokensIn, tokensOut, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd, wallClockS };
 	}
 
 	return {
@@ -125,6 +125,7 @@ async function generateProfileDiff(founder) {
 		diff: unifiedDiff(`minds/${founder}/profile.md`, currentProfile, newContent),
 		tokensIn,
 		tokensOut,
+		costUsd,
 		wallClockS,
 	};
 }
@@ -154,18 +155,18 @@ async function generateDynamicsDiff() {
 	];
 
 	const t0 = Date.now();
-	const { content, usage } = await callFlashForDiff(messages);
+	const { content, usage, costUsd } = await callFlashForDiff(messages);
 	const wallClockS = (Date.now() - t0) / 1000;
 	const tokensIn = usage?.prompt_tokens ?? 0;
 	const tokensOut = usage?.completion_tokens ?? 0;
 
 	if (content === null) {
-		return { changed: false, tokensIn, tokensOut, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd: costUsd ?? 0, wallClockS };
 	}
 
 	const newContent = content.trim();
 	if (newContent === currentDynamics.trim()) {
-		return { changed: false, tokensIn, tokensOut, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd, wallClockS };
 	}
 
 	return {
@@ -175,6 +176,7 @@ async function generateDynamicsDiff() {
 		diff: unifiedDiff("minds/shared/dynamics.md", currentDynamics, newContent),
 		tokensIn,
 		tokensOut,
+		costUsd,
 		wallClockS,
 	};
 }
@@ -312,6 +314,7 @@ async function runWeeklyProfileEvolution(client) {
 					founder,
 					tokensIn: result.tokensIn,
 					tokensOut: result.tokensOut,
+					costUsd: result.costUsd,
 					wallClockS: result.wallClockS,
 					status: result.changed ? "ok" : "no_change",
 				}),
@@ -341,6 +344,7 @@ async function runWeeklyProfileEvolution(client) {
 				founder: null,
 				tokensIn: result.tokensIn,
 				tokensOut: result.tokensOut,
+				costUsd: result.costUsd,
 				wallClockS: result.wallClockS,
 				status: result.changed ? "ok" : "no_change",
 			}),

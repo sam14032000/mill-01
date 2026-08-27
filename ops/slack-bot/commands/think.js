@@ -59,7 +59,7 @@ async function runThink({ founder, ideaText }) {
 	];
 
 	const t0 = Date.now();
-	const { content, usage } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+	const { content, usage, costUsd } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
 	const wallClockS = (Date.now() - t0) / 1000;
 
 	const responseText = hasRealProfile
@@ -70,6 +70,7 @@ async function runThink({ founder, ideaText }) {
 		responseText,
 		tokensIn: usage?.prompt_tokens ?? 0,
 		tokensOut: usage?.completion_tokens ?? 0,
+		costUsd,
 		wallClockS,
 	};
 }
@@ -98,7 +99,7 @@ async function handleThinkCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { responseText, tokensIn, tokensOut, wallClockS } = await runThink({
+		const { responseText, tokensIn, tokensOut, costUsd, wallClockS } = await runThink({
 			founder,
 			ideaText,
 		});
@@ -110,6 +111,7 @@ async function handleThinkCommand({ command, ack, client }) {
 				founder,
 				tokensIn,
 				tokensOut,
+				costUsd,
 				wallClockS,
 				status: "ok",
 			}),

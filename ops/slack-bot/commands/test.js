@@ -86,6 +86,7 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 	let gapOutput = null;
 	let tokensIn = 0;
 	let tokensOut = 0;
+	let costUsd = 0;
 	let wallClockS = 0;
 
 	if (evidenceBasis === "web-only") {
@@ -98,10 +99,11 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 			{ role: "user", content: assumption },
 		];
 		const t0 = Date.now();
-		const { content, usage } = await callFlash(messages, { model: MODEL, maxTokens: 2048 });
+		const { content, usage, costUsd: callCost } = await callFlash(messages, { model: MODEL, maxTokens: 2048 });
 		wallClockS += (Date.now() - t0) / 1000;
 		tokensIn += usage?.prompt_tokens ?? 0;
 		tokensOut += usage?.completion_tokens ?? 0;
+		costUsd += callCost ?? 0;
 		gapOutput = content;
 	}
 
@@ -159,7 +161,7 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 		"utf8",
 	);
 
-	return { evidenceBasis, reportMd, stamp, tokensIn, tokensOut, wallClockS };
+	return { evidenceBasis, reportMd, stamp, tokensIn, tokensOut, costUsd, wallClockS };
 }
 
 async function handleTestCommand({ command, ack, client }) {
@@ -211,7 +213,7 @@ async function handleTestCommand({ command, ack, client }) {
 			id,
 		});
 
-		const { evidenceBasis, reportMd, tokensIn, tokensOut, wallClockS } = await runResearchPass({
+		const { evidenceBasis, reportMd, tokensIn, tokensOut, costUsd, wallClockS } = await runResearchPass({
 			id,
 			assumption,
 			hasFieldEvidence,
@@ -235,6 +237,7 @@ async function handleTestCommand({ command, ack, client }) {
 				ideaId: id,
 				tokensIn,
 				tokensOut,
+				costUsd,
 				wallClockS,
 				evidenceBasis,
 				status: "ok",

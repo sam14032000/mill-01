@@ -31,9 +31,13 @@ capture → brainstorm → research → AUDIT → prototype ⇄ touches
                                    kill
 ```
 
-Harness is **Pi**. Control surface is **Slack** via a custom Bolt bot
-(D-39) — not `pi-chat`, which supports Discord and Telegram only. Provider
-access through `pi-ai`.
+No harness. Control surface is **Slack** via a custom Bolt bot (D-39) —
+not `pi-chat`, which supports Discord and Telegram only. Model access
+through **LiteLLM** directly. Pi was evaluated, built against, and
+ultimately removed — see D-03/D-43: everything a harness would have done
+(provider-agnostic routing, the Slack surface, sandboxed execution) turned
+out to already be owned by LiteLLM, the custom bot, and Part 10's Docker
+sandbox respectively, with nothing left over for a harness layer to do.
 
 ---
 
@@ -66,11 +70,13 @@ would resolve the assumption and who to ask. That output is the point.
   "likely". (D-20)
 - **Profile diffs are proposed, never auto-applied.** (D-30)
 - **Raw captures arrive by DM, then land in the shared repo.** Not private after commit — all three founders can read them once pushed. (D-38, supersedes D-31)
-- **No credentials reachable from the prototype container.** Pi ships no
-  permission system; the sandbox is ours to enforce. (D-06)
+- **No credentials reachable from the prototype container.** Generated code
+  runs with real permissions unless sandboxed; the sandbox is ours to
+  enforce. (D-06)
 - **Never modify `sshd_config` or restart ssh.** Founders do this by
   hand. (D-22)
-- **Never run Pi outside its container for working prototypes.** (D-06)
+- **All prototype execution goes through Part 10's Docker sandbox,
+  nothing else runs generated code directly.** (D-06)
 
 ---
 
@@ -144,16 +150,18 @@ dropped silently: no reply, no capture.
 
 ## Pitfalls
 
-- **Pi has no permission system.** It runs with the full permissions of the
-  launching user. Working prototypes go in Docker with no host mount beyond
-  scratch and no credentials in the environment. (D-06)
+- **Generated code has no permission system of its own.** It runs with the
+  full permissions of whatever executes it. Working prototypes go in Docker
+  with no host mount beyond scratch and no credentials in the environment.
+  (D-06)
 - **Cache the brainstorm prefix.** Profile plus recent captures is stable;
   cache hits cost 10% of base input. Without it, brainstorm costs three
   times as much.
 - **Never use native model grounding for bulk search.** Grounding bills per
   query the model executes and can exceed the token cost of the task. (D-16)
-- **Use `pi -p` with `--mode json`** for scripted stage runs, RPC for the
-  Slack bot. Do not shell out to the interactive TUI.
+- **Call LiteLLM's `/chat/completions` directly** from every command
+  handler and stage script. There is no harness layer to route through.
+  (D-43)
 - **Weekly cron cleanup** of node modules, Docker layers and browser
   binaries. Disk fills before memory does.
 

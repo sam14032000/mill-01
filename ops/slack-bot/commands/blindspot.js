@@ -31,13 +31,14 @@ async function runBlindspot({ ideaText }) {
 	];
 
 	const t0 = Date.now();
-	const { content, usage } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+	const { content, usage, costUsd } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
 	const wallClockS = (Date.now() - t0) / 1000;
 
 	return {
 		responseText: content,
 		tokensIn: usage?.prompt_tokens ?? 0,
 		tokensOut: usage?.completion_tokens ?? 0,
+		costUsd,
 		wallClockS,
 	};
 }
@@ -68,7 +69,7 @@ async function handleBlindspotCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { responseText, tokensIn, tokensOut, wallClockS } = await runBlindspot({ ideaText });
+		const { responseText, tokensIn, tokensOut, costUsd, wallClockS } = await runBlindspot({ ideaText });
 
 		emit(
 			buildEvalEvent({
@@ -77,6 +78,7 @@ async function handleBlindspotCommand({ command, ack, client }) {
 				founder,
 				tokensIn,
 				tokensOut,
+				costUsd,
 				wallClockS,
 				status: "ok",
 			}),
