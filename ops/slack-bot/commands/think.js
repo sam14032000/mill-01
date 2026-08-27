@@ -4,7 +4,7 @@ const { founderForUserId, channelId } = require("../config");
 const { callFlash } = require("../llm");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
-const { readProfile, readCaptures, hasProfile } = require("../context");
+const { readProfile, readCaptures, hasProfile, parseDocMention, readDocIndex, readProjectDocs } = require("../context");
 const { commandDestination, postCommandResult } = require("../chat-session");
 
 const MODEL = "flash-fast";
@@ -37,10 +37,27 @@ const SYSTEM_PROMPT_NO_PROFILE = [
 // profile-informed. With no profile, this swaps in a prompt that never
 // asks for that framing, and the reply is prefixed so the founder knows
 // what they're getting isn't personalized.
-async function runThink({ founder, ideaText }) {
+async function runThink({ founder, ideaText, project }) {
 	const profile = readProfile(founder);
 	const hasRealProfile = hasProfile(founder);
 	const captures = readCaptures(founder, { maxEntries: 20, maxTokens: 8000 });
+
+	// 17.4: in a project channel, brainstorm sees the docs index by
+	// default; `@filename <question>` / `@all <question>` pulls full text
+	// for that call only.
+	const { mention, rest } = project ? parseDocMention(ideaText) : { mention: null, rest: ideaText };
+	let docBlock = "";
+	if (project) {
+		const full = mention ? readProjectDocs(project.id, mention) : "";
+		if (full) {
+			docBlock = `Project document${mention === "@all" ? "s" : ""} (${mention}), full text:\n\n${full}`;
+		} else {
+			const index = readDocIndex(project.id);
+			docBlock = index
+				? `Project documents — index only (name a file with @filename for its full text):\n\n${index}`
+				: "";
+		}
+	}
 
 	const messages = [
 		{ role: "system", content: hasRealProfile ? SYSTEM_PROMPT : SYSTEM_PROMPT_NO_PROFILE },
@@ -50,14 +67,17 @@ async function runThink({ founder, ideaText }) {
 				? `Founder profile (how they fail):\n\n${profile}`
 				: "(no profile recorded yet)",
 		},
+	];
+	if (docBlock) messages.push({ role: "system", content: docBlock });
+	messages.push(
 		{
 			role: "system",
 			content: captures.length
 				? `Recent captures from this founder:\n\n${captures.join("\n")}`
 				: "(no recent captures)",
 		},
-		{ role: "user", content: ideaText },
-	];
+		{ role: "user", content: mention ? rest : ideaText },
+	);
 
 	const t0 = Date.now();
 	const { content, usage, costUsd, cacheHit } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
@@ -104,6 +124,7 @@ async function handleThinkCommand({ command, ack, client }) {
 		const { responseText, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runThink({
 			founder,
 			ideaText,
+			project: dest.project || null,
 		});
 
 		emit(

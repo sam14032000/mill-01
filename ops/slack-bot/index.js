@@ -24,6 +24,7 @@ const { handleChatTurn } = require("./chat-turn");
 const chatSession = require("./chat-session");
 const { PROMOTE_ACTION_ID } = require("./promote-button");
 const { promoteChat } = require("./promotion");
+const { handleProjectUpload } = require("./documents");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
@@ -159,6 +160,9 @@ app.message(async ({ message, client }) => {
 	// else a message could be -- if consumed here, it's not a capture
 	// even if it happened to arrive in a DM.
 	if (handleThreadMessage(message)) return;
+
+	// A file uploaded into a project channel is a document (Part 17).
+	if (message.subtype === "file_share" && (await handleProjectUpload({ message, client }))) return;
 
 	// A message in a #chats session thread is a conversational turn, not
 	// a capture (build-guide-projects 14.3 -- these paths never collapse).

@@ -87,11 +87,79 @@ function readCaptures(founder, { maxEntries = Infinity, maxDays = Infinity, maxT
 	return lines;
 }
 
+// --- Project documents (build-guide-projects 17.4) --------------------
+// Default: brainstorm sees ideas/<id>/docs/index.md only. `@filename`
+// pulls one document's full text for that call; `@all` pulls everything.
+// This keeps a 47-page report from being re-sent across twenty turns.
+
+const IDEAS_DIR = path.join(REPO_ROOT, "ideas");
+
+// Splits a leading "@token" (a document mention) off the command text.
+function parseDocMention(text) {
+	const m = String(text || "").match(/^\s*(@\S+)\s+([\s\S]+)$/);
+	if (!m) return { mention: null, rest: text };
+	return { mention: m[1], rest: m[2] };
+}
+
+function readDocIndex(ideaId) {
+	try {
+		return fs.readFileSync(path.join(IDEAS_DIR, ideaId, "docs", "index.md"), "utf8");
+	} catch {
+		return "";
+	}
+}
+
+// Returns the document-context block for a command, given an optional
+// mention. Empty string means "no documents".
+function readProjectDocs(ideaId, mention) {
+	const docsDir = path.join(IDEAS_DIR, ideaId, "docs");
+
+	if (mention === "@all") {
+		let files;
+		try {
+			files = fs.readdirSync(docsDir).filter((f) => f !== "index.md" && !f.startsWith("."));
+		} catch {
+			return "";
+		}
+		const parts = [];
+		let budget = 400_000;
+		for (const f of files) {
+			let content = "";
+			try {
+				content = fs.readFileSync(path.join(docsDir, f), "utf8");
+			} catch {
+				continue;
+			}
+			const block = `--- ${f} ---\n${content}`;
+			if (block.length > budget) break;
+			budget -= block.length;
+			parts.push(block);
+		}
+		return parts.join("\n\n");
+	}
+
+	if (mention && mention.startsWith("@")) {
+		const name = path.basename(mention.slice(1)); // strip any path parts
+		const p = path.join(docsDir, name);
+		if (path.dirname(p) !== docsDir) return `(bad document name: ${name})`;
+		try {
+			return `--- ${name} ---\n${fs.readFileSync(p, "utf8")}`;
+		} catch {
+			return `(no document named ${name} in this project)`;
+		}
+	}
+
+	return ""; // default -- caller falls back to the index
+}
+
 module.exports = {
 	readProfile,
 	readDynamics,
 	readCaptures,
 	hasProfile,
+	parseDocMention,
+	readDocIndex,
+	readProjectDocs,
 	MIN_PROFILE_LENGTH,
 	MINDS_DIR,
 };
