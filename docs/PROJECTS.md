@@ -20,7 +20,7 @@ surface web search                    + /test  (deep research)
                                       + /audit (the gate)
                                       + document storage
 no repo footprint                     + ideas/<id>/ in the repo
-flash-fast only                       + research, audit, mechanical
+flash-fast only                       + research, audit
         │                                   ▲
         └────── "Start a project" ──────────┘
 ```
@@ -181,7 +181,7 @@ Git keeps every version of every binary forever, on a 40 GB disk.
 
 ### Indexing
 
-On upload, generate an index entry with the **mechanical** model (cheap; exactly its job):
+On upload, generate an index entry with `flash-fast` (the `mechanical`/MiniMax tier was removed — D-46):
 
 ```markdown
 ## market-report-q2.pdf

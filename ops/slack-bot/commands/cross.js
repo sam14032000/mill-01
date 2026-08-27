@@ -5,6 +5,7 @@ const { callFlash } = require("../llm");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile, hasProfile } = require("../context");
+const { commandDestination, postCommandResult } = require("../chat-session");
 
 const MODEL = "flash-fast";
 const STAGE = "cross";
@@ -125,9 +126,9 @@ async function handleCrossCommand({ command, ack, client }) {
 
 	await ack();
 
-	const millChannel = channelId("mill");
-	if (!millChannel) {
-		console.error("SLACK_CHANNEL_MILL not configured — /cross cannot post its result anywhere");
+	const dest = commandDestination(command);
+	if (!dest.channel) {
+		console.error("/cross has no channel to post to (mill/chats unset)");
 	}
 
 	try {
@@ -150,8 +151,12 @@ async function handleCrossCommand({ command, ack, client }) {
 			}),
 		);
 
-		if (millChannel) {
-			await client.chat.postMessage({ channel: millChannel, text: responseText });
+		if (dest.channel) {
+			await postCommandResult(client, dest, {
+				text: responseText,
+				invocation: `/cross ${ideaText}`,
+				userId: command.user_id,
+			});
 		}
 	} catch (err) {
 		console.error("cross command failed:", err);
@@ -164,10 +169,11 @@ async function handleCrossCommand({ command, ack, client }) {
 				reasonCode: "model_call_failed",
 			}),
 		);
-		if (millChannel) {
+		if (dest.channel) {
 			await client.chat
 				.postMessage({
-					channel: millChannel,
+					channel: dest.channel,
+					...(dest.threadTs ? { thread_ts: dest.threadTs } : {}),
 					text: `\`/cross\` failed for ${founder}: ${err?.message || err}`,
 				})
 				.catch(() => {});

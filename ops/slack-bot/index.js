@@ -17,9 +17,14 @@ const { handleThemesCommand } = require("./commands/themes");
 const { handleTestCommand } = require("./commands/test");
 const { handleAuditCommand } = require("./commands/audit");
 const { handleProtoCommand } = require("./commands/proto");
+const { handleChatCommand } = require("./commands/chat");
+const { handleSearchCommand } = require("./commands/search");
 const { handleThreadMessage } = require("./thread-wait");
+const { handleChatTurn } = require("./chat-turn");
+const chatSession = require("./chat-session");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
+const { startNightlyScheduler } = require("./nightly-capture");
 const { startSocketHealth } = require("./socket-health");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
@@ -66,6 +71,8 @@ app.command("/audit", handleAuditCommand);
 app.command("/proto", handleProtoCommand);
 app.command("/blindspot", handleBlindspotCommand);
 app.command("/themes", handleThemesCommand);
+app.command("/chat", handleChatCommand);
+app.command("/search", handleSearchCommand);
 
 for (const command of STUBBED_COMMANDS) {
 	app.command(command, async ({ ack, command: cmd }) => {
@@ -127,6 +134,10 @@ app.message(async ({ message, client }) => {
 	// even if it happened to arrive in a DM.
 	if (handleThreadMessage(message)) return;
 
+	// A message in a #chats session thread is a conversational turn, not
+	// a capture (build-guide-projects 14.3 -- these paths never collapse).
+	if (await handleChatTurn({ message, client })) return;
+
 	// Only DMs are captures. Ignore channel messages, edits, deletes, bot
 	// messages and anything without a plain user text body.
 	if (message.channel_type !== "im") return;
@@ -186,9 +197,20 @@ app.message(async ({ message, client }) => {
 	// rationale (2026-08-27 reboot: socket alive, events silently dropped).
 	startSocketHealth({ app });
 
+	// #chats session state is mirrored to disk (outside the repo) so a
+	// restart doesn't lose raw thinking -- reload it (build-guide-projects
+	// Part 14.2/14.7).
+	const restored = chatSession.loadAll();
+	console.log(`chat-session: restored ${restored} session(s) from disk`);
+
 	startBatchCommitLoop((reason) => {
 		console.error(`batch commit failed: ${reason}`);
 	});
+
+	// 20:00 UTC (01:30 IST): append each founder's own messages from
+	// unpromoted chats to their captures file (Part 14.7). In-process, not
+	// cron, for the same reason weekly profile evolution is.
+	startNightlyScheduler((reason) => console.error(`nightly chat capture failed: ${reason}`));
 
 	// Sunday 09:30 IST (04:00 UTC), D-30: proposes profile/dynamics diffs,
 	// never applies them -- see profile-evolution.js and the

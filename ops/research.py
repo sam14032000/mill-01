@@ -33,7 +33,7 @@ os.environ["OPENAI_API_KEY"] = os.environ["MILL_RESEARCH_KEY"]
 # SMART_LLM=openai:gpt-4.1, STRATEGIC_LLM=openai:o4-mini) are real
 # OpenAI model names -- redirecting OPENAI_API_BASE to our proxy does
 # NOT make these resolve; our config.yaml's model_list only has
-# flash-fast/flash/audit/mechanical/embed. Left unset, every call would
+# flash-fast/flash/audit/embed. Left unset, every call would
 # 400 against a model our proxy doesn't have, regardless of the correct
 # key routing above. Must be set explicitly to match.
 os.environ["FAST_LLM"] = "openai:flash"

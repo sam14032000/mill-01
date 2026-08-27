@@ -3,6 +3,7 @@
 @docs/DECISIONS.md
 @docs/runbook.md
 @docs/COMMANDS.md
+@docs/PROJECTS.md
 
 `docs/EVAL.md` is the monthly review protocol — deliberately **not** imported.
 Layer 3 of that protocol must run in a fresh session with no build context,
@@ -90,11 +91,12 @@ would resolve the assumption and who to ask. That output is the point.
 | **audit** | **Fable 5 — one pass, the only use** |
 | prototype / touches | Gemini 3.7 Flash |
 | profile evolution | Gemini 3.7 Flash |
-| mechanical | MiniMax M3 |
+| document indexing | `flash-fast` (was MiniMax M3 — removed, D-46) |
 
 Do not substitute models to save cost or because a better one appears.
 Opus 5, Kimi K3 and DeepSeek were deliberately removed — read D-09, D-11
-and D-07 before proposing any of them.
+and D-07 before proposing any of them. MiniMax M3 (the old `mechanical`
+tier) was removed in the projects phase — read D-46/D-12.
 
 ---
 

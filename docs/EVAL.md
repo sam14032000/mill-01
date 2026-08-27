@@ -43,7 +43,7 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 | `C-01` | No Fable 5 call originates outside the audit path (D-10) |
 | `C-02` | Fable month-to-date spend ≤ $35 (D-23 tripwire) |
 | `C-03` | No calls to Opus 5, Kimi K3, or any DeepSeek model (D-07, D-09, D-11) |
-| `C-04` | Every model call from application code (the Slack bot, `ops/`) routes through the LiteLLM proxy — no direct provider `base_url` in the bot's own config or source. **Scope excludes `~/stack/litellm/config.yaml` itself** — LiteLLM's own `model_list` entries legitimately carry provider `api_base` (e.g. `mechanical`'s MiniMax endpoint); that's LiteLLM routing to a provider, not application code bypassing it. Checking the wrong layer here false-positives on day one. |
+| `C-04` | Every model call from application code (the Slack bot, `ops/`) routes through the LiteLLM proxy — no direct provider `base_url` in the bot's own config or source. **Scope excludes `~/stack/litellm/config.yaml` itself** — LiteLLM's own `model_list` entries legitimately carry provider `api_base`; that's LiteLLM routing to a provider, not application code bypassing it. Checking the wrong layer here false-positives on day one. |
 | `C-05` | Per-key daily budgets configured and non-null in LiteLLM |
 
 ### Gate integrity

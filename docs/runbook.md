@@ -197,9 +197,10 @@ Each founder reads and hand-corrects their own profile monthly. It will be wrong
 | Research (~16 passes @ $1.50) | $24 |
 | **Audit — Fable 5 (~15 @ $1.60)** | **$24** |
 | Prototype + touches | $12 |
-| Mechanical (MiniMax M3) | $3 |
-| Buffer | $13 |
+| Buffer | $16 |
 | **Total** | **$100** |
+
+MiniMax M3 (the old "mechanical" $3 line) was removed in the projects phase — D-46. Document indexing uses `flash-fast`; the $3 folds into the buffer.
 
 Slack free tier is adequate. Transcription is gone — Gemini handles audio natively.
 

@@ -7,6 +7,7 @@ const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile } = require("../context");
+const { findLatestSessionForUser, addTurn } = require("../chat-session");
 
 const MODEL = "flash-fast";
 const STAGE = "attack";
@@ -130,7 +131,27 @@ async function handleAttackCommand({ command, ack, client }) {
 	await ack();
 
 	const millChannel = channelId("mill");
-	if (!millChannel) {
+	const chatsChannel = channelId("chats");
+
+	// build-guide-projects 14.4 / PROJECTS.md: `/attack` in a chat writes
+	// NOTHING -- no idea, no state.json, no directory. It returns the case
+	// + ASSUMPTION line into the chat thread; promotion (Part 15) is what
+	// turns that assumption into a project.
+	const inChat = command.channel_id === chatsChannel;
+	const chatSess = inChat ? findLatestSessionForUser(command.user_id, chatsChannel) : null;
+	const dest = inChat ? chatsChannel : millChannel;
+	const threadTs = chatSess ? chatSess.threadTs : undefined;
+	const postToDest = (text) => {
+		if (!dest) {
+			console.error("/attack has no channel to post to (mill/chats unset)");
+			return Promise.resolve();
+		}
+		const msg = { channel: dest, text };
+		if (threadTs) msg.thread_ts = threadTs;
+		return client.chat.postMessage(msg);
+	};
+
+	if (!millChannel && !inChat) {
 		console.error(
 			"SLACK_CHANNEL_MILL not configured — /attack cannot post its result anywhere",
 		);
@@ -138,6 +159,39 @@ async function handleAttackCommand({ command, ack, client }) {
 
 	try {
 		const { tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS, parsed } = await runAttack({ founder, ideaText });
+
+		if (inChat) {
+			// Chat mode: post the result, record it in the session so
+			// compaction and promotion keep it, create nothing on disk.
+			let out;
+			if (!parsed) {
+				out = "`/attack` couldn't produce a falsifiable assumption after one retry.";
+			} else if (parsed.kind === "too_vague") {
+				out = `TOO_VAGUE: ${parsed.detail}`;
+			} else {
+				out = `${parsed.caseText}\n\n*Assumption:* ${parsed.assumption}\n\n_Promote this chat to a project to research it (\`/test\` needs a project)._`;
+			}
+			await postToDest(out);
+			if (chatSess) {
+				addTurn(chatSess, { role: "user", text: `/attack ${ideaText}`, userId: command.user_id });
+				addTurn(chatSess, { role: "assistant", text: out });
+			}
+			emit(
+				buildEvalEvent({
+					stage: STAGE,
+					model: MODEL,
+					founder,
+					tokensIn,
+					tokensOut,
+					costUsd,
+					cacheHitRatio,
+					wallClockS,
+					status: parsed && parsed.kind !== "too_vague" ? "ok" : parsed ? "refused" : "failed",
+					reasonCode: "chat_no_idea",
+				}),
+			);
+			return;
+		}
 
 		if (!parsed) {
 			emit(

@@ -5,6 +5,7 @@ const { callFlash } = require("../llm");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile, readCaptures, hasProfile } = require("../context");
+const { commandDestination, postCommandResult } = require("../chat-session");
 
 const MODEL = "flash-fast";
 const STAGE = "think";
@@ -94,9 +95,9 @@ async function handleThinkCommand({ command, ack, client }) {
 
 	await ack();
 
-	const millChannel = channelId("mill");
-	if (!millChannel) {
-		console.error("SLACK_CHANNEL_MILL not configured — /think cannot post its result anywhere");
+	const dest = commandDestination(command);
+	if (!dest.channel) {
+		console.error("/think has no channel to post to (mill/chats unset)");
 	}
 
 	try {
@@ -119,8 +120,12 @@ async function handleThinkCommand({ command, ack, client }) {
 			}),
 		);
 
-		if (millChannel) {
-			await client.chat.postMessage({ channel: millChannel, text: responseText });
+		if (dest.channel) {
+			await postCommandResult(client, dest, {
+				text: responseText,
+				invocation: `/think ${ideaText}`,
+				userId: command.user_id,
+			});
 		}
 	} catch (err) {
 		console.error("think command failed:", err);
@@ -133,10 +138,11 @@ async function handleThinkCommand({ command, ack, client }) {
 				reasonCode: "model_call_failed",
 			}),
 		);
-		if (millChannel) {
+		if (dest.channel) {
 			await client.chat
 				.postMessage({
-					channel: millChannel,
+					channel: dest.channel,
+					...(dest.threadTs ? { thread_ts: dest.threadTs } : {}),
 					text: `\`/think\` failed for ${founder}: ${err?.message || err}`,
 				})
 				.catch(() => {});

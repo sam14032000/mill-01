@@ -207,7 +207,7 @@ def check_c03():
 
 def check_c04():
     provider_urls = re.compile(
-        r"api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.minimax\.io|api\.openai\.com"
+        r"api\.anthropic\.com|generativelanguage\.googleapis\.com|api\.openai\.com"
     )
     hits = grep_files(OPS_DIR, provider_urls.pattern, (".js", ".py"))
     if hits:
@@ -223,7 +223,6 @@ def check_c05():
         "mill-flash": {"MILL_FLASH_KEY"},
         "mill-research": {"MILL_RESEARCH_KEY"},
         "mill-audit": {"MILL_AUDIT_KEY"},
-        "mill-mech": {"MILL_MECH_KEY"},
     }
     if not MASTER_KEY:
         return Result("C-05", "Per-key daily budgets configured (D-23)", False, "LITELLM_MASTER_KEY not available to this script")

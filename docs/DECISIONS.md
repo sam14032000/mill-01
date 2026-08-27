@@ -225,7 +225,9 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 
 ---
 
-### D-12 · MiniMax M3 for mechanical work only
+### D-12 · MiniMax M3 for mechanical work only · SUPERSEDED
+
+**Superseded by D-46.** The `mechanical` tier was removed entirely in the projects phase — it was only ever wired up for document indexing (Part 17), never had a virtual key provisioned, and wasn't worth a fourth provider to rotate. Original entry kept below.
 
 **Decision.** Bulk scrape, classify, summarise. Not a reasoning stage.
 
@@ -385,8 +387,9 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 |---|---|
 | Google — Gemini 3.7 Flash | $60 |
 | Anthropic — Fable 5 workspace | $35 |
-| MiniMax | $10 |
 | Search API | $15 |
+
+(MiniMax's $10 line removed — provider dropped, D-46.)
 
 **Fable's line is a tripwire.** Gate-only use at ~$1.60/call means a healthy month is $24. Above $35 means something is invoking Fable outside the gate — a D-10 violation, and the cap is how it surfaces.
 
@@ -533,3 +536,17 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **Why rebase, not merge.** Keeps `origin/main` linear and keeps each capture/idea commit as a single reviewable change. Conflicts are very unlikely in practice (capture files are per-founder and append-only, D-42; idea directories are per-id) — but if one happens, aborting and retrying is safe because the commits are append-only by construction, so a later batch just re-applies cleanly on top of whatever landed.
 
 **Revisit when:** rebase conflicts start actually happening (they shouldn't), or a case appears where the bot needs to push something that genuinely conflicts with concurrent human edits — at which point the retry-forever loop needs a give-up-and-alert bound.
+
+---
+
+### D-46 · MiniMax M3 / the `mechanical` tier removed
+
+**Decision.** The `mechanical` model tier (MiniMax M3) is removed from the system entirely: no `model_list` entry in `~/stack/litellm/config.yaml`, no `mill-mech` virtual key, no `MILL_MECH_KEY` in `~/.config/mill/env`, no `MiniMax` provider spend cap. Document indexing (Part 17 of the projects phase, `docs/PROJECTS.md`) — the only place `mechanical` was ever going to be used — uses `flash-fast` instead.
+
+**Supersedes** D-12, which reserved MiniMax M3 for "bulk scrape, classify, summarise."
+
+**Why.** MiniMax never had a key provisioned (`MINIMAX_API_KEY` was blank from Part 7 onward, so the route would 400 on first use) and was only ever *referenced* prospectively for indexing. Standing up a fourth provider — a fourth key to rotate, a fourth spend cap to watch, a fourth failure mode — to save a few cents per document index is not worth it when Fable is ~73% of real spend and `flash-fast` indexes a document perfectly well. The projects phase forced the question by making document indexing real; the answer was to drop the tier, not wire it up.
+
+**Cost effect.** The runbook's $3/month "Mechanical" line folds into the buffer. No capability lost — `flash-fast` (Gemini 3.7 Flash, `thinking_level: low`) handles the ~150-word summary + key-figures extraction that indexing needs.
+
+**Revisit when:** a genuine high-volume mechanical workload appears (bulk classification over thousands of items, where `flash-fast`'s per-call cost actually adds up) — at which point compare current cheap models fresh, don't assume MiniMax.

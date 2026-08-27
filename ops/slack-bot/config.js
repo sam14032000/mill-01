@@ -31,6 +31,7 @@ const CHANNEL_KEYS = {
 	SLACK_CHANNEL_MILL: "mill",
 	SLACK_CHANNEL_RESEARCH: "research",
 	SLACK_CHANNEL_GRAVEYARD: "graveyard",
+	SLACK_CHANNEL_CHATS: "chats",
 };
 
 let allowlist = Object.freeze({});

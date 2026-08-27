@@ -5,6 +5,7 @@ const { callFlash } = require("../llm");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readCaptures } = require("../context");
+const { commandDestination, postCommandResult } = require("../chat-session");
 
 const MODEL = "flash-fast";
 const STAGE = "themes";
@@ -54,9 +55,9 @@ async function handleThemesCommand({ command, ack, client }) {
 
 	await ack();
 
-	const millChannel = channelId("mill");
-	if (!millChannel) {
-		console.error("SLACK_CHANNEL_MILL not configured — /themes cannot post its result anywhere");
+	const dest = commandDestination(command);
+	if (!dest.channel) {
+		console.error("/themes has no channel to post to (mill/chats unset)");
 	}
 
 	try {
@@ -76,8 +77,12 @@ async function handleThemesCommand({ command, ack, client }) {
 			}),
 		);
 
-		if (millChannel) {
-			await client.chat.postMessage({ channel: millChannel, text: responseText });
+		if (dest.channel) {
+			await postCommandResult(client, dest, {
+				text: responseText,
+				invocation: "/themes",
+				userId: command.user_id,
+			});
 		}
 	} catch (err) {
 		console.error("themes command failed:", err);
@@ -90,10 +95,11 @@ async function handleThemesCommand({ command, ack, client }) {
 				reasonCode: "model_call_failed",
 			}),
 		);
-		if (millChannel) {
+		if (dest.channel) {
 			await client.chat
 				.postMessage({
-					channel: millChannel,
+					channel: dest.channel,
+					...(dest.threadTs ? { thread_ts: dest.threadTs } : {}),
 					text: `\`/themes\` failed for ${founder}: ${err?.message || err}`,
 				})
 				.catch(() => {});

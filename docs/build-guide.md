@@ -35,9 +35,10 @@ Create a project called `mill`.
 |---|---|---|
 | Google AI Studio | Gemini 3.7 Flash | `aistudio.google.com`. Intro pricing ends 31 Dec 2026 |
 | Anthropic Console | Fable 5 | Separate **workspace** for Fable so its spend is isolated (D-23) |
-| MiniMax | M3, mechanical | Optional at launch |
 
-Set console spend caps now: Google $60, Anthropic-Fable workspace $35, MiniMax $10.
+Set console spend caps now: Google $60, Anthropic-Fable workspace $35.
+
+(MiniMax M3 / the `mechanical` tier was removed — D-46. No account needed.)
 
 ### 0.3 Search provider
 
@@ -288,7 +289,6 @@ services:
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
     command: ["--config", "/app/config.yaml", "--port", "4000"]
 
 volumes:
@@ -329,11 +329,17 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       max_tokens: 16384
 
-  - model_name: mechanical
-    litellm_params:
-      model: openai/MiniMax-M3
-      api_base: https://api.minimax.io/v1
-      api_key: os.environ/MINIMAX_API_KEY
+  # NOTE: the `mechanical` (MiniMax M3) entry was removed in the projects
+  # phase — D-46 / build-guide-projects.md Part 14.1. A from-scratch build
+  # can skip it entirely: no MiniMax account, no MINIMAX_API_KEY, no
+  # mill-mech key. Document indexing uses flash-fast. The block is left
+  # here struck-through only so the D-number is discoverable from the guide.
+  #
+  # - model_name: mechanical
+  #   litellm_params:
+  #     model: openai/MiniMax-M3
+  #     api_base: https://api.minimax.io/v1
+  #     api_key: os.environ/MINIMAX_API_KEY
 
 litellm_settings:
   # Global default stays true; flash/flash-fast override it per-model
@@ -363,7 +369,7 @@ LITELLM_MASTER_KEY=sk-
 LITELLM_SALT_KEY=
 GEMINI_API_KEY=
 ANTHROPIC_API_KEY=
-MINIMAX_API_KEY=
+# MINIMAX_API_KEY removed — D-46 (mechanical tier dropped)
 EOF
 chmod 600 .env
 ```
@@ -405,10 +411,8 @@ curl -s -X POST http://127.0.0.1:4000/key/generate \
        "max_budget":2.00,"budget_duration":"1d",
        "rpm_limit":5}'
 
-curl -s -X POST http://127.0.0.1:4000/key/generate \
-  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
-  -d '{"key_alias":"mill-mech","models":["mechanical"],
-       "max_budget":0.50,"budget_duration":"1d"}'
+# mill-mech (MiniMax) removed — D-46 / build-guide-projects.md Part 14.1.
+# Skip on a from-scratch build; there are three virtual keys, not four.
 ```
 
 The daily amounts on `mill-audit` and `mill-mech` are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later. `mill-flash`/`mill-research` are sized directly from measured per-command cost (`ops/BUILD-LOG.md`), not from D-23's undifferentiated $60 Gemini line — $0.50/day covers roughly 80+ interactive exchanges at the measured ~$0.006/call ceiling; $3.00/day covers roughly two research passes at ~$1.50 each.
@@ -511,7 +515,6 @@ LITELLM_BASE_URL=http://127.0.0.1:4000
 MILL_FLASH_KEY=sk-...
 MILL_RESEARCH_KEY=sk-...
 MILL_AUDIT_KEY=sk-...
-MILL_MECH_KEY=sk-...
 FOUNDER_SAKSHAM=U01ABC
 FOUNDER_AMISHA=U02DEF
 FOUNDER_VAIBHAV=U03GHI
@@ -790,7 +793,7 @@ Every check is a grep, a file read, a git command, or an HTTP call to LiteLLM's 
 - [ ] Hetzner Cloud Firewall port 22 rule **removed**
 - [ ] `tailscale funnel status` shows nothing enabled
 - [ ] `curl 127.0.0.1:4000/health/readiness` returns healthy
-- [ ] All four virtual keys (`mill-flash`, `mill-research`, `mill-audit`, `mill-mech`) created with daily budgets; `/key/info?key=<key>` returns `spend`/`max_budget` for each — `/global/spend/report` is Enterprise-only and will 402, don't use it
+- [ ] All three virtual keys (`mill-flash`, `mill-research`, `mill-audit`) created with daily budgets; `/key/info?key=<key>` returns `spend`/`max_budget` for each — `/global/spend/report` is Enterprise-only and will 402, don't use it (`mill-mech` removed, D-46)
 - [ ] Nothing outside `~/stack/litellm/.env` contains a provider API key — `grep -rIl "sk-ant\|AIza" ~/workspace` returns nothing
 - [ ] Sandbox leak tests from Part 10 all return `clean` / permission denied, and the default-network vs `MILL_SANDBOX_NETWORK=egress` pair behaves as documented (blocked by default, reaches out when opted in)
 - [ ] Slack: a DM to the bot creates a capture file attributed to the right founder

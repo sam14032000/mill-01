@@ -61,7 +61,6 @@ declare -A KEYS=(
 	[mill-flash]="${MILL_FLASH_KEY:-}"
 	[mill-research]="${MILL_RESEARCH_KEY:-}"
 	[mill-audit]="${MILL_AUDIT_KEY:-}"
-	[mill-mech]="${MILL_MECH_KEY:-}"
 )
 for alias in "${!KEYS[@]}"; do
 	key="${KEYS[$alias]}"
