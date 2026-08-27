@@ -10,6 +10,8 @@ const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { waitForThreadReply } = require("../thread-wait");
+const { commandDestination } = require("../chat-session");
+const { postNeedsProject } = require("../promotion");
 
 const MODEL = "flash"; // research keeps thinking_level: medium (D-08 amendment), mill-research key
 const STAGE = "test";
@@ -181,6 +183,21 @@ async function handleTestCommand({ command, ack, client }) {
 	const founder = founderForUserId(command.user_id);
 	if (!founder) {
 		await ack(); // D-40: off-allowlist -> silent
+		return;
+	}
+
+	// 15.2: /test in a chat hits the chat's ceiling -- offer the button,
+	// don't run and don't silently refuse.
+	if (command.channel_id === channelId("chats")) {
+		await ack();
+		const dest = commandDestination(command);
+		await postNeedsProject({
+			client,
+			channel: dest.channel,
+			threadTs: dest.threadTs,
+			what: "`/test` runs deep research and writes a report into the repo.",
+		});
+		emit(buildEvalEvent({ stage: STAGE, founder, status: "refused", reasonCode: "needs_project" }));
 		return;
 	}
 

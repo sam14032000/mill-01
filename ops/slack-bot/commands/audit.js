@@ -15,6 +15,8 @@ const {
 	nowIso,
 } = require("../ideas");
 const { commitAndPush } = require("../git");
+const { commandDestination } = require("../chat-session");
+const { postNeedsProject } = require("../promotion");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -169,6 +171,20 @@ async function handleAuditCommand({ command, ack, client }) {
 	const invoker = founderForUserId(command.user_id);
 	if (!invoker) {
 		await ack(); // D-40: off-allowlist -> silent
+		return;
+	}
+
+	// 15.2: the gate needs a project.
+	if (command.channel_id === channelId("chats")) {
+		await ack();
+		const dest = commandDestination(command);
+		await postNeedsProject({
+			client,
+			channel: dest.channel,
+			threadTs: dest.threadTs,
+			what: "`/audit` is the gate — it rules on a researched assumption.",
+		});
+		emit(buildEvalEvent({ stage: STAGE, founder: invoker, status: "refused", reasonCode: "needs_project" }));
 		return;
 	}
 

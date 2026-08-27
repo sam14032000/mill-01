@@ -21,6 +21,7 @@ const path = require("node:path");
 const { callFlash } = require("./llm");
 const { readProfile, readCaptures, hasProfile } = require("./context");
 const { channelId } = require("./config");
+const { withPromoteButton } = require("./promote-button");
 
 const STORE_DIR =
 	process.env.MILL_CHAT_STORE_DIR ||
@@ -279,6 +280,8 @@ function commandDestination(command) {
 async function postCommandResult(client, dest, { text, invocation, userId }) {
 	const msg = { channel: dest.channel, text };
 	if (dest.threadTs) msg.thread_ts = dest.threadTs;
+	// 15.1: every bot reply in a chat thread carries the promote button.
+	if (dest.session) msg.blocks = withPromoteButton(text, dest.session.threadTs);
 	const posted = await client.chat.postMessage(msg);
 	if (dest.session) {
 		if (invocation) addTurn(dest.session, { role: "user", text: invocation, userId: userId || null });

@@ -8,6 +8,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile } = require("../context");
 const { findLatestSessionForUser, addTurn } = require("../chat-session");
+const { withPromoteButton } = require("../promote-button");
 
 const MODEL = "flash-fast";
 const STAGE = "attack";
@@ -147,7 +148,10 @@ async function handleAttackCommand({ command, ack, client }) {
 			return Promise.resolve();
 		}
 		const msg = { channel: dest, text };
-		if (threadTs) msg.thread_ts = threadTs;
+		if (threadTs) {
+			msg.thread_ts = threadTs;
+			msg.blocks = withPromoteButton(text, threadTs); // 15.1
+		}
 		return client.chat.postMessage(msg);
 	};
 

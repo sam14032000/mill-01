@@ -15,20 +15,39 @@ const {
 	buildContextMessages,
 	maybeCompact,
 } = require("./chat-session");
+const { withPromoteButton } = require("./promote-button");
 
 const MODEL = "flash-fast";
 const STAGE = "chat";
 
 async function handleChatTurn({ message, client }) {
-	// Must be a plain user message in a #chats thread that has a session.
+	// Must be in a #chats thread that has a session.
 	if (message.bot_id) return false;
-	if (message.subtype) return false;
-	if (!message.user || !message.text) return false;
 	if (message.channel !== channelId("chats")) return false;
 	if (!message.thread_ts) return false;
 
 	const session = getSession(message.thread_ts);
 	if (!session) return false;
+
+	// 15.2 triggered prompt: an upload in a chat can't be stored. Never
+	// silently drop it -- offer the button.
+	if (message.subtype === "file_share" || (message.files && message.files.length)) {
+		const text =
+			"I can't store files in a chat — start a project and I'll keep it with the idea.";
+		await client.chat
+			.postMessage({
+				channel: message.channel,
+				thread_ts: session.threadTs,
+				text,
+				blocks: withPromoteButton(text, session.threadTs),
+			})
+			.catch(() => {});
+		return true;
+	}
+
+	// Plain user text only past here (ignore edits, joins, other subtypes).
+	if (message.subtype) return false;
+	if (!message.user || !message.text) return false;
 
 	// #chats is shared -- any allowlisted founder can contribute
 	// (PROJECTS.md). Off-allowlist users are ignored, same as everywhere.
@@ -79,6 +98,7 @@ async function handleChatTurn({ message, client }) {
 		channel: message.channel,
 		thread_ts: session.threadTs,
 		text: replyText,
+		blocks: withPromoteButton(replyText, session.threadTs), // 15.1
 	});
 
 	// Compaction (14.6) after the turn is recorded and answered.

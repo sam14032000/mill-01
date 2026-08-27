@@ -74,6 +74,68 @@ function createIdea({ id, founder, originText, caseText, assumption }) {
 	return { dir, relPath: path.relative(REPO_ROOT, dir) };
 }
 
+// Promotion from a chat (docs/PROJECTS.md "Promotion", build-guide-
+// projects Part 15.3). Unlike createIdea (which is /attack-only and
+// requires an assumption), promotion always succeeds and the assumption
+// is optional -- if the chat never ran /attack, the idea is created
+// `open` with the assumption unset and /test is told it needs one.
+// Writes idea.md, origin-chat.md (the FULL transcript -- promoting late
+// must lose nothing), and state.json.
+function promoteIdea({ id, founder, topic, assumption, originChatMd, originChatTs, summary }) {
+	const dir = path.join(IDEAS_DIR, id);
+	fs.mkdirSync(dir, { recursive: true });
+	const ts = nowIso();
+
+	const assumptionSection = assumption
+		? assumption
+		: "_Not set yet — this chat didn't run `/attack`. `/test` needs a named, falsifiable assumption; run `/attack <idea>` in the project's Brainstorm thread first._";
+
+	const ideaMd = [
+		`# ${id}`,
+		"",
+		`**Founder:** ${founder}`,
+		`**Created:** ${ts}  (promoted from a chat)`,
+		"",
+		"## Origin",
+		"",
+		topic || "(no topic recorded)",
+		"",
+		"## Summary of origin chat",
+		"",
+		summary || "(no summary generated)",
+		"",
+		"## Assumption",
+		"",
+		assumptionSection,
+		"",
+	].join("\n");
+	fs.writeFileSync(path.join(dir, "idea.md"), ideaMd, "utf8");
+	fs.writeFileSync(path.join(dir, "origin-chat.md"), originChatMd || "(transcript unavailable)\n", "utf8");
+
+	const state = {
+		id,
+		state: "open",
+		founder,
+		created_at: ts,
+		updated_at: ts,
+		origin: "chat",
+		origin_chat_ts: originChatTs || null,
+		has_assumption: Boolean(assumption),
+		// The assumption text is carried here too (not just idea.md) so a
+		// pre-filled /attack assumption is visible in state without parsing
+		// markdown -- build-guide-projects 15 verification checks state.json.
+		assumption: assumption || null,
+		channel_id: null, // Part 16 fills this
+		threads: {}, // Part 16 fills this
+		parent: null,
+		children: [],
+		touch_count: 0,
+	};
+	fs.writeFileSync(path.join(dir, "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+	return { dir, relPath: path.relative(REPO_ROOT, dir) };
+}
+
 function readState(id) {
 	try {
 		return JSON.parse(fs.readFileSync(path.join(IDEAS_DIR, id, "state.json"), "utf8"));
@@ -143,6 +205,7 @@ module.exports = {
 	ideaExists,
 	generateIdeaId,
 	createIdea,
+	promoteIdea,
 	readState,
 	readIdeaMd,
 	readAssumption,

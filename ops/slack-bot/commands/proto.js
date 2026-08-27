@@ -9,6 +9,8 @@ const { callFlash } = require("../llm");
 const { ideaExists, readState, updateState, IDEAS_DIR } = require("../ideas");
 const { runInSandbox } = require("../sandbox");
 const { commitAndPush } = require("../git");
+const { commandDestination } = require("../chat-session");
+const { postNeedsProject } = require("../promotion");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -84,6 +86,20 @@ async function handleProtoCommand({ command, ack, client }) {
 	const founder = founderForUserId(command.user_id);
 	if (!founder) {
 		await ack(); // D-40: off-allowlist -> silent
+		return;
+	}
+
+	// 15.2: /proto needs a project.
+	if (command.channel_id === channelId("chats")) {
+		await ack();
+		const dest = commandDestination(command);
+		await postNeedsProject({
+			client,
+			channel: dest.channel,
+			threadTs: dest.threadTs,
+			what: "`/proto` builds an artifact and runs it in the sandbox.",
+		});
+		emit(buildEvalEvent({ stage: STAGE, founder, status: "refused", reasonCode: "needs_project" }));
 		return;
 	}
 

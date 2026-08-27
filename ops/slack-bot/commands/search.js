@@ -6,6 +6,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { search } = require("../tavily");
 const { findLatestSessionForUser, addTurn } = require("../chat-session");
+const { withPromoteButton } = require("../promote-button");
 
 const MODEL = "flash-fast";
 const STAGE = "search";
@@ -124,7 +125,10 @@ async function handleSearchCommand({ command, ack, client }) {
 		const r = await runSearch(topic);
 
 		const post = { channel: dest, text: r.body };
-		if (session) post.thread_ts = session.threadTs;
+		if (session) {
+			post.thread_ts = session.threadTs;
+			post.blocks = withPromoteButton(r.body, session.threadTs); // 15.1
+		}
 		await client.chat.postMessage(post);
 
 		if (session) {

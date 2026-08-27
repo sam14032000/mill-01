@@ -22,6 +22,8 @@ const { handleSearchCommand } = require("./commands/search");
 const { handleThreadMessage } = require("./thread-wait");
 const { handleChatTurn } = require("./chat-turn");
 const chatSession = require("./chat-session");
+const { PROMOTE_ACTION_ID } = require("./promote-button");
+const { promoteChat } = require("./promotion");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
@@ -125,6 +127,30 @@ app.action("profile_diff_reject", async ({ ack, action, body, client }) => {
 	await ack();
 	await handleDiffDecision({ action, body, client }).catch((err) =>
 		console.error("profile_diff_reject failed:", err),
+	);
+});
+
+// "Start a project from this idea" (build-guide-projects Part 15). The
+// button's value is the chat session's thread_ts.
+app.action(PROMOTE_ACTION_ID, async ({ ack, body, client }) => {
+	await ack();
+	const threadTs = body.actions?.[0]?.value;
+	const session = chatSession.getSession(threadTs);
+	const channel = body.channel?.id;
+	if (!session) {
+		if (channel) {
+			await client.chat
+				.postMessage({
+					channel,
+					thread_ts: threadTs,
+					text: "_Can't promote — I've lost the state for this chat (a restart, or it was already promoted). Start a fresh `/chat` if you need to._",
+				})
+				.catch(() => {});
+		}
+		return;
+	}
+	await promoteChat({ session, client, triggeredByUserId: body.user?.id }).catch((err) =>
+		console.error("promote_chat action failed:", err),
 	);
 });
 
