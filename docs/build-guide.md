@@ -415,6 +415,8 @@ The daily amounts on `mill-audit` and `mill-mech` are D-23's monthly caps divide
 
 **Application code routes to the correct key automatically, keyed off model name** (`ops/slack-bot/llm.js`), so a caller can't accidentally put a `/test` call on the interactive budget or vice versa by getting the key wrong.
 
+**Per-call cost comes from LiteLLM's `x-litellm-response-cost` header, with one exception: cache hits.** On a cache hit LiteLLM returns that header with the *would-be uncached* price but bills nothing. `llm.js`/`audit-llm.js` detect the hit (`x-litellm-cache-key` response header is present only on a hit) and record `cost_usd: 0` / `cache_hit_ratio > 0`. Since the brainstorm prefix is cached deliberately (`cache: true` in `config.yaml`), most brainstorm calls hit — trusting the raw header would inflate `cost_usd` on the majority of events. `ops/conformance.py` C-23 guards both directions.
+
 **LiteLLM's daily budget window resets at UTC midnight — 05:30 IST, not a rolling 24 hours from key creation.** Confirmed directly via `/key/info`'s `budget_reset_at` field. An evening exhaustion (e.g. 8pm IST) blocks that key until 5:30am IST the next day, not a few hours later — worth knowing before treating a "budget exceeded" error at night as a quick wait.
 
 Save the returned keys to `~/.config/mill/env`. **Everything downstream points at `http://127.0.0.1:4000` and uses these, never a provider key directly** (conformance check C-04).
@@ -600,6 +602,17 @@ pass. **`/audit` last** — its JSON validation and the D-33 web-only-caps-at-
 `narrow` enforcement (C-07 in `docs/COMMANDS.md`) is the most load-bearing
 code in the system, and every command before it exists to feed that gate
 correctly.
+
+**Git commit/push (`ops/slack-bot/git.js`).** `commitAndPush` is shared by
+capture batching (every 15 min, `git-batch.js`) and per-idea commits
+(`/attack`, `/test`, `/proto`, `/audit`). It `fetch`es and `rebase`s onto
+`origin/main` before pushing — both a founder and the bot push during normal
+use, so the remote moves out from under it routinely; without the rebase the
+push just fails and the commit silently never leaves the box. A rebase
+conflict (rare — capture files are per-founder append-mostly) aborts cleanly,
+leaving the commit local for the next batch to retry. Any failure is posted
+to `#mill-ideas` via `notify.js` (a raw `chat.postMessage`, no Bolt handle
+needed), per `docs/COMMANDS.md`'s failure table, not just `console.error`d.
 
 ---
 

@@ -46,6 +46,8 @@ async function readAs(readerFounder, ideaText) {
 			tokensIn: 0,
 			tokensOut: 0,
 			costUsd: 0,
+			calls: 0,
+			cacheHits: 0,
 			wallClockS: 0,
 		};
 	}
@@ -60,7 +62,7 @@ async function readAs(readerFounder, ideaText) {
 	];
 
 	const t0 = Date.now();
-	const { content, usage, costUsd } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+	const { content, usage, costUsd, cacheHit } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
 	const wallClockS = (Date.now() - t0) / 1000;
 
 	return {
@@ -70,6 +72,8 @@ async function readAs(readerFounder, ideaText) {
 		tokensIn: usage?.prompt_tokens ?? 0,
 		tokensOut: usage?.completion_tokens ?? 0,
 		costUsd,
+		calls: 1,
+		cacheHits: cacheHit ? 1 : 0,
 		wallClockS,
 	};
 }
@@ -92,11 +96,13 @@ async function runCross({ founder, ideaText }) {
 		);
 	}
 
+	const calls = a.calls + b.calls;
 	return {
 		responseText: parts.join("\n\n"),
 		tokensIn: a.tokensIn + b.tokensIn,
 		tokensOut: a.tokensOut + b.tokensOut,
 		costUsd: a.costUsd + b.costUsd,
+		cacheHitRatio: calls ? (a.cacheHits + b.cacheHits) / calls : 0,
 		wallClockS: a.wallClockS + b.wallClockS,
 	};
 }
@@ -125,7 +131,7 @@ async function handleCrossCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { responseText, tokensIn, tokensOut, costUsd, wallClockS } = await runCross({
+		const { responseText, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runCross({
 			founder,
 			ideaText,
 		});
@@ -138,6 +144,7 @@ async function handleCrossCommand({ command, ack, client }) {
 				tokensIn,
 				tokensOut,
 				costUsd,
+				cacheHitRatio,
 				wallClockS,
 				status: "ok",
 			}),

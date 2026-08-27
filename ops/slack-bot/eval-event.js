@@ -25,6 +25,12 @@ function buildEvalEvent({
 	tokensIn = 0,
 	tokensOut = 0,
 	costUsd = 0,
+	// Fraction of the LLM calls behind this event that LiteLLM served
+	// from cache (0..1). Single-call events pass 0 or 1; multi-call
+	// events (cross.js's two reads, retry loops) pass hits / calls. A
+	// cached call is billed nothing, so cost_usd and cache_hit_ratio move
+	// together -- ops/conformance.py C-23 cross-checks that.
+	cacheHitRatio = 0,
 	wallClockS = 0,
 	verdict = null,
 	evidenceBasis = null,
@@ -38,7 +44,7 @@ function buildEvalEvent({
 		model,
 		tokens_in: tokensIn,
 		tokens_out: tokensOut,
-		cache_hit_ratio: 0.0,
+		cache_hit_ratio: cacheHitRatio,
 		cost_usd: costUsd,
 		wall_clock_s: Math.round(wallClockS * 1000) / 1000,
 		verdict,

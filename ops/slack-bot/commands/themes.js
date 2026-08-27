@@ -32,7 +32,7 @@ async function runThemes({ founder }) {
 	];
 
 	const t0 = Date.now();
-	const { content, usage, costUsd } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+	const { content, usage, costUsd, cacheHit } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
 	const wallClockS = (Date.now() - t0) / 1000;
 
 	return {
@@ -40,6 +40,7 @@ async function runThemes({ founder }) {
 		tokensIn: usage?.prompt_tokens ?? 0,
 		tokensOut: usage?.completion_tokens ?? 0,
 		costUsd,
+		cacheHitRatio: cacheHit ? 1 : 0,
 		wallClockS,
 	};
 }
@@ -59,7 +60,7 @@ async function handleThemesCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { responseText, tokensIn, tokensOut, costUsd, wallClockS } = await runThemes({ founder });
+		const { responseText, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runThemes({ founder });
 
 		emit(
 			buildEvalEvent({
@@ -69,6 +70,7 @@ async function handleThemesCommand({ command, ack, client }) {
 				tokensIn,
 				tokensOut,
 				costUsd,
+				cacheHitRatio,
 				wallClockS,
 				status: "ok",
 			}),

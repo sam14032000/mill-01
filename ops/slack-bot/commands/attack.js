@@ -77,11 +77,13 @@ async function runAttack({ founder, ideaText }) {
 	let tokensIn = 0;
 	let tokensOut = 0;
 	let costUsd = 0;
+	let calls = 0;
+	let cacheHits = 0;
 	let wallClockS = 0;
 
 	for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
 		const t0 = Date.now();
-		const { content, usage, costUsd: callCost } = await callFlash(messages, {
+		const { content, usage, costUsd: callCost, cacheHit } = await callFlash(messages, {
 			model: MODEL,
 			maxTokens: 4096,
 		});
@@ -89,12 +91,22 @@ async function runAttack({ founder, ideaText }) {
 		tokensIn += usage?.prompt_tokens ?? 0;
 		tokensOut += usage?.completion_tokens ?? 0;
 		costUsd += callCost ?? 0;
+		calls += 1;
+		if (cacheHit) cacheHits += 1;
 
 		responseText = content;
 		parsed = parseAttackResponse(responseText);
 	}
 
-	return { responseText, tokensIn, tokensOut, costUsd, wallClockS, parsed };
+	return {
+		responseText,
+		tokensIn,
+		tokensOut,
+		costUsd,
+		cacheHitRatio: calls ? cacheHits / calls : 0,
+		wallClockS,
+		parsed,
+	};
 }
 
 async function handleAttackCommand({ command, ack, client }) {
@@ -125,7 +137,7 @@ async function handleAttackCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { tokensIn, tokensOut, costUsd, wallClockS, parsed } = await runAttack({ founder, ideaText });
+		const { tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS, parsed } = await runAttack({ founder, ideaText });
 
 		if (!parsed) {
 			emit(
@@ -136,6 +148,7 @@ async function handleAttackCommand({ command, ack, client }) {
 					tokensIn,
 					tokensOut,
 					costUsd,
+					cacheHitRatio,
 					wallClockS,
 					status: "failed",
 					reasonCode: "no_assumption_or_too_vague_line",
@@ -162,6 +175,7 @@ async function handleAttackCommand({ command, ack, client }) {
 					tokensIn,
 					tokensOut,
 					costUsd,
+					cacheHitRatio,
 					wallClockS,
 					status: "refused",
 					reasonCode: "too_vague",
@@ -200,6 +214,7 @@ async function handleAttackCommand({ command, ack, client }) {
 				tokensIn,
 				tokensOut,
 				costUsd,
+				cacheHitRatio,
 				wallClockS,
 				status: "ok",
 			}),

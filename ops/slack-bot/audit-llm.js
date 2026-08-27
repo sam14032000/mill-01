@@ -46,16 +46,20 @@ async function callAudit(messages, { maxTokens = 4096 } = {}) {
 	}
 
 	// LiteLLM's own per-model cost, ground truth -- see llm.js's matching
-	// comment. Fable's actual cost has no hardcoded price table anywhere
-	// in this codebase; this header is the only source of truth for it.
-	const costUsd = Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
+	// comment, including the cache-hit caveat: x-litellm-response-cost
+	// reports the would-be uncached price even on a hit, which LiteLLM
+	// does not bill. x-litellm-cache-key is present only on a hit.
+	const cacheHit = res.headers.get("x-litellm-cache-key") != null;
+	const costUsd = cacheHit
+		? 0
+		: Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
 
 	const data = await res.json();
 	const content = data.choices?.[0]?.message?.content;
 	if (typeof content !== "string" || !content.trim()) {
 		throw new Error("audit call returned no content");
 	}
-	return { content, usage: data.usage, costUsd };
+	return { content, usage: data.usage, costUsd, cacheHit };
 }
 
 module.exports = { callAudit };

@@ -61,19 +61,23 @@ async function runProto({ assumption }) {
 	let tokensIn = 0;
 	let tokensOut = 0;
 	let costUsd = 0;
+	let calls = 0;
+	let cacheHits = 0;
 	let wallClockS = 0;
 
 	for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
 		const t0 = Date.now();
-		const { content, usage, costUsd: callCost } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+		const { content, usage, costUsd: callCost, cacheHit } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
 		wallClockS += (Date.now() - t0) / 1000;
 		tokensIn += usage?.prompt_tokens ?? 0;
 		tokensOut += usage?.completion_tokens ?? 0;
 		costUsd += callCost ?? 0;
+		calls += 1;
+		if (cacheHit) cacheHits += 1;
 		parsed = parseProtoResponse(content);
 	}
 
-	return { parsed, tokensIn, tokensOut, costUsd, wallClockS };
+	return { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio: calls ? cacheHits / calls : 0, wallClockS };
 }
 
 async function handleProtoCommand({ command, ack, client }) {
@@ -145,7 +149,7 @@ async function handleProtoCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { parsed, tokensIn, tokensOut, costUsd, wallClockS } = await runProto({ assumption });
+		const { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runProto({ assumption });
 
 		if (!parsed) {
 			emit(
@@ -157,6 +161,7 @@ async function handleProtoCommand({ command, ack, client }) {
 					tokensIn,
 					tokensOut,
 					costUsd,
+					cacheHitRatio,
 					wallClockS,
 					status: "failed",
 					reasonCode: "unparseable_artifact",
@@ -218,6 +223,7 @@ async function handleProtoCommand({ command, ack, client }) {
 				tokensIn,
 				tokensOut,
 				costUsd,
+				cacheHitRatio,
 				wallClockS,
 				status: "ok",
 			}),

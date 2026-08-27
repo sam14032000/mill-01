@@ -81,7 +81,19 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 	// table (see eval-event.js/pricing.js, which used to guess at cost
 	// from tokens_out using Gemini-only rates and silently mispriced
 	// every other model routed through this same function).
-	const costUsd = Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
+	//
+	// BUT: on a cache hit LiteLLM still returns the *would-be uncached*
+	// price in that header, while billing nothing (x-litellm-key-spend is
+	// unchanged across a hit -- verified against /spend/logs). Trusting
+	// the header on a hit over-reports cost on every cached call, and the
+	// brainstorm prefix is deliberately built around caching (CLAUDE.md
+	// pitfalls), so cached calls are the common case, not the rare one.
+	// x-litellm-cache-key is present only when the response was served
+	// from cache. Record what was actually billed: zero.
+	const cacheHit = res.headers.get("x-litellm-cache-key") != null;
+	const costUsd = cacheHit
+		? 0
+		: Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
 
 	const data = await res.json();
 	const content = data.choices?.[0]?.message?.content;
@@ -94,9 +106,10 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 		const err = new Error(`${model} call returned no content`);
 		err.usage = data.usage;
 		err.costUsd = costUsd;
+		err.cacheHit = cacheHit;
 		throw err;
 	}
-	return { content, usage: data.usage, costUsd };
+	return { content, usage: data.usage, costUsd, cacheHit };
 }
 
 module.exports = { callFlash };

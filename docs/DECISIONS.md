@@ -521,3 +521,15 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **The principle.** For a single-process, phone-only-operated system with no human watching logs, "process alive but not doing its job" is a worse failure mode than "process dead," because only the second one triggers recovery. Health checks that can't distinguish the two are close to useless. Every long-running component should convert its own unrecoverable-but-silent states into a non-zero exit, and emit a heartbeat something else can alert on.
 
 **Revisit when:** the thresholds prove wrong in practice (spurious restarts on a healthy-but-idle connection, or a real wedge that slips past all three triggers) — tune via the `MILL_SOCKET_*` env vars first, change the design only if tuning can't fix it.
+
+---
+
+### D-45 · The bot rebases onto origin/main before pushing
+
+**Decision.** `ops/slack-bot/git.js`'s `commitAndPush` runs `git fetch` + `git rebase origin/main` before `git push`. A rebase conflict aborts (`git rebase --abort`) and leaves the commit local for the next batch to retry; it never force-pushes and never creates a merge commit. Every git failure (fetch, rebase, push) is posted to `#mill-ideas` via `notify.js`, not just logged.
+
+**Why this needed recording.** The original `commitAndPush` did a bare `git push origin main`. During the projects phase both a founder (from a laptop / GitHub web) and the bot (capture batches every 15 min, per-idea commits from `/attack` `/test` `/proto` `/audit`) push to `origin/main`, so the remote moves out from under the bot constantly. A bare push then fails, and — because `docs/COMMANDS.md` correctly says never to block a command on git — the failure was swallowed to `console.error`, where nobody sees it. Captures and ideas were being committed locally and silently never reaching the shared repo that D-21/D-38 depend on.
+
+**Why rebase, not merge.** Keeps `origin/main` linear and keeps each capture/idea commit as a single reviewable change. Conflicts are very unlikely in practice (capture files are per-founder and append-only, D-42; idea directories are per-id) — but if one happens, aborting and retrying is safe because the commits are append-only by construction, so a later batch just re-applies cleanly on top of whatever landed.
+
+**Revisit when:** rebase conflicts start actually happening (they shouldn't), or a case appears where the bot needs to push something that genuinely conflicts with concurrent human edits — at which point the retry-forever loop needs a give-up-and-alert bound.

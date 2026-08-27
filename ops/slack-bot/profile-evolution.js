@@ -75,7 +75,7 @@ async function callFlashForDiff(messages) {
 		return await callFlash(messages, { model: MODEL, maxTokens: 2048 });
 	} catch (err) {
 		if (String(err?.message || "").endsWith("call returned no content")) {
-			return { content: null, usage: undefined };
+			return { content: null, usage: undefined, costUsd: err.costUsd ?? 0, cacheHit: err.cacheHit ?? false };
 		}
 		throw err;
 	}
@@ -104,18 +104,19 @@ async function generateProfileDiff(founder) {
 	];
 
 	const t0 = Date.now();
-	const { content, usage, costUsd } = await callFlashForDiff(messages);
+	const { content, usage, costUsd, cacheHit } = await callFlashForDiff(messages);
 	const wallClockS = (Date.now() - t0) / 1000;
 	const tokensIn = usage?.prompt_tokens ?? 0;
 	const tokensOut = usage?.completion_tokens ?? 0;
+	const cacheHitRatio = cacheHit ? 1 : 0;
 
 	if (content === null) {
-		return { changed: false, tokensIn, tokensOut, costUsd: costUsd ?? 0, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd: costUsd ?? 0, cacheHitRatio, wallClockS };
 	}
 
 	const newContent = content.trim();
 	if (newContent === currentProfile.trim()) {
-		return { changed: false, tokensIn, tokensOut, costUsd, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS };
 	}
 
 	return {
@@ -126,6 +127,7 @@ async function generateProfileDiff(founder) {
 		tokensIn,
 		tokensOut,
 		costUsd,
+		cacheHitRatio,
 		wallClockS,
 	};
 }
@@ -155,18 +157,19 @@ async function generateDynamicsDiff() {
 	];
 
 	const t0 = Date.now();
-	const { content, usage, costUsd } = await callFlashForDiff(messages);
+	const { content, usage, costUsd, cacheHit } = await callFlashForDiff(messages);
 	const wallClockS = (Date.now() - t0) / 1000;
 	const tokensIn = usage?.prompt_tokens ?? 0;
 	const tokensOut = usage?.completion_tokens ?? 0;
+	const cacheHitRatio = cacheHit ? 1 : 0;
 
 	if (content === null) {
-		return { changed: false, tokensIn, tokensOut, costUsd: costUsd ?? 0, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd: costUsd ?? 0, cacheHitRatio, wallClockS };
 	}
 
 	const newContent = content.trim();
 	if (newContent === currentDynamics.trim()) {
-		return { changed: false, tokensIn, tokensOut, costUsd, wallClockS };
+		return { changed: false, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS };
 	}
 
 	return {
@@ -177,6 +180,7 @@ async function generateDynamicsDiff() {
 		tokensIn,
 		tokensOut,
 		costUsd,
+		cacheHitRatio,
 		wallClockS,
 	};
 }
@@ -315,6 +319,7 @@ async function runWeeklyProfileEvolution(client) {
 					tokensIn: result.tokensIn,
 					tokensOut: result.tokensOut,
 					costUsd: result.costUsd,
+					cacheHitRatio: result.cacheHitRatio ?? 0,
 					wallClockS: result.wallClockS,
 					status: result.changed ? "ok" : "no_change",
 				}),
@@ -345,6 +350,7 @@ async function runWeeklyProfileEvolution(client) {
 				tokensIn: result.tokensIn,
 				tokensOut: result.tokensOut,
 				costUsd: result.costUsd,
+				cacheHitRatio: result.cacheHitRatio ?? 0,
 				wallClockS: result.wallClockS,
 				status: result.changed ? "ok" : "no_change",
 			}),

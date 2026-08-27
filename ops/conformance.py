@@ -647,7 +647,7 @@ def check_c23():
     if not month_file.exists():
         return Result("C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", True, f"no telemetry file for this month yet ({month_file.name}) -- nothing to check")
 
-    events = []
+    all_events = []
     for line in month_file.read_text().splitlines():
         if not line.strip():
             continue
@@ -655,10 +655,30 @@ def check_c23():
             e = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if e.get("status") == "ok" and e.get("model") and e.get("cost_usd", 0) > 0:
-            events.append(e)
+        all_events.append(e)
     cutoff = datetime.fromisoformat(PRICING_FIX_DEPLOYED_AT).timestamp()
-    events = [e for e in events if parse_telemetry_ts(e["ts"]).timestamp() >= cutoff]
+    post_fix = [e for e in all_events if parse_telemetry_ts(e["ts"]).timestamp() >= cutoff]
+
+    # Cache-hit events must be zero-cost: LiteLLM bills nothing for a
+    # cache hit (verified -- x-litellm-key-spend is unchanged across
+    # one), even though x-litellm-response-cost still reports the
+    # would-be uncached price. llm.js/audit-llm.js detect the hit (the
+    # x-litellm-cache-key response header) and record cost 0; a
+    # regression there would show as a cached call logged at full price,
+    # exactly the bug this sub-check guards. Brainstorm is built around
+    # prefix caching, so this is the common path, not an edge case.
+    cache_hit_bad = [
+        f"{e['ts']} stage={e.get('stage')}: cache_hit_ratio={e.get('cache_hit_ratio')} but cost_usd={e.get('cost_usd')} (a cache hit is billed nothing)"
+        for e in post_fix
+        if (e.get("cache_hit_ratio") or 0) > 0 and (e.get("cost_usd") or 0) > TOLERANCE_ABS_USD
+    ]
+    if cache_hit_bad:
+        return Result(
+            "C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", False,
+            f"{len(cache_hit_bad)} cache-hit event(s) logged with nonzero cost: {cache_hit_bad[:5]}",
+        )
+
+    events = [e for e in post_fix if e.get("status") == "ok" and e.get("model") and e.get("cost_usd", 0) > 0]
     sample = events[-SAMPLE_SIZE:]
     if not sample:
         return Result("C-23", "Logged cost_usd matches LiteLLM's spend log within tolerance", True, "no cost-bearing telemetry events since the pricing fix was deployed -- nothing to check yet")
