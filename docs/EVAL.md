@@ -105,6 +105,15 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 
 **Why this exists.** `ops/healthcheck.sh` (budget / service-down / heartbeat-stale / disk alerts) emitted nothing on a healthy run, so an empty log was indistinguishable from the cron job having silently stopped — and with it every alert it carries. This was the sixth "component fails without emitting anything" instance found during the build. The script now logs one status line every invocation regardless of outcome; `C-24` fails if that line goes missing or stale.
 
+### Improvement guards
+
+| Check | Passes if |
+|---|---|
+| `C-25` | No idea sits at `open`/`researched` past 14 days (window elapsed under I4) without a `stale_nudges` entry for 14 — i.e. I4's daily staleness sweep is still running |
+| `C-26` | Every kill-shaped line in a `graveyard.md` is extracted by the I3 digest parser — i.e. the audit is not silently getting an empty or truncated graveyard |
+
+**Why these two and not more.** The audit against I1–I5: I1's gate is covered by `C-07` (updated); I2's outcome file and I5's India directive have no scriptable invariant beyond code-presence, which isn't worth a check. I3 and I4 each add a mechanism whose entire job is catching neglect (a resurrected idea, a parked one) and each fails *silently* — a dead scheduler, a regex that stops matching a reformatted file. `C-25`/`C-26` are the "component fails without emitting anything" guard applied to exactly those two. Both are near-vacuous today (no stale ideas, empty graveyards) and exist to bite the day the mechanism quietly breaks.
+
 ---
 
 # Layer 2 — Telemetry

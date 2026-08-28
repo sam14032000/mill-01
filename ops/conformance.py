@@ -826,13 +826,88 @@ def check_c24():
     return Result("C-24", desc, True, f"most recent run {age_h:.1f}h ago ({newest.isoformat()}), {len(stamps)} run line(s) in the log")
 
 
+# ---------------------------------------------------------------------
+# Improvement-layer silent-failure guards (C-25, C-26)
+# ---------------------------------------------------------------------
+
+# I4's staleness sweep and I3's graveyard-digest parser are both
+# mechanisms whose whole job is to catch neglect -- and both fail
+# silently (a dead scheduler, a regex that stops matching a reformatted
+# file). These two checks are the "component fails without emitting
+# anything" guard the founder asked for, applied to I3/I4.
+
+# Only enforce C-25 for ideas whose full 14-day staleness window elapsed
+# under I4 (like C-23's cutoff -- don't score pre-feature data).
+I4_ACTIVE_SINCE = datetime(2026, 8, 28, tzinfo=timezone.utc)
+STALE_STATES = {"open", "researched"}
+
+
+def check_c25():
+    desc = "No idea sits pre-verdict past 14 days without a recorded staleness nudge (I4)"
+    now = datetime.now(timezone.utc)
+    overdue = []
+    checked = 0
+    for state_file in IDEAS_DIR.glob("*/state.json"):
+        if state_file.parent.name.lower().startswith("zz"):
+            continue
+        st = read_json(state_file)
+        if not st or st.get("state") not in STALE_STATES:
+            continue
+        ts = st.get("updated_at") or st.get("created_at")
+        if not ts:
+            continue
+        try:
+            updated = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if updated < I4_ACTIVE_SINCE:
+            continue  # window predates I4
+        age_days = (now - updated).total_seconds() / 86400
+        if age_days < 15:  # 14 + a day of grace for the daily sweep
+            continue
+        checked += 1
+        if 14 not in (st.get("stale_nudges") or []):
+            overdue.append(f"{state_file.parent.name}: {st['state']}, {age_days:.0f}d stale, no 14d nudge recorded")
+    if overdue:
+        return Result("C-25", desc, False, f"the daily staleness sweep may have stopped: {overdue}")
+    return Result("C-25", desc, True, f"{checked} idea(s) past the 14-day mark under I4, all carry a recorded nudge")
+
+
+_GY_LINE = re.compile(r"^- \d{4}-\d{2}-\d{2} — `[^`]+`:", re.MULTILINE)
+_GY_ENTRY = re.compile(
+    r"^- (\d{4}-\d{2}-\d{2}) — `([^`]+)`: ([\s\S]*?)\n\s*Reason: ([\s\S]*?)(?=\n- |\n*$)",
+    re.MULTILINE,
+)
+
+
+def check_c26():
+    desc = "The graveyard digest parser (I3) still extracts every kill entry it should"
+    problems = []
+    total_lines = 0
+    total_parsed = 0
+    for gy in MINDS_DIR.glob("*/graveyard.md"):
+        try:
+            text = gy.read_text(errors="replace")
+        except OSError:
+            continue
+        n_lines = len(_GY_LINE.findall(text))
+        n_parsed = len(_GY_ENTRY.findall(text))
+        total_lines += n_lines
+        total_parsed += n_parsed
+        if n_lines > n_parsed:
+            problems.append(f"{gy.parent.name}: {n_lines} kill line(s), parser extracted {n_parsed} -- the audit is getting an incomplete or empty graveyard")
+    if problems:
+        return Result("C-26", desc, False, "; ".join(problems))
+    return Result("C-26", desc, True, f"{total_parsed}/{total_lines} kill entries across all graveyards parse cleanly (vacuously true while graveyards are empty)")
+
+
 CHECKS = [
     check_c01, check_c02, check_c03, check_c04, check_c05,
     check_c06, check_c07, check_c08, check_c09, check_c10,
     check_c11, check_c12, check_c13, check_c14,
     check_c15, check_c16, check_c17, check_c18,
     check_c19, check_c20, check_c21, check_c22,
-    check_c23, check_c24,
+    check_c23, check_c24, check_c25, check_c26,
 ]
 
 
