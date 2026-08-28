@@ -36,8 +36,18 @@ function buildEvalEvent({
 	evidenceBasis = null,
 	reasonCode = null,
 	status,
+	// D-51: conversational-turn action-intent fields. Only appear on chat
+	// / project_turn events (chat-turn.js passes them every turn, nulls
+	// included, so an over-eager suggestion prompt is visible in telemetry
+	// rather than degrading silently). undefined here -> omitted.
+	suggestedAction,
+	suggestionConfidence,
+	regexAction,
+	offerMade,
+	offerAction,
+	offerSuppressedReason,
 }) {
-	return {
+	const event = {
 		founder,
 		stage,
 		idea_id: ideaId,
@@ -52,6 +62,15 @@ function buildEvalEvent({
 		reason_code: reasonCode,
 		status,
 	};
+	if (offerMade !== undefined) {
+		event.suggested_action = suggestedAction ?? null;
+		event.suggestion_confidence = suggestionConfidence ?? null;
+		event.regex_action = regexAction ?? null;
+		event.offer_made = Boolean(offerMade);
+		event.offer_action = offerAction ?? null;
+		event.offer_suppressed_reason = offerSuppressedReason ?? null;
+	}
+	return event;
 }
 
 module.exports = { buildEvalEvent };

@@ -7,3 +7,6 @@ scratch/
 telemetry/*.jsonl
 minds/*/.pending-diffs/
 minds/shared/.pending-diffs/
+
+# throwaway test scaffolds (underscore-prefixed, per convention)
+ops/slack-bot/_*.js

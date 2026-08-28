@@ -1,9 +1,17 @@
 "use strict";
 
-// Conversational turn handling for #chats threads (build-guide-projects
-// Part 14.2/14.3). Called from index.js's message router before the
-// DM-capture path. Returns true if the message was consumed as a chat
-// turn (caller then stops), false otherwise.
+// Conversational turn handling for #chats threads and project stage
+// threads (build-guide-projects 14.2/14.3, 16.3). Called from index.js's
+// message router before the DM-capture path. Returns true if the message
+// was consumed.
+//
+// D-51: slash commands don't work in Slack threads. This handler already
+// sees every conversational turn, so it also (a) reads a structured
+// action-suggestion trailer off the same reply call it's already making,
+// (b) runs a fast regex for unambiguous phrasing, and (c) appends a
+// one-tap offer to the reply when an intent is detected AND applies to
+// the idea's current state. The offer never interrupts: it's appended to
+// the normal reply, ignoring it costs nothing.
 
 const { founderForUserId, channelId } = require("./config");
 const { callFlash } = require("./llm");
@@ -16,11 +24,23 @@ const {
 	buildContextMessages,
 	maybeCompact,
 } = require("./chat-session");
-const { withPromoteButton } = require("./promote-button");
-const { findIdeaByChannel } = require("./ideas");
+const { buildReplyBlocks } = require("./promote-button");
+const {
+	findIdeaByChannel,
+	readState,
+	readAssumption,
+	readLatestResearch,
+} = require("./ideas");
+const {
+	detectRegexIntent,
+	validateSuggestion,
+	splitReplyTrailer,
+	PROMPT_TRAILER_INSTRUCTION,
+} = require("./intent");
 
 const MODEL = "flash-fast";
 const STAGE = "chat";
+const OFFER_TTL_MIN = Math.round((Number(process.env.MILL_OFFER_TTL_MS) || 2 * 60 * 60 * 1000) / 60000);
 
 async function handleChatTurn({ message, client }) {
 	if (message.bot_id) return false;
@@ -32,9 +52,6 @@ async function handleChatTurn({ message, client }) {
 
 	const speakerFounder = message.user ? founderForUserId(message.user) : null;
 
-	// A #chats thread must already have a session (created by /chat). A
-	// project stage thread gets a session lazily, keyed on that thread's
-	// ts, so each stage's conversation is isolated (16.3).
 	const session = inChats
 		? getSession(message.thread_ts)
 		: getOrCreateStageSession({
@@ -46,90 +63,96 @@ async function handleChatTurn({ message, client }) {
 			});
 	if (!session) return false;
 
-	// Uploads: only #chats offers the promote-button nudge (15.2).
-	// Project channels handle file_shared for real (Part 17), so leave
-	// those alone here.
 	if (inChats && (message.subtype === "file_share" || (message.files && message.files.length))) {
-		const text =
-			"I can't store files in a chat — start a project and I'll keep it with the idea.";
+		const text = "I can't store files in a chat — start a project and I'll keep it with the idea.";
 		await client.chat
-			.postMessage({
-				channel: message.channel,
-				thread_ts: session.threadTs,
-				text,
-				blocks: withPromoteButton(text, session.threadTs),
-			})
+			.postMessage({ channel: message.channel, thread_ts: session.threadTs, text, blocks: buildReplyBlocks(text, { promote: true, threadTs: session.threadTs }) })
 			.catch(() => {});
 		return true;
 	}
 
-	// Plain user text only past here (ignore edits, joins, other subtypes).
 	if (message.subtype) return false;
 	if (!message.user || !message.text) return false;
 
-	// #chats is shared -- any allowlisted founder can contribute
-	// (PROJECTS.md). Off-allowlist users are ignored, same as everywhere.
 	const speaker = founderForUserId(message.user);
-	if (!speaker) return true; // consumed (in a session thread) but no reply
+	if (!speaker) return true;
 
 	const text = message.text.trim();
 	if (!text) return true;
 
 	addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
 
-	let replyText;
+	const isProject = session.kind === "project";
+
+	// --- the one model call, with the action-suggestion trailer asked for ---
+	const messages = buildContextMessages(session);
+	messages.splice(1, 0, { role: "system", content: PROMPT_TRAILER_INSTRUCTION });
+
+	let raw;
 	let usage;
 	let costUsd = 0;
 	let cacheHit = false;
 	const t0 = Date.now();
 	try {
-		const res = await callFlash(buildContextMessages(session), { model: MODEL, maxTokens: 4096 });
-		replyText = res.content;
+		const res = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+		raw = res.content;
 		usage = res.usage;
 		costUsd = res.costUsd;
 		cacheHit = res.cacheHit;
 	} catch (err) {
 		console.error(`chat-turn: model call failed (${session.threadTs}): ${err.message}`);
-		emit(
-			buildEvalEvent({
-				stage: STAGE,
-				model: MODEL,
-				founder: session.ownerFounder,
-				status: "failed",
-				reasonCode: "model_call_failed",
-			}),
-		);
+		emit(buildEvalEvent({ stage: isProject ? "project_turn" : STAGE, model: MODEL, founder: session.ownerFounder, status: "failed", reasonCode: "model_call_failed" }));
 		await client.chat
-			.postMessage({
-				channel: message.channel,
-				thread_ts: session.threadTs,
-				text: `_(couldn't generate a reply: ${err?.message || err})_`,
-			})
+			.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: `_(couldn't generate a reply: ${err?.message || err})_` })
 			.catch(() => {});
 		return true;
 	}
 	const wallClockS = (Date.now() - t0) / 1000;
 
+	const { reply: replyText, suggested_action, confidence } = splitReplyTrailer(raw);
+
+	// --- intent: regex fast path wins; else a high-confidence model suggestion ---
+	const regexHit = detectRegexIntent(text);
+	const intent =
+		regexHit ||
+		(confidence === "high" && suggested_action ? { action: suggested_action, source: "model" } : null);
+
+	// --- validate against actual idea state before offering (the risk:
+	//     /audit before research, /proto on a killed idea) ---
+	let offer = null;
+	let offerSuppressed = null;
+	if (intent) {
+		const ideaId = session.ideaId || null;
+		const ctx = {
+			inChats: !isProject,
+			project: isProject && ideaId ? readState(ideaId) : null,
+			assumption: isProject && ideaId ? readAssumption(ideaId) : null,
+			research: isProject && ideaId ? readLatestResearch(ideaId) : null,
+		};
+		const v = validateSuggestion(intent.action, ctx);
+		if (v.ok) offer = { action: intent.action, offeredAt: Date.now(), ideaId, turnIndex: session.turns.length - 1 };
+		else offerSuppressed = v.reason;
+	}
+
+	// A5: only replyText (trailer-stripped, no offer chrome) is a turn.
 	addTurn(session, { role: "assistant", text: replyText });
 
 	await client.chat.postMessage({
 		channel: message.channel,
 		thread_ts: session.threadTs,
 		text: replyText,
-		// 15.1: promote button on chat replies only -- a project stage
-		// thread is already a project.
-		...(session.kind === "project" ? {} : { blocks: withPromoteButton(replyText, session.threadTs) }),
+		blocks: buildReplyBlocks(replyText, {
+			promote: !isProject, // PROJECTS.md P2: promote button on every #chats reply
+			offer,
+			threadTs: session.threadTs,
+			ttlMin: OFFER_TTL_MIN,
+		}),
 	});
 
-	// Compaction (14.6) after the turn is recorded and answered.
 	try {
 		const marker = await maybeCompact(session);
 		if (marker) {
-			await client.chat.postMessage({
-				channel: message.channel,
-				thread_ts: session.threadTs,
-				text: marker,
-			});
+			await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: marker });
 		}
 	} catch (err) {
 		console.error(`chat-turn: compaction failed (${session.threadTs}): ${err.message}`);
@@ -137,7 +160,7 @@ async function handleChatTurn({ message, client }) {
 
 	emit(
 		buildEvalEvent({
-			stage: session.kind === "project" ? "project_turn" : STAGE,
+			stage: isProject ? "project_turn" : STAGE,
 			model: MODEL,
 			founder: session.ownerFounder,
 			ideaId: session.ideaId || null,
@@ -148,6 +171,14 @@ async function handleChatTurn({ message, client }) {
 			wallClockS,
 			status: "ok",
 			reasonCode: session.stage ? `stage_${session.stage}` : "turn",
+			// D-51 telemetry -- logged every turn, nulls included, so an
+			// over-eager prompt (offers on >~1/5 of turns) shows here.
+			suggestedAction: suggested_action, // model's raw suggestion (may be non-null at low confidence)
+			suggestionConfidence: confidence, // model's confidence
+			regexAction: regexHit ? regexHit.action : null,
+			offerMade: Boolean(offer),
+			offerAction: offer ? offer.action : null,
+			offerSuppressedReason: offerSuppressed,
 		}),
 	);
 	return true;

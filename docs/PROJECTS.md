@@ -29,6 +29,24 @@ The promotion is a gate, in the same sense the audit is. Most ideas should never
 
 ---
 
+## Running commands in threads
+
+**Slack does not deliver slash commands typed inside a thread** ("That slash command is not supported in threads"). Chats and project stages are both threads, so a slash command is only usable from a channel's main compose box. This is a platform constraint, not a design choice — see D-51. Three ways to reach a command:
+
+| Path | How | Confirmation |
+|---|---|---|
+| **Slash command** | Typed in a channel's main compose box (not a thread) | Runs immediately |
+| **`@Mill <command> [args]`** | Mentioning the bot inside any thread, e.g. `@Mill attack` or `@Mill find dosa batter prices` | Runs immediately |
+| **Tapped offer** | Say what you want in plain words ("attack this", "what would the others say"). If the intent is unambiguous the bot appends a one-tap button to its normal reply | Runs on tap |
+
+The offer **never interrupts** — it is appended to the conversational reply and ignoring it costs nothing. It is made only on high confidence (explicit phrasing), deliberately under-offering; an incidental mention ("the counterargument is obvious") produces no offer. Offers **expire after two hours** and refuse if the conversation has moved past the turn that triggered them — a command built from a thread you can no longer see is exactly the confidently-wrong output the mill exists to prevent.
+
+**Every gate fires identically on all three paths.** `@Mill` and the offer button both run the real command handler unchanged: `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and C-07 web-only downgrade, the five-touch cap. There is no shortcut path around a gate.
+
+When a command needs a subject and none is given (`@Mill attack` with no text, or a tapped offer), the bot rebuilds it from the thread — the topic plus recent substantive turns — so the brainstorm commands see the idea under discussion, not the word "attack". `/proto` is the exception: it still refuses without an explicitly named assumption.
+
+---
+
 ## Chats
 
 ### Starting one
@@ -45,6 +63,8 @@ A founder DMs Mill, or runs `/chat <topic>`. The bot opens a thread in `#chats` 
 | `/attack` | Produces the assumption. Creates **no** idea — see below |
 | `/find <query>` | New. Surface web search, 1–3 queries, summarised inline (`/search` is reserved by Slack) |
 | Plain messages | Conversational brainstorming in-thread |
+
+Commands here are invoked by `@Mill <command>` or a tapped offer, since the chat is a thread (see "Running commands in threads"). `/chat` itself is the exception — it starts the thread from the `#chats` compose box.
 
 **Session context** is keyed on `thread_ts` and holds the running conversation, the founder's profile, and recent captures. It does not persist to the repo.
 
@@ -122,7 +142,7 @@ Slack threads are one level deep — replying inside a thread stays in that thre
   └─ 📎 Documents      ← uploads
 ```
 
-Five anchor messages at creation; their `thread_ts` stored in `state.json`. Every command posts into its stage thread.
+Five anchor messages at creation; their `thread_ts` stored in `state.json`. Every command posts into its stage thread. Because these are threads, commands are run by `@Mill <command>` or a tapped offer, not a slash command — see "Running commands in threads" above.
 
 **Context is keyed on `thread_ts`, never on channel.** One channel hosts four parallel conversations, and binding sessions at channel level causes silent context bleed — research findings leaking into brainstorm, prototype talk contaminating an audit.
 

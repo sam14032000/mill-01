@@ -113,6 +113,15 @@ Do not collapse these paths.
 
 `/think`, `/cross`, `/blindspot`, `/themes`, `/find`.
 
+**Slack rejects slash commands inside threads (D-51).** A chat is a thread, so inside it these run one of two ways, both handled in `ops/slack-bot/`:
+
+- **`@Mill <command> [args]`** — `app.event("app_mention")` in `index.js` strips the mention, `parseMention()` in `intent.js` maps the first word to an action, `command-shim.js` builds the `{command, ack, client}` shape and calls the real handler. Immediate.
+- **A tapped offer** — `chat-turn.js` reads a `---MILL-ACTION---` trailer off the same conversational reply call (plus a regex fast path in `intent.js` for unambiguous phrasing), validates the suggested action against idea state (`validateSuggestion`), and appends a one-tap button via `promote-button.js`'s `buildReplyBlocks`. `app.action("run_suggested")` in `index.js` runs it through the same shim. Offer TTL is `MILL_OFFER_TTL_MS`, default 2h; a tap past TTL or past the triggering turn refuses.
+
+The shim adds nothing and bypasses nothing — `/proto`'s named-assumption refusal, `/audit`'s stub/no-research refusal, the C-07 downgrade and the five-touch cap all live in the handlers and fire on every path. `command-shim.js` captures any `ack({text})` refusal and reposts it as a thread message so an input-validation refusal is visible on the `@Mill`/offer path exactly as it is for a slash command.
+
+`suggested_action` is logged in telemetry on every turn including nulls (`chat-turn.js` → `eval-event.js`), so an over-eager prompt firing offers on more than ~1/5 of turns shows up rather than degrading silently.
+
 **`/attack` writes nothing here.** Returns the case against plus the `ASSUMPTION:` line, then presents the promote button pre-filled with that assumption. No idea, no `state.json`, no directory.
 
 ## 14.5 `/find`  (`/search` is reserved by Slack)
@@ -166,7 +175,7 @@ Never silently refuse. Always offer the button.
 | Founder does | Bot |
 |---|---|
 | Uploads a file | "I can't store files in a chat — start a project and I'll keep it with the idea." |
-| Runs `/test`, `/proto`, `/audit` | "That needs a project." |
+| Runs (or `@Mill`s / taps an offer for) `/test`, `/proto`, `/audit` in a chat | "That needs a project." |
 | Asks to build, save, or keep something | Same |
 
 ## 15.3 On promotion
@@ -212,6 +221,8 @@ Five messages posted at creation. Store `thread_ts` for each in `state.json`:
 ## 16.3 Routing
 
 Every command posts to its stage thread. **Context keyed on `thread_ts`** — one channel, four parallel conversations, and channel-level binding leaks research findings into brainstorm silently.
+
+Stage threads are threads, so commands run by `@Mill <command>` or a tapped offer, not a slash command (D-51, and see 14.4). `commandDestination()` in `chat-session.js` already resolves an `@Mill`/offer invocation carrying `thread_ts` to the right stage session; a slash command from the channel body with no `thread_ts` falls back to the stage the command maps to.
 
 ## 16.4 Retire `#research`
 

@@ -297,7 +297,12 @@ function commandDestination(command) {
 	const chatsChannel = channelId("chats");
 	const millChannel = channelId("mill");
 	if (command.channel_id === chatsChannel) {
-		const session = findLatestSessionForUser(command.user_id, chatsChannel);
+		// D-51: an `@Mill <cmd>` or a tapped offer carries the exact thread
+		// it came from -- prefer that session over "the founder's latest",
+		// which is only a fallback for a real slash command (no thread_ts).
+		const session =
+			(command.thread_ts && getSession(command.thread_ts)) ||
+			findLatestSessionForUser(command.user_id, chatsChannel);
 		return {
 			channel: chatsChannel,
 			threadTs: session ? session.threadTs : undefined,

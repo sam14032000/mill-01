@@ -4,7 +4,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
-const TELEMETRY_DIR = path.join(REPO_ROOT, "telemetry");
+// MILL_TELEMETRY_DIR lets a test run redirect telemetry to a scratch
+// dir so verification events never land in the real log (C-23
+// reconciles the real log against LiteLLM's spend and rapid-fire test
+// calls otherwise show as mismatches). Unset in production.
+const TELEMETRY_DIR = process.env.MILL_TELEMETRY_DIR || path.join(REPO_ROOT, "telemetry");
 
 // India Standard Time is a fixed +05:30 offset, no DST -- safe to
 // hardcode rather than pull in a timezone library for one conversion.

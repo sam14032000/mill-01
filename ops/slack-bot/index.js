@@ -23,7 +23,9 @@ const { handleFindCommand } = require("./commands/find");
 const { handleThreadMessage } = require("./thread-wait");
 const { handleChatTurn } = require("./chat-turn");
 const chatSession = require("./chat-session");
-const { PROMOTE_ACTION_ID } = require("./promote-button");
+const { PROMOTE_ACTION_ID, RUN_ACTION_ID } = require("./promote-button");
+const { parseMention } = require("./intent");
+const { dispatchCommand } = require("./command-shim");
 const { promoteChat } = require("./promotion");
 const { handleProjectUpload } = require("./documents");
 const mountMod = require("./mount");
@@ -140,7 +142,12 @@ app.action("profile_diff_reject", async ({ ack, action, body, client }) => {
 // button's value is the chat session's thread_ts.
 app.action(PROMOTE_ACTION_ID, async ({ ack, body, client }) => {
 	await ack();
-	const threadTs = body.actions?.[0]?.value;
+	// value is the chat session's thread_ts. On the /chat root message the
+	// value can't be known at post time, so fall back to the message's own
+	// ts / thread_ts from the interaction payload.
+	const raw = body.actions?.[0]?.value;
+	const fromMsg = body.message?.thread_ts || body.message?.ts || body.container?.message_ts;
+	const threadTs = raw && raw !== "PENDING" ? raw : fromMsg;
 	const session = chatSession.getSession(threadTs);
 	const channel = body.channel?.id;
 	if (!session) {
@@ -189,6 +196,87 @@ app.action("proto_extend", async ({ ack, body }) => {
 	const id = body.actions?.[0]?.value;
 	if (id) await mountMod.extend({ id, ...mountCtx(body, id) }).catch((e) => console.error("proto_extend failed:", e));
 });
+// D-51: `@Mill <cmd> <args>` in a thread runs the command immediately
+// (slash commands don't work in threads; app_mention events do). Goes
+// through command-shim.js -> the real handler, so every gate fires
+// exactly as it would for a slash invocation.
+const OFFER_TTL_MS = Number(process.env.MILL_OFFER_TTL_MS) || 2 * 60 * 60 * 1000;
+
+app.event("app_mention", async ({ event, client }) => {
+	const founder = founderForUserId(event.user);
+	if (!founder) return; // D-40
+	const afterMention = String(event.text || "").replace(/<@[A-Z0-9]+>/i, "").trim();
+	const parsed = parseMention(afterMention);
+	const post = (text) =>
+		client.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text }).catch(() => {});
+	if (!parsed) {
+		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`. Or run the slash command from the channel body.");
+		return;
+	}
+	await dispatchCommand({
+		action: parsed.action,
+		text: parsed.rest,
+		channelId: event.channel,
+		userId: event.user,
+		threadTs: event.thread_ts,
+		client,
+	}).catch((e) => console.error(`app_mention dispatch failed (${parsed.action}):`, e));
+});
+
+// D-51: a tapped intent offer. Expires (2h) and refuses if the
+// conversation has moved on -- a stale command builds a confidently-wrong
+// assumption, which is what this system exists to prevent.
+app.action(RUN_ACTION_ID, async ({ ack, body, client }) => {
+	await ack();
+	let v;
+	try {
+		v = JSON.parse(body.actions?.[0]?.value || "{}");
+	} catch {
+		return;
+	}
+	const founder = founderForUserId(body.user?.id);
+	const channel = body.channel?.id;
+	if (!founder || !channel || !v.action) return;
+	const post = (text) => client.chat.postMessage({ channel, thread_ts: v.threadTs, text }).catch(() => {});
+
+	const staleMsg = `That offer's gone stale and the conversation's moved on — say \`@Mill ${v.action}\` (or run \`/${v.action}\` from the channel) if you still want it. A command built from a conversation you can't see any more is exactly the kind of confidently-wrong output this system exists to prevent.`;
+
+	if (Date.now() - (v.offeredAt || 0) > OFFER_TTL_MS) {
+		await post(staleMsg);
+		return;
+	}
+	const sess = chatSession.getSession(v.threadTs);
+	// moved on: promoted, compacted past the triggering turn, or >8 turns
+	// of conversation since the offer.
+	if (sess) {
+		if (sess.promoted && sess.kind !== "project") {
+			await post(`This chat was already promoted — \`/${v.action}\` belongs in the project now.`);
+			return;
+		}
+		if (
+			typeof v.turnIndex === "number" &&
+			(v.turnIndex < (sess.compactedThrough || 0) || sess.turns.length - v.turnIndex > 8)
+		) {
+			await post(staleMsg);
+			return;
+		}
+	}
+
+	// Run against the exact turn that triggered the offer, not "latest".
+	const triggerText =
+		sess && typeof v.turnIndex === "number" && sess.turns[v.turnIndex]?.role === "user"
+			? sess.turns[v.turnIndex].text
+			: "";
+	await dispatchCommand({
+		action: v.action,
+		text: triggerText,
+		channelId: channel,
+		userId: body.user?.id,
+		threadTs: v.threadTs,
+		client,
+	}).catch((e) => console.error(`run_suggested dispatch failed (${v.action}):`, e));
+});
+
 // I4: [Kill it] on a staleness nudge -- always reason `stale`.
 app.action("stale_kill", async ({ ack, body }) => {
 	await ack();

@@ -627,3 +627,29 @@ Three refinements from `docs/IMPROVEMENTS.md` (I3–I5), grouped because each is
 **Pending:** IMPROVEMENTS.md I5 also calls for a Tavily-vs-Exa retriever comparison ("who else does this in India" is semantic, Exa's shape). Deferred until there are real assumptions from actual use — running it on invented inputs would decide the wrong thing. Tracked in `ops/BUILD-LOG.md`.
 
 **Revisit when:** the staleness thresholds prove wrong in practice (14/30 days), or the graveyard digest grows past a few hundred tokens and needs trimming harder.
+
+---
+
+### D-51 · Commands in threads: `@Mill <cmd>` and one-tap offers, because Slash-in-threads doesn't exist
+
+**The platform constraint, found in live use.** Slack refuses a slash command typed inside a thread: *"That slash command is not supported in threads."* PROJECTS.md and COMMANDS.md were both written assuming `/find`, `/think`, `/cross`, `/blindspot`, `/attack`, `/test`, `/audit`, `/proto`, `/spinoff` all run inside chat and project-stage threads. Only `/chat` ever worked, because it is invoked from a channel's compose box. This is the same class of unverified platform assumption as the "one level of threads" limit that shaped the project-channel structure (D-47) — a second one, so the lesson is: **Slack's interaction surface has sharp edges that only surface in live use; verify them before building on them.**
+
+**Decision.** A command reaches a thread three ways, all routing through the same handler:
+
+1. **Slash command** — still registered, works from a channel's main compose box. Not removed.
+2. **`@Mill <command> [args]`** — an `app_mention` event (scope `app_mentions:read`, already granted) carries `thread_ts`. `intent.js`'s `parseMention()` maps the first word to an action; `command-shim.js` builds the exact `{command, ack, client}` shape the real handler takes and calls it unchanged. Runs immediately.
+3. **A tapped offer** — `chat-turn.js` asks the conversational-reply call it is *already making* for a structured trailer (`---MILL-ACTION---` followed by `{suggested_action, confidence}`) — a delimiter, not a JSON envelope, because escaping a markdown reply into a JSON string field is a reliability problem. A regex fast path in `intent.js` handles unambiguous phrasing ("attack this") so it never depends on model judgement. On `high` confidence **and** a `validateSuggestion()` check that the action applies to the idea's current state, `promote-button.js` appends a one-tap button to the reply.
+
+**Constraints that make the offer safe.**
+
+- **It never interrupts.** Appended to the normal reply; ignoring it costs nothing. Made only on high confidence (explicit phrasing), deliberately under-offering — an incidental mention ("the counterargument is obvious") produces nothing. `suggested_action` is logged on every turn, nulls included, so an over-eager prompt firing on more than ~1/5 of turns shows in telemetry instead of degrading silently.
+- **Offers expire after 2 hours** (`MILL_OFFER_TTL_MS`) and refuse if the conversation has moved past the triggering turn (compacted away, or >8 turns on). Brainstorm threads move in minutes; a command built from a thread the founder can no longer see is the confidently-wrong output the mill exists to prevent. The offer stores the index of the turn that triggered it and runs against *that* turn's text, not "latest".
+- **The bot's own offer is not a conversational turn** — only the trailer-stripped reply is added to the session, so it never counts toward compaction.
+
+**Gate parity is the load-bearing property.** `@Mill` and the offer button are not a shortcut around validation. `command-shim.js` re-implements nothing: `/proto`'s named-assumption requirement (D-29), `/audit`'s research-stub refusal and the C-07 web-only→`narrow` downgrade (D-49), the five-touch cap (D-29), and `/attack`'s `TOO_VAGUE` refusal all live inside the handlers and fire identically on all three paths. Handlers deliver input-validation refusals via `ack({text})`, which is invisible on a non-slash path — so the shim captures that payload and reposts it as a thread message. Verified by invoking each refusal via the `@Mill` path and confirming it fires (`ops/slack-bot/_d51gates.js`).
+
+**Subject reconstruction.** When a brainstorm command is invoked with no argument (`@Mill attack`, or a tapped offer whose trigger turn is just "attack this"), the shim rebuilds the subject from the thread — topic plus recent substantive turns — so the model sees the idea under discussion, not the word "attack". `/proto` is exempt: it still refuses without an explicitly named assumption.
+
+**Also fixed here.** The promote button (D-15 / PROJECTS.md P2) was not rendering on bot replies inside `#chats` threads — `chat-turn.js` now builds every reply through `promote-button.js`'s `buildReplyBlocks`, and the `promote_chat` action resolves its target thread from the interaction payload when the stored value is a placeholder.
+
+**Revisit when:** Slack ships slash-command support in threads (then paths 2–3 become convenience, not necessity), or the telemetry shows offers firing on >~1/5 of turns despite the prompt (then the regex/confidence bar needs raising).

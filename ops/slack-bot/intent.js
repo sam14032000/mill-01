@@ -1,0 +1,147 @@
+"use strict";
+
+// Command-intent detection for conversational turns (D-51). Slash
+// commands don't work inside Slack threads, so a founder thinking out
+// loud reaches the brainstorm/project actions three ways: a slash command
+// from the channel body, `@Mill <cmd>` in the thread (immediate), or by
+// phrasing it in a normal message and tapping the offer this module
+// produces.
+//
+// Two detectors feed the offer:
+//   1. REGEX_INTENT -- unambiguous imperative phrasing, so "attack this"
+//      never depends on model judgement. Fast, zero cost.
+//   2. the conversational reply call's structured trailer (see
+//      chat-turn.js) -- better recall than a regex list, no extra call.
+// The offer only renders after validateSuggestion() confirms the action
+// actually applies to the idea's current state.
+
+// The fixed option set the model is told about and the regex maps into.
+const ACTIONS = ["attack", "find", "cross", "blindspot", "themes", "test", "proto", "spinoff", "audit"];
+
+// Actions that need a project (never offered in a bare #chats session).
+const PROJECT_ONLY = new Set(["test", "proto", "spinoff", "audit"]);
+
+// High-precision: an imperative aimed at *this idea now*, at the start of
+// the message or a clause. Narration ("someone could attack this on
+// price", "I searched already", "the counterargument is obvious") must
+// NOT match -- it describes, it doesn't ask. The regex is deliberately
+// conservative: a miss just falls through to the model's structured
+// suggestion; a false positive on narration is the worse failure (it
+// trains founders to ignore offers). Anchoring an imperative verb to a
+// clause boundary and forbidding a preceding modal/subject
+// ("could/would/might/someone/you could") is what buys that.
+const CLAUSE_START = "(?:^|[.!?…]\\s+|\\bnow\\s+|\\bok(?:ay)?[,\\s]+|\\bso[,\\s]+|\\bplease\\s+|\\bcan you\\s+|\\bcould you\\s+|\\blet'?s\\s+|\\bgo ahead and\\s+)";
+// "you could" / "we should" are already caught by could/should; leaving
+// bare "you"/"we" out so a request framing ("can you attack this") isn't
+// mistaken for narration.
+const NOT_NARRATED = "(?<!\\b(?:could|would|might|should|someone|somebody|one|they|he|she)\\s)";
+const RX = (body, flags = "i") => new RegExp(body, flags);
+
+const REGEX_INTENT = [
+	[RX(`${CLAUSE_START}${NOT_NARRATED}(attack|steel[- ]?man the case against|make the case against|poke holes in|argue against)\\s+(this|that|it|the idea)\\b`), "attack"],
+	[RX(`${CLAUSE_START}(search|look\\s+up|find|google|check online)\\s+(for\\s+|the\\s+|whether\\s+|if\\s+|about\\s+|out\\s+)`), "find"],
+	[RX(`${CLAUSE_START}(research this|test this assumption|run (a\\s+)?research pass)\\b`), "test"],
+	[RX(`${CLAUSE_START}(prototype this|mock this up|build a (quick\\s+)?(mock|landing\\s?page|prototype|one[- ]?pager))`), "proto"],
+	[RX(`${CLAUSE_START}spin (this\\s+)?(off|out)\\b|${CLAUSE_START}make this (its own|a separate)\\b`), "spinoff"],
+	[RX(`${CLAUSE_START}(audit this|send this to the (gate|audit))\\b|\\bis this ready for the gate\\b`), "audit"],
+	// Question-shaped -- hard to say incidentally, kept looser.
+	[RX(`\\b(what would|how would)\\s+(the\\s+)?(others|amisha|vaibhav|saksham|the team|everyone else)\\s+(say|think|react)`), "cross"],
+	[RX(`${CLAUSE_START}(run|bounce)\\s+(this|it|that)\\s+(past|by|off)\\s+(the\\s+)?(others|team)`), "cross"],
+	[RX(`\\b(what'?s|where'?s)\\s+(the\\s+|our\\s+)?(shared\\s+)?blind\\s?spot\\b|\\bwhat are we (all\\s+)?missing\\b`), "blindspot"],
+	[RX(`${CLAUSE_START}(show my themes|what have i been circling)\\b|\\brecurring (preoccupations|themes)\\b`), "themes"],
+];
+
+// Returns { action, source: "regex" } or null.
+function detectRegexIntent(text) {
+	const t = String(text || "");
+	for (const [re, action] of REGEX_INTENT) {
+		if (re.test(t)) return { action, source: "regex" };
+	}
+	return null;
+}
+
+// The `@Mill <word> ...` form. First word after the mention, mapped to an
+// action. Returns { action, rest } or null.
+const MENTION_ALIASES = {
+	attack: "attack", find: "find", search: "find", think: "think", develop: "think",
+	cross: "cross", blindspot: "blindspot", themes: "themes", theme: "themes",
+	test: "test", research: "test", audit: "audit", gate: "audit",
+	proto: "proto", prototype: "proto", spinoff: "spinoff", "spin-off": "spinoff",
+};
+function parseMention(textAfterMention) {
+	const m = String(textAfterMention || "").trim().match(/^(\S+)\s*([\s\S]*)$/);
+	if (!m) return null;
+	const action = MENTION_ALIASES[m[1].toLowerCase()];
+	if (!action) return null;
+	return { action, rest: m[2].trim() };
+}
+
+// Does this action apply to the idea right now? (The risk the founder
+// flagged: the model may suggest /audit before research, /proto on a
+// killed idea.) `ctx` = { inChats, project (state obj or null), assumption,
+// research (readLatestResearch result or null) }.
+// Returns { ok: true } or { ok: false, reason: "<slug>" }.
+function validateSuggestion(action, ctx) {
+	if (!ACTIONS.includes(action)) return { ok: false, reason: "unknown_action" };
+	if (ctx.inChats && PROJECT_ONLY.has(action)) return { ok: false, reason: "needs_project" };
+
+	const state = ctx.project?.state;
+	if (state === "killed" && action !== "spinoff") return { ok: false, reason: "idea_killed" };
+
+	if (action === "test") {
+		if (!ctx.assumption) return { ok: false, reason: "no_assumption" };
+		if (state && !["open", "researched"].includes(state)) return { ok: false, reason: "wrong_state" };
+	}
+	if (action === "audit") {
+		if (!ctx.research) return { ok: false, reason: "no_research" };
+		if (ctx.research.json && ctx.research.json.research_stub !== false) return { ok: false, reason: "research_stub" };
+		if (state && state !== "researched") return { ok: false, reason: "not_researched" };
+	}
+	if (action === "proto") {
+		if ((ctx.project?.touch_count ?? 0) >= 5) return { ok: false, reason: "touch_cap" };
+	}
+	return { ok: true };
+}
+
+// Parse the `---MILL-ACTION---` trailer off a conversational reply.
+// Returns { reply, suggested_action, confidence }. A missing or malformed
+// trailer means the whole thing is the reply and no action -- a
+// formatting hiccup never breaks a turn.
+const TRAILER = "---MILL-ACTION---";
+function splitReplyTrailer(raw) {
+	const s = String(raw || "");
+	const i = s.lastIndexOf(TRAILER);
+	if (i === -1) return { reply: s.trim(), suggested_action: null, confidence: null };
+	const reply = s.slice(0, i).trim();
+	let obj = {};
+	try {
+		obj = JSON.parse(s.slice(i + TRAILER.length).trim());
+	} catch {
+		return { reply: reply || s.trim(), suggested_action: null, confidence: null };
+	}
+	const action = ACTIONS.includes(obj.suggested_action) ? obj.suggested_action : null;
+	const confidence = ["high", "medium", "low"].includes(obj.confidence) ? obj.confidence : null;
+	return { reply: reply || s.trim(), suggested_action: action, confidence };
+}
+
+const PROMPT_TRAILER_INSTRUCTION = [
+	"",
+	"After your reply, on its own line, output exactly:",
+	TRAILER,
+	'{"suggested_action": <one of "attack","find","cross","blindspot","themes","test","proto","spinoff","audit", or null>, "confidence": "high"|"medium"|"low"}',
+	"Decide whether the founder is, in THIS message, asking you to run one of those actions on the current idea right now.",
+	'"high" only when they explicitly asked ("attack this", "search for X", "what would the others say"). Incidental mentions ("the counterargument is obvious", "someone might attack this") are not a request — use null or "low".',
+	"Under-suggest. An offer on every message trains the founder to ignore them.",
+	"The reply above the line must read exactly as it would without this instruction — the trailer is metadata, not part of the conversation.",
+].join("\n");
+
+module.exports = {
+	ACTIONS,
+	PROJECT_ONLY,
+	detectRegexIntent,
+	parseMention,
+	validateSuggestion,
+	splitReplyTrailer,
+	PROMPT_TRAILER_INSTRUCTION,
+	TRAILER,
+};

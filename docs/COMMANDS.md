@@ -72,6 +72,19 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ---
 
+## Invocation paths
+
+Slack rejects slash commands typed inside a thread (D-51). Since chats and project stages are threads, the slash forms below are only usable from a channel's main compose box. Inside a thread, a command is reached by:
+
+- **`@Mill <command> [args]`** — mention the bot, runs immediately.
+- **A tapped offer** — phrase the request in plain words; on high confidence the bot appends a one-tap button to its normal reply. Offers expire after 2h and refuse if the conversation has moved on.
+
+All three paths call the same handler. Every gate — `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and the C-07 web-only→`narrow` downgrade, the five-touch cap, the `TOO_VAGUE` refusal — fires identically regardless of path. `@Mill` and the offer button are not a shortcut around validation.
+
+When a subject is needed and none is supplied (`@Mill attack` alone, or a tapped offer), the shim rebuilds it from the thread topic plus recent substantive turns for the brainstorm commands. `/proto` is exempt: it still refuses without an explicit named assumption.
+
+---
+
 ## Commands
 
 ### Capture — any DM that isn't a slash command
