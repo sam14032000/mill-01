@@ -110,7 +110,7 @@ Ungated deliberately — at roughly $1.50 a pass, research is cheap enough to ru
 
 `/test <assumption>` starts it. The bot **first asks the founder** in-thread:
 
-> Have you spoken to anyone about this? Paste anything you've heard — quotes, objections, prices people named, who they were. Or reply `none`.
+> Before I research this — have you spoken to anyone? I'm most interested in what they **currently do**, not what they'd do: what they use today and what it costs, the workaround you've seen (a spreadsheet, a WhatsApp group, someone they pay), any price named or asked for. Paste it raw. Reply `none` if you haven't.
 
 Then the pass runs:
 
@@ -137,7 +137,7 @@ The only place a frontier model is used, guarding the most expensive downstream 
 **Output — verdict, not essay:**
 
 - **Verdict:** proceed / narrow / kill
-- **Evidence basis:** web-only / field-supported / both
+- **Evidence basis (graded, I1):** none / web-only / field-intent / field-behaviour / field-committed — the auditor assigns this from the raw field notes and prototype outcomes, not from the founder's framing
 - **Load-bearing assumption:** the one that, if false, makes the rest moot
 - **Strongest reason this fails:** plainly, unhedged
 - **What would change the verdict**

@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const { founderForUserId, channelId } = require("../config");
 const { callFlash } = require("../llm");
-const { ideaExists, readState, readAssumption, updateState, IDEAS_DIR, nowIso } = require("../ideas");
+const { ideaExists, readState, readAssumption, updateState, readFieldNotes, IDEAS_DIR, nowIso } = require("../ideas");
 const { commitAndPush } = require("../git");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
@@ -21,10 +21,18 @@ const STAGE = "test";
 // path fires correctly.
 const FIELD_EVIDENCE_TIMEOUT_MS = Number(process.env.MILL_TEST_FIELD_TIMEOUT_MS) || 30 * 60 * 1000;
 
+// I1: ask for behaviour, not intent. Surveys overestimate willingness to
+// pay ~21%; what people currently do and pay is the corrective. The audit
+// grades whatever comes back (see commands/audit.js) -- this prompt just
+// steers the founder toward the useful kind of answer.
 const FIELD_PROMPT = [
-	"Before I research this: have you spoken to anyone about it?",
-	"Paste anything you've heard — quotes, objections, prices people named, who they were.",
-	"Reply `none` if you haven't.",
+	"Before I research this — have you spoken to anyone?",
+	"I'm most interested in what they *currently do*, not what they say they'd do:",
+	"• What are they using today, and what does it cost them?",
+	"• Have you seen the workaround — a spreadsheet, a WhatsApp group, a person they pay?",
+	"• Did anyone name a price, or ask when they could buy?",
+	"",
+	"Paste it raw. Reply `none` if you haven't spoken to anyone yet.",
 ].join("\n");
 
 function timestamp() {
@@ -89,7 +97,10 @@ async function runFieldEvidencePhase({ client, researchChannel, founderUserId, i
 // makes is the gap-output question generation, which asks questions
 // rather than asserting facts, so it doesn't carry the same risk.
 async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFile, threadTs }) {
-	const evidenceBasis = hasFieldEvidence ? "field-supported" : "web-only";
+	// I1: /test does NOT grade the field evidence. It records that raw
+	// notes exist ("field-raw"); the audit reads them and assigns one of
+	// none/web-only/field-intent/field-behaviour/field-committed.
+	const evidenceBasis = hasFieldEvidence ? "field-raw" : "web-only";
 	let gapOutput = null;
 	let tokensIn = 0;
 	let tokensOut = 0;
@@ -129,10 +140,10 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 		"**Research stub:** true — no web research ran; /audit will not rule on this report as-is.",
 		`**Generated:** ${ts}`,
 		"",
-		"## Field evidence",
+		"## Field evidence (raw — the audit grades this)",
 		"",
 		hasFieldEvidence
-			? `See \`${fieldNotesFile}\`.`
+			? `_From \`${fieldNotesFile}\`. This is the founder's unedited text; classify behaviour vs intent from it, do not take the founder's own framing._\n\n${readFieldNotes(id)}`
 			: "None — founder replied `none` or did not reply within the field-evidence window.",
 		"",
 		"## Web evidence",

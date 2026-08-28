@@ -51,7 +51,7 @@ Deterministic. Implement as `ops/conformance.py`. Every check is pass/fail with 
 | Check | Passes if |
 |---|---|
 | `C-06` | No audit input contains brainstorm transcript content (D-28) |
-| `C-07` | No verdict of `proceed` carries `evidence_basis: web-only` (D-33) |
+| `C-07` | No verdict of `proceed` carries `evidence_basis` of `none` / `web-only` / `field-intent` — `proceed` needs `field-behaviour` or `field-committed` (D-33 / D-49) |
 | `C-08` | Every research pass has an associated falsifiable assumption (D-28) |
 | `C-09` | Every research pass with thin field evidence produced three questions and a who-to-ask (D-33) |
 | `C-10` | Every `kill` verdict wrote to the originating founder's `graveyard.md` |
@@ -124,7 +124,7 @@ Log per event to `telemetry/YYYY-MM.jsonl`. Without this, Layer 3 has nothing to
   "cost_usd": 1.48,
   "wall_clock_s": 41,
   "verdict": "kill",
-  "evidence_basis": "web-only",
+  "evidence_basis": "field-intent",   // none | web-only | field-intent | field-behaviour | field-committed (D-49; auditor-assigned)
   "reason_code": "no-willingness-to-pay-signal"
 }
 ```
@@ -136,7 +136,8 @@ Per idea, track the chain: `capture_ts → first_brainstorm → research → aud
 | Metric | Target | Reads on |
 |---|---|---|
 | Kill rate at gate | > 30% | D-10, D-28 |
-| Share of audits with `evidence_basis: field` | rising | D-33 |
+| Share of audits at `field-behaviour` or `field-committed` | rising over time; if it stays at zero the mill has become a substitute for the conversations | D-33 / D-49 |
+| `field-intent` share | falling (the field prompt now asks for behaviour) | D-49 |
 | Captures per founder per week | > 5 | D-37 |
 | `/blindspot` and `/cross` invocations | > 0 | D-27 |
 | Median touches per prototype | < 3 | D-29 |

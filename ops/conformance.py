@@ -267,18 +267,23 @@ def check_c06():
     return Result("C-06", "No audit input contains brainstorm transcript content (D-28)", True, "commands/audit.js imports only idea.md (assumption) + research report -- no think/cross/blindspot/context module")
 
 
+# I1: `proceed` requires field-behaviour or field-committed. none,
+# web-only and field-intent all cap at narrow.
+C07_CAPPED = {"none", "web-only", "field-intent", "field-supported"}  # field-supported = pre-I1 records
+
+
 def check_c07():
     violations = []
     for audit_file in IDEAS_DIR.glob("*/audit-*.json"):
         data = read_json(audit_file)
         if not data:
             continue
-        if data.get("verdict") == "proceed" and data.get("evidence_basis") == "web-only":
-            violations.append(str(audit_file))
+        if data.get("verdict") == "proceed" and data.get("evidence_basis") in C07_CAPPED:
+            violations.append(f"{audit_file.name}: proceed on {data.get('evidence_basis')}")
     if violations:
-        return Result("C-07", "No 'proceed' verdict carries web-only evidence (D-33)", False, f"violating audit records: {violations}")
+        return Result("C-07", "No 'proceed' verdict below field-behaviour (D-33 / I1)", False, f"violating audit records: {violations}")
     n = len(list(IDEAS_DIR.glob("*/audit-*.json")))
-    return Result("C-07", "No 'proceed' verdict carries web-only evidence (D-33)", True, f"checked {n} audit record(s), none violate D-33")
+    return Result("C-07", "No 'proceed' verdict below field-behaviour (D-33 / I1)", True, f"checked {n} audit record(s), none carry a proceed on {sorted(C07_CAPPED)}")
 
 
 def check_c08():

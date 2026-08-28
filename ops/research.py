@@ -167,7 +167,11 @@ async def main():
     if issues:
         report += "\n\n## Citation issues\n\n" + "\n".join(issues)
 
-    evidence_basis = "both" if has_field else "web-only"
+    # I1: the research pass does NOT grade field evidence. It records that
+    # raw notes exist ("field-raw") or not ("web-only"); commands/audit.js
+    # reads the raw notes and assigns the graded evidence_basis
+    # (field-intent / field-behaviour / field-committed).
+    evidence_basis = "field-raw" if has_field else "web-only"
 
     gap_text = None
     if evidence_basis == "web-only":

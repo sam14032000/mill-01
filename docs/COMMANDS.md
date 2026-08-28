@@ -142,11 +142,15 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 **Phase 1 — field evidence.** Bot replies in thread:
 
-> Before I research this: have you spoken to anyone about it?
-> Paste anything you heard — quotes, objections, prices named, who they were.
-> Reply `none` if you haven't.
+> Before I research this — have you spoken to anyone?
+> I'm most interested in what they **currently do**, not what they say they'd do:
+> • What are they using today, and what does it cost them?
+> • Have you seen the workaround — a spreadsheet, a WhatsApp group, a person they pay?
+> • Did anyone name a price, or ask when they could buy?
+>
+> Paste it raw. Reply `none` if you haven't spoken to anyone yet.
 
-Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes-<stamp>.md`. `none`, or timeout, proceeds with `evidence_basis: web-only`.
+The prompt asks for **behaviour, not intent** (I1) — what people currently do and pay, workarounds seen, prices named unprompted. Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes-<stamp>.md` **raw and ungraded**; `/test` records `evidence_basis: field-raw` (or `web-only` on `none`/timeout). The audit grades it — `/test` never does.
 
 **Phase 2 — the pass.** Runs `ops/research.py` (Part 11). Backgrounded; the bot must not block.
 
@@ -164,11 +168,12 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 
 - **Model:** **audit key only** (Fable 5). Never any other command. (D-10)
 - **Posts to:** the project's **Audit** stage thread in `#idea-<id>-<slug>` (Part 16). Kills also post to `#graveyard`. Fallback for channel-less ideas: `#research` (retired — D-47).
-- **Context:** `ideas/<id>/idea.md` (assumption only) + latest `research-<stamp>.md`
-- **Explicitly NOT in context:** brainstorm output, `/think` or `/cross` results, the founder's profile, any enthusiasm. (D-28)
+- **Context:** `ideas/<id>/idea.md` (assumption only) + latest `research-<stamp>.md` + the **raw** field notes (`field/notes-*.md`, for the audit to grade — I1) + `ideas/<id>/outcomes.md` if it exists (prototype outcomes — I2)
+- **Explicitly NOT in context:** brainstorm output, `/think` or `/cross` results, the founder's profile, the founder's own characterisation of the field evidence, any enthusiasm. (D-28)
 - **System prompt:**
   > Audit this assumption against the research provided. You are a gate, not an advisor.
-  > `proceed` requires field evidence from real people. Research from published sources alone caps at `narrow` — published information tells you a market exists; it cannot tell you anyone will buy.
+  > CLASSIFY the field evidence yourself from the raw notes. Do not accept the founder's framing. `field-intent` = "they said they would". `field-behaviour` = observed current spend / a real workaround / a price named unprompted. `field-committed` = paid, pre-ordered, signed up, or did the thing.
+  > `proceed` is only defensible on `field-behaviour` or `field-committed`. `web-only` and `field-intent` cap at `narrow`.
   > Be willing to kill. A kill returns founder attention, which is scarcer than money.
   > Return only the JSON object specified. No preamble.
 
@@ -177,18 +182,19 @@ Waits up to 30 minutes. A non-`none` reply is written to `ideas/<id>/field/notes
 ```json
 {
   "verdict": "proceed | narrow | kill",
-  "evidence_basis": "web-only | field-supported | both",
+  "evidence_basis": "none | web-only | field-intent | field-behaviour | field-committed"  // the audit assigns this by grading the raw field notes + prototype outcomes; it ignores any label already on the report
   "load_bearing_assumption": "the one that, if false, makes the rest moot",
   "strongest_failure_reason": "plainly, unhedged",
   "what_would_change_verdict": "…",
   "evidence_quality": "thin | adequate | strong",
-  "who_to_talk_to": "required when evidence_basis is web-only, else null"
+  "who_to_talk_to": "required when evidence_basis is none / web-only / field-intent, else null"
 }
 ```
 
 **Hard validation, enforced in code not prompt (C-07):**
 
-- `verdict == "proceed"` && `evidence_basis == "web-only"` → **reject, downgrade to `narrow`**, log the violation
+- `verdict == "proceed"` && `evidence_basis ∈ {none, web-only, field-intent}` → **reject, downgrade to `narrow`**, log the violation (I1: `proceed` needs `field-behaviour` or `field-committed` — observed behaviour or a real commitment, never stated intent)
+- **Grading is the audit's, from raw notes.** `field-intent` = "they said they would". `field-behaviour` = observed current spend / a workaround / a price named unprompted. `field-committed` = paid, pre-ordered, signed up, or did the thing (incl. in `ideas/<id>/outcomes.md`, I2).
 - Malformed JSON → one retry, then report failure. Never post an unvalidated verdict.
 
 **On `kill`:** append to `minds/<founder>/graveyard.md` with id, assumption, reason, date. Post to `#graveyard`. State → `killed`, terminal.

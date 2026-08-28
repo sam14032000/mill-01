@@ -11,15 +11,19 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 
-const { IDEAS_DIR, readState, updateState } = require("./ideas");
+const { IDEAS_DIR, readState, updateState, appendOutcome } = require("./ideas");
+const { commitAndPush } = require("./git");
 const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
-const { userIdForFounder } = require("./config");
+const { userIdForFounder, founderForUserId } = require("./config");
+const { waitForThreadReply } = require("./thread-wait");
 
 const MOUNT_SH = path.join(os.homedir(), "stack", "sandbox", "mount.sh");
 const DEFAULT_MIN = Number(process.env.MILL_MOUNT_DEFAULT_MIN) || 30;
 const CAP_MIN = Number(process.env.MILL_MOUNT_CAP_MIN) || 480; // 8h
 const WARN_MIN = Number(process.env.MILL_MOUNT_WARN_MIN) || 5;
+const OUTCOME_TIMEOUT_MS = Number(process.env.MILL_OUTCOME_TIMEOUT_MS) || 60 * 60 * 1000;
+const NGROK_REQ_API = process.env.MILL_NGROK_REQ_API || "http://127.0.0.1:4040/api/requests/http";
 const NGROK_API = process.env.MILL_NGROK_API || "http://127.0.0.1:4040/api/tunnels";
 
 // in-memory timers for the currently-mounted idea (re-armed on restart
@@ -109,17 +113,86 @@ function armTimers({ id, expiresAt, client, channel, threadTs }) {
 	timers.expire.unref?.();
 }
 
-async function dismount({ id, client, channel, threadTs, reason }) {
+// I2: how many times ngrok saw a request since the mount started.
+// null == ngrok's inspector wasn't reachable (tunnel down or old ngrok).
+async function tunnelRequestCount(sinceIso) {
+	try {
+		const res = await fetch(`${NGROK_REQ_API}?limit=1000`, { signal: AbortSignal.timeout(4000) });
+		if (!res.ok) return null;
+		const data = await res.json();
+		const reqs = data.requests || [];
+		const since = sinceIso ? new Date(sinceIso).getTime() : 0;
+		return reqs.filter((r) => {
+			const t = new Date(r.request?.headers?.date?.[0] || r.start || 0).getTime();
+			return Number.isFinite(t) ? t >= since : true;
+		}).length;
+	} catch {
+		return null;
+	}
+}
+
+function outcomePrompt(durationMin, reqCount) {
+	const opened =
+		reqCount == null
+			? ""
+			: reqCount === 0
+				? "\nThe tunnel logged *0 requests* — the URL was never opened. That's a finding in itself."
+				: `\nThe tunnel logged *${reqCount} request${reqCount === 1 ? "" : "s"}*.`;
+	return (
+		`Prototype dismounted after ${durationMin} min.${opened}\n\n` +
+		"• Who saw it?\n" +
+		"• What did they actually do — clicked, asked a question, signed up, paid, went quiet?\n" +
+		"• Anything they said about price?\n\n" +
+		"Reply `nobody` if it was just you."
+	);
+}
+
+async function dismount({ id, client, channel, threadTs, reason, byUserId }) {
 	await sh(["down"]);
 	const st = readState(id);
-	if (st && st.mount) updateState(id, { mount: null });
+	const mountInfo = st && st.mount;
+	if (mountInfo) updateState(id, { mount: null });
 	clearTimers();
-	if (client && channel) {
-		await client.chat
-			.postMessage({ channel, thread_ts: threadTs, text: `🔻 Prototype for \`${id}\` dismounted — ${reason}. The slot is free.` })
-			.catch(() => {});
+
+	if (!client || !channel) {
+		emit(buildEvalEvent({ stage: "mount", ideaId: id, founder: null, status: "ok", reasonCode: "dismount" }));
+		return;
 	}
-	emit(buildEvalEvent({ stage: "mount", ideaId: id, founder: null, status: "ok", reasonCode: "dismount" }));
+
+	// I2: the founder just finished showing it to someone -- capture the
+	// outcome. Non-blocking: post the prompt, register a thread-wait, and
+	// write the reply to outcomes.md whenever it arrives.
+	const durationMin = mountInfo?.mounted_at
+		? Math.max(1, Math.round((Date.now() - new Date(mountInfo.mounted_at).getTime()) / 60000))
+		: null;
+	const reqCount = await tunnelRequestCount(mountInfo?.mounted_at);
+
+	const posted = await client.chat
+		.postMessage({
+			channel,
+			thread_ts: threadTs,
+			text: `🔻 Prototype for \`${id}\` dismounted — ${reason}. The slot is free.\n\n${outcomePrompt(durationMin ?? "?", reqCount)}`,
+		})
+		.catch(() => null);
+
+	const founderUserId = byUserId || (mountInfo?.mounted_by ? userIdForFounder(mountInfo.mounted_by) : null);
+	const replyThreadTs = posted?.ts || threadTs;
+	if (founderUserId && replyThreadTs) {
+		waitForThreadReply(replyThreadTs, founderUserId, OUTCOME_TIMEOUT_MS).then((r) => {
+			if (!r.replied || !r.text) return;
+			const founder = founderForUserId(founderUserId) || mountInfo?.mounted_by || "unknown";
+			const file = appendOutcome(id, { founder, requestCount: reqCount, durationMin: durationMin ?? "?", text: r.text });
+			commitAndPush([`ideas/${id}/outcomes.md`], `idea ${id}: prototype outcome by ${founder}`, (e) =>
+				console.error(`outcome commit/push failed for ${id}: ${e}`),
+			);
+			client.chat
+				.postMessage({ channel, thread_ts: threadTs, text: `Recorded to \`ideas/${id}/outcomes.md\`. \`/audit ${id}\` will see it.` })
+				.catch(() => {});
+			emit(buildEvalEvent({ stage: "outcome", ideaId: id, founder, status: "ok", reasonCode: `requests_${reqCount == null ? "unknown" : reqCount}` }));
+		});
+	}
+
+	emit(buildEvalEvent({ stage: "mount", ideaId: id, founder: mountInfo?.mounted_by || null, status: "ok", reasonCode: "dismount" }));
 }
 
 async function mount({ id, touchN, byFounder, minutes, client, channel, threadTs }) {

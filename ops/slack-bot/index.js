@@ -181,7 +181,7 @@ app.action("proto_mount", async ({ ack, body }) => {
 app.action("proto_dismount", async ({ ack, body }) => {
 	await ack();
 	const id = body.actions?.[0]?.value;
-	if (id) await mountMod.dismount({ id, reason: "manual", ...mountCtx(body, id) }).catch((e) => console.error("proto_dismount failed:", e));
+	if (id) await mountMod.dismount({ id, reason: "manual", byUserId: body.user?.id, ...mountCtx(body, id) }).catch((e) => console.error("proto_dismount failed:", e));
 });
 app.action("proto_extend", async ({ ack, body }) => {
 	await ack();

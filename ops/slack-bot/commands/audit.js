@@ -10,6 +10,8 @@ const {
 	readState,
 	readAssumption,
 	readLatestResearch,
+	readFieldNotes,
+	readOutcomes,
 	updateState,
 	IDEAS_DIR,
 	nowIso,
@@ -23,10 +25,18 @@ const { buildEvalEvent } = require("../eval-event");
 const MODEL = "audit"; // Fable 5. D-10: never called anywhere else in this codebase.
 const STAGE = "audit";
 
-// Verbatim from docs/COMMANDS.md's /audit system prompt.
+// docs/COMMANDS.md's /audit system prompt + I1's evidence-grading rule.
 const SYSTEM_PROMPT = [
 	"Audit this assumption against the research provided. You are a gate, not an advisor.",
-	"`proceed` requires field evidence from real people. Research from published sources alone caps at `narrow` — published information tells you a market exists; it cannot tell you anyone will buy.",
+	"",
+	"CLASSIFY the field evidence yourself from the raw founder notes in the report. Do NOT accept the founder's own characterisation of it. Grade it into `evidence_basis`:",
+	"  • `none` — no research has run / no usable evidence",
+	"  • `web-only` — published sources only, no field evidence",
+	"  • `field-intent` — people said what they *would* do (would use, would pay, sounds useful). Surveys overestimate this; treat it as weak.",
+	"  • `field-behaviour` — observed: what someone currently uses and pays, a real workaround (spreadsheet, WhatsApp group, a person they pay), or a price named/asked-for unprompted",
+	"  • `field-committed` — someone paid, pre-ordered, signed up, or (in the prototype outcomes) actually did the thing",
+	"",
+	"`proceed` is only defensible on `field-behaviour` or `field-committed`. `web-only` and `field-intent` cap at `narrow` — published info and stated intent tell you a market might exist; they don't tell you anyone will buy.",
 	"Be willing to kill. A kill returns founder attention, which is scarcer than money.",
 	"Return only the JSON object specified. No preamble.",
 ].join("\n");
@@ -41,7 +51,10 @@ const REQUIRED_FIELDS = [
 	"who_to_talk_to",
 ];
 const VALID_VERDICTS = ["proceed", "narrow", "kill"];
-const VALID_EVIDENCE_BASIS = ["web-only", "field-supported", "both"];
+// I1: graded. Ordered weakest -> strongest.
+const VALID_EVIDENCE_BASIS = ["none", "web-only", "field-intent", "field-behaviour", "field-committed"];
+// The grades that can never carry a `proceed` (C-07, enforced in code).
+const CAPPED_AT_NARROW = new Set(["none", "web-only", "field-intent"]);
 
 // Models occasionally wrap JSON in a markdown code fence despite being
 // told not to ("no preamble"). Stripped defensively before parsing;
@@ -83,11 +96,12 @@ function parseAuditResponse(text) {
 // let a web-only proceed through. Returns the (possibly modified)
 // verdict object and whether a downgrade happened.
 function enforceEvidenceGate(verdictObj) {
-	if (verdictObj.verdict === "proceed" && verdictObj.evidence_basis === "web-only") {
-		return {
-			verdict: { ...verdictObj, verdict: "narrow" },
-			downgraded: true,
-		};
+	// I1: `proceed` requires field-behaviour or field-committed. Anything
+	// weaker -- none, web-only, or field-intent ("they said they would")
+	// -- is downgraded to `narrow` here in code regardless of what the
+	// model returned.
+	if (verdictObj.verdict === "proceed" && CAPPED_AT_NARROW.has(verdictObj.evidence_basis)) {
+		return { verdict: { ...verdictObj, verdict: "narrow" }, downgraded: true };
 	}
 	return { verdict: verdictObj, downgraded: false };
 }
@@ -126,22 +140,29 @@ function appendToGraveyard({ founder, id, assumption, reason }) {
 const SCHEMA_INSTRUCTION = `Return exactly one JSON object with these fields and no others:
 {
   "verdict": one of ${JSON.stringify(VALID_VERDICTS)},
-  "evidence_basis": one of ${JSON.stringify(VALID_EVIDENCE_BASIS)},
+  "evidence_basis": one of ${JSON.stringify(VALID_EVIDENCE_BASIS)}  (you assign this by grading the raw field notes; ignore any label already in the report),
   "load_bearing_assumption": string,
   "strongest_failure_reason": string,
   "what_would_change_verdict": string,
   "evidence_quality": one of ["thin", "adequate", "strong"],
-  "who_to_talk_to": string, required when evidence_basis is "web-only", otherwise null
+  "who_to_talk_to": string, required when evidence_basis is "none", "web-only" or "field-intent", otherwise null
 }`;
 
-async function runAudit({ assumption, researchMd }) {
+async function runAudit({ assumption, researchMd, fieldNotesMd, outcomesMd }) {
+	const parts = [`Assumption:\n${assumption}`, `Research report:\n${researchMd}`];
+	// I1: the raw field notes, verbatim, for the model to grade itself.
+	if (fieldNotesMd && fieldNotesMd.trim()) {
+		parts.push(`Raw field notes (grade these — behaviour vs intent vs commitment):\n${fieldNotesMd}`);
+	}
+	// I2: what real people did when they saw the prototype. A recorded
+	// signup / pre-order / payment here is what makes `field-committed`.
+	if (outcomesMd && outcomesMd.trim()) {
+		parts.push(`Prototype outcomes (real people seeing the built thing):\n${outcomesMd}`);
+	}
 	const messages = [
 		{ role: "system", content: SYSTEM_PROMPT },
 		{ role: "system", content: SCHEMA_INSTRUCTION },
-		{
-			role: "user",
-			content: `Assumption:\n${assumption}\n\nResearch report:\n${researchMd}`,
-		},
+		{ role: "user", content: parts.join("\n\n") },
 	];
 
 	let parsed = null;
@@ -273,6 +294,8 @@ async function handleAuditCommand({ command, ack, client }) {
 		const { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runAudit({
 			assumption,
 			researchMd: research.md,
+			fieldNotesMd: readFieldNotes(id),
+			outcomesMd: readOutcomes(id),
 		});
 
 		if (!parsed) {
@@ -347,7 +370,7 @@ async function handleAuditCommand({ command, ack, client }) {
 		);
 
 		const lines = [
-			`*Verdict:* ${verdict.verdict}${downgraded ? " _(downgraded from proceed — web-only evidence cannot proceed, C-07)_" : ""}`,
+			`*Verdict:* ${verdict.verdict}${downgraded ? ` _(downgraded from proceed — \`${verdict.evidence_basis}\` cannot proceed; needs field-behaviour or field-committed, C-07/I1)_` : ""}`,
 			`*Evidence basis:* ${verdict.evidence_basis}`,
 			`*Load-bearing assumption:* ${verdict.load_bearing_assumption}`,
 			`*Strongest reason this fails:* ${verdict.strongest_failure_reason}`,

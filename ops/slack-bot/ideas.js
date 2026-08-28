@@ -198,6 +198,42 @@ function setAssumption(id, assumption) {
 	updateState(id, { assumption, has_assumption: true });
 }
 
+// All raw field-evidence notes for an idea, concatenated newest-first.
+// I1: the audit reads and *grades* these itself -- it must see the raw
+// founder text, not a pre-assigned label.
+function readFieldNotes(id) {
+	const dir = path.join(IDEAS_DIR, id, "field");
+	let files;
+	try {
+		files = fs.readdirSync(dir).filter((f) => /^notes-.*\.md$/.test(f)).sort().reverse();
+	} catch {
+		return "";
+	}
+	return files
+		.map((f) => `--- ${f} ---\n${fs.readFileSync(path.join(dir, f), "utf8").trim()}`)
+		.join("\n\n");
+}
+
+// I2: what real people did when they saw the prototype. Feeds the audit.
+function readOutcomes(id) {
+	try {
+		return fs.readFileSync(path.join(IDEAS_DIR, id, "outcomes.md"), "utf8");
+	} catch {
+		return "";
+	}
+}
+
+function appendOutcome(id, { founder, requestCount, durationMin, text }) {
+	const p = path.join(IDEAS_DIR, id, "outcomes.md");
+	const stamp = nowIso();
+	const block =
+		`\n## ${stamp} — ${founder}\n` +
+		`mount duration: ${durationMin} min · tunnel requests: ${requestCount == null ? "unknown" : requestCount}\n\n` +
+		`${(text || "").trim()}\n`;
+	fs.appendFileSync(p, block, "utf8");
+	return p;
+}
+
 function readLatestResearch(id) {
 	const dir = path.join(IDEAS_DIR, id);
 	let files;
@@ -240,6 +276,9 @@ module.exports = {
 	promoteIdea,
 	findIdeaByChannel,
 	setAssumption,
+	readFieldNotes,
+	readOutcomes,
+	appendOutcome,
 	readState,
 	readIdeaMd,
 	readAssumption,

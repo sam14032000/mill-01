@@ -591,3 +591,21 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **Amends D-06** (which said "network egress allowlisted" without distinguishing build from run) and the Part 10 `run.sh` design (single `egress` network).
 
 **Revisit when:** frontend prototypes become frequent enough that the single ngrok slot is a real bottleneck — at which point reconsider a static host, comparing current free tiers fresh.
+
+---
+
+### D-49 · Field evidence is graded; `proceed` requires demonstrated behaviour
+
+**Decision.** `evidence_basis` is no longer a binary "field evidence exists / doesn't". It is a grade the **audit** assigns, from weakest to strongest: `none`, `web-only`, `field-intent`, `field-behaviour`, `field-committed`. The gate (C-07, enforced in `commands/audit.js`'s `enforceEvidenceGate` after JSON parsing, never by prompt): **`proceed` requires `field-behaviour` or `field-committed`**; `none`, `web-only` and `field-intent` all cap at `narrow`.
+
+- `field-intent` — people said what they *would* do ("I'd totally use this", "sounds useful", "I'd pay for that").
+- `field-behaviour` — observed: what someone currently uses and pays, a real workaround (a spreadsheet, a WhatsApp group, a person they pay), or a price named / asked for unprompted.
+- `field-committed` — someone paid, pre-ordered, signed up, or did the thing — including in `ideas/<id>/outcomes.md` (the I2 prototype-outcome capture).
+
+**Why.** D-33 opened a door — web-only caps at `narrow`, field evidence unlocks `proceed` — and the failure it was built to prevent walked straight through it: "my friend said he'd totally use this" counted as `field-supported` and was eligible for `proceed`. Surveys overestimate willingness to pay by ~21%; stated intent is close to worthless as a buy signal. The corrective is structured past-behaviour questioning, so the `/test` field prompt now asks what people *currently do and pay*, and the audit grades the raw notes itself — it does **not** accept the founder's characterisation, because the founder is the most optimistic reader of their own field notes.
+
+**Supersedes** the three-value `evidence_basis` (`web-only` / `field-supported` / `both`) in D-33's enforcement and every prior schema. `/test` and `ops/research.py` now emit only `web-only` or `field-raw` (ungraded); grading happens once, at the gate.
+
+**Paired with I2 (outcomes at dismount).** The strongest evidence a mill can produce — someone clicked, signed up, paid when shown the prototype — previously had nowhere to live. On `[Dismount]` or auto-expiry the bot asks who saw it and what they did (with the ngrok request count as a fact to react to), writes the reply to `ideas/<id>/outcomes.md`, and feeds that file into audit context. A recorded signup or payment there is what makes `field-committed`.
+
+**Revisit when:** never, without an explicit decision to lower the bar. If `field-behaviour` share stays at zero across a month of real use (tracked in `EVAL.md`), the mill has become a substitute for the conversations rather than preparation for them — which is a signal about how it's being used, not a reason to relax the grade.
