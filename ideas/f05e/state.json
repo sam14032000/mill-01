@@ -1,0 +1,22 @@
+{
+  "id": "f05e",
+  "state": "open",
+  "founder": "saksham",
+  "created_at": "2026-08-28T13:58:59.031Z",
+  "updated_at": "2026-08-28T13:58:59.031Z",
+  "origin": "chat",
+  "origin_chat_ts": "1787923060.248729",
+  "has_assumption": false,
+  "assumption": null,
+  "channel_id": "C0BTA4GDK5K",
+  "threads": {
+    "brainstorm": "1787925538.266179",
+    "research": "1787925538.429089",
+    "audit": "1787925538.594209",
+    "prototype": "1787925538.767289",
+    "documents": "1787925538.941299"
+  },
+  "parent": null,
+  "children": [],
+  "touch_count": 0
+}
