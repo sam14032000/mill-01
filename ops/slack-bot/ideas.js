@@ -19,7 +19,10 @@ function generateIdeaId() {
 	let id;
 	do {
 		id = crypto.randomBytes(2).toString("hex");
-	} while (ideaExists(id));
+		// `zz*` is reserved for test/verification ideas, which git.js
+		// excludes from every commit. Keep the namespaces disjoint so a
+		// real idea is never silently un-committable.
+	} while (ideaExists(id) || /^zz/i.test(id));
 	return id;
 }
 
@@ -214,6 +217,47 @@ function readFieldNotes(id) {
 		.join("\n\n");
 }
 
+// I3: a compact digest of every founder's graveyard for audit context --
+// so the auditor can say "this is your June idea renamed, killed for a
+// reason that still applies". Titles/assumptions + reasons + dates only,
+// newest first, capped. graveyard.md lines are written by
+// commands/audit.js's appendToGraveyard as:
+//   - <date> — `<id>`: <assumption>
+//     Reason: <reason>
+function readGraveyardDigest({ maxEntries = 40, reasonChars = 240 } = {}) {
+	const MINDS = path.join(IDEAS_DIR, "..", "minds");
+	const entryRe = /^- (\d{4}-\d{2}-\d{2}) — `([^`]+)`: ([\s\S]*?)\n\s*Reason: ([\s\S]*?)(?=\n- |\n*$)/gm;
+	const rows = [];
+	let founders;
+	try {
+		founders = fs.readdirSync(MINDS).filter((f) => f !== "shared");
+	} catch {
+		return "";
+	}
+	for (const f of founders) {
+		let text;
+		try {
+			text = fs.readFileSync(path.join(MINDS, f, "graveyard.md"), "utf8");
+		} catch {
+			continue;
+		}
+		for (const m of text.matchAll(entryRe)) {
+			rows.push({
+				date: m[1],
+				id: m[2],
+				founder: f,
+				assumption: m[3].trim().replace(/\s+/g, " "),
+				reason: m[4].trim().replace(/\s+/g, " ").slice(0, reasonChars),
+			});
+		}
+	}
+	rows.sort((a, b) => b.date.localeCompare(a.date));
+	return rows
+		.slice(0, maxEntries)
+		.map((r) => `- \`${r.id}\` (${r.founder}, ${r.date}): ${r.assumption}\n  killed: ${r.reason}`)
+		.join("\n");
+}
+
 // I2: what real people did when they saw the prototype. Feeds the audit.
 function readOutcomes(id) {
 	try {
@@ -277,6 +321,7 @@ module.exports = {
 	findIdeaByChannel,
 	setAssumption,
 	readFieldNotes,
+	readGraveyardDigest,
 	readOutcomes,
 	appendOutcome,
 	readState,

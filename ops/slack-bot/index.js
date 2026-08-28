@@ -28,6 +28,7 @@ const { promoteChat } = require("./promotion");
 const { handleProjectUpload } = require("./documents");
 const mountMod = require("./mount");
 const { readState } = require("./ideas");
+const { startStalenessSweep, killStale } = require("./staleness");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
@@ -188,6 +189,13 @@ app.action("proto_extend", async ({ ack, body }) => {
 	const id = body.actions?.[0]?.value;
 	if (id) await mountMod.extend({ id, ...mountCtx(body, id) }).catch((e) => console.error("proto_extend failed:", e));
 });
+// I4: [Kill it] on a staleness nudge -- always reason `stale`.
+app.action("stale_kill", async ({ ack, body }) => {
+	await ack();
+	const id = body.actions?.[0]?.value;
+	if (id) await killStale({ id, client: app.client }).catch((e) => console.error("stale_kill failed:", e));
+});
+
 app.action("proto_takeover", async ({ ack, body }) => {
 	await ack();
 	const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
@@ -297,6 +305,10 @@ app.message(async ({ message, client }) => {
 	// unpromoted chats to their captures file (Part 14.7). In-process, not
 	// cron, for the same reason weekly profile evolution is.
 	startNightlyScheduler((reason) => console.error(`nightly chat capture failed: ${reason}`));
+
+	// I4: daily staleness sweep -- nudge ideas stuck pre-verdict for 14/30
+	// days, once each. In-process, same reason as the other schedulers.
+	startStalenessSweep(app.client, (reason) => console.error(`staleness sweep failed: ${reason}`));
 
 	// Sunday 09:30 IST (04:00 UTC), D-30: proposes profile/dynamics diffs,
 	// never applies them -- see profile-evolution.js and the

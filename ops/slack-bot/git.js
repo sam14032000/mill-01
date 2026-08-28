@@ -6,6 +6,21 @@ const { postToMill } = require("./notify");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
+// Test/verification ideas use the `zz` prefix (ideas/zz16, ideas/zzI2, ...).
+// commitAndPush scopes to explicit paths, but those paths include `ideas/`,
+// so a verification run that exercises the real /attack, /proto, promote or
+// dismount path would commit its throwaway idea and need a cleanup commit
+// afterward (this happened four times across Parts 14-17 + I2). This magic
+// pathspec is appended to every git operation so the bot never stages,
+// never commits, and never reports on anything under ideas/zz*. Real idea
+// ids are 4-char lowercase hex and can start "zz" only 1/65536 of the time
+// -- generateIdeaId() rejects any id matching /^zz/ to keep the namespaces
+// disjoint.
+// No `glob` magic: default pathspec wildmatch lets `*` cross `/`, so
+// `ideas/zz*` also excludes `ideas/zzNEW/state.json` etc. (with `glob` it
+// would only match the directory name, not its children).
+const EXCLUDE_TEST_IDEAS = ":(exclude)ideas/zz*";
+
 function run(cmd, args) {
 	return new Promise((resolve) => {
 		execFile(cmd, args, { cwd: REPO_ROOT }, (error, stdout, stderr) => {
@@ -30,7 +45,8 @@ async function reportGitFailure(onFailure, msg) {
 // true only if the commit was made AND pushed; false if there was nothing
 // to commit, or a step failed (already reported).
 async function commitAndPush(paths, message, onFailure) {
-	const status = await run("git", ["status", "--porcelain", "--", ...paths]);
+	const scoped = [...paths, EXCLUDE_TEST_IDEAS];
+	const status = await run("git", ["status", "--porcelain", "--", ...scoped]);
 	if (status.error) {
 		await reportGitFailure(onFailure, `status failed: ${status.error.message}`);
 		return false;
@@ -47,13 +63,13 @@ async function commitAndPush(paths, message, onFailure) {
 	// message. Both halves are needed: `add` picks up new untracked
 	// files under the paths (e.g. a fresh ideas/<id>/), `commit -- paths`
 	// fences everything else out.
-	const add = await run("git", ["add", "--", ...paths]);
+	const add = await run("git", ["add", "--", ...scoped]);
 	if (add.error) {
 		await reportGitFailure(onFailure, `add failed: ${add.error.message}`);
 		return false;
 	}
 
-	const commit = await run("git", ["commit", "-m", message, "--", ...paths]);
+	const commit = await run("git", ["commit", "-m", message, "--", ...scoped]);
 	if (commit.error) {
 		await reportGitFailure(onFailure, `commit failed: ${commit.error.message}`);
 		return false;

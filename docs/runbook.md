@@ -141,7 +141,8 @@ The only place a frontier model is used, guarding the most expensive downstream 
 - **Load-bearing assumption:** the one that, if false, makes the rest moot
 - **Strongest reason this fails:** plainly, unhedged
 - **What would change the verdict**
-- **If web-only:** who to talk to before this can proceed
+- **If web-only / intent:** who to talk to before this can proceed
+- **Resembles killed idea (I3):** the id of a previously-killed idea this echoes, or none — the auditor sees every founder's graveyard
 
 **Hard rule: web-only evidence caps at `narrow`.** `proceed` requires field evidence. This is the mechanism that stops the mill becoming a machine for generating confident desk research.
 

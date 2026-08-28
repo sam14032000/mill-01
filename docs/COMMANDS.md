@@ -168,12 +168,13 @@ The prompt asks for **behaviour, not intent** (I1) — what people currently do 
 
 - **Model:** **audit key only** (Fable 5). Never any other command. (D-10)
 - **Posts to:** the project's **Audit** stage thread in `#idea-<id>-<slug>` (Part 16). Kills also post to `#graveyard`. Fallback for channel-less ideas: `#research` (retired — D-47).
-- **Context:** `ideas/<id>/idea.md` (assumption only) + latest `research-<stamp>.md` + the **raw** field notes (`field/notes-*.md`, for the audit to grade — I1) + `ideas/<id>/outcomes.md` if it exists (prototype outcomes — I2)
+- **Context:** `ideas/<id>/idea.md` (assumption only) + latest `research-<stamp>.md` + the **raw** field notes (`field/notes-*.md`, for the audit to grade — I1) + `ideas/<id>/outcomes.md` if it exists (prototype outcomes — I2) + a compact digest of all three founders' graveyards (id, assumption, kill reason, date — I3)
 - **Explicitly NOT in context:** brainstorm output, `/think` or `/cross` results, the founder's profile, the founder's own characterisation of the field evidence, any enthusiasm. (D-28)
 - **System prompt:**
   > Audit this assumption against the research provided. You are a gate, not an advisor.
   > CLASSIFY the field evidence yourself from the raw notes. Do not accept the founder's framing. `field-intent` = "they said they would". `field-behaviour` = observed current spend / a real workaround / a price named unprompted. `field-committed` = paid, pre-ordered, signed up, or did the thing.
   > `proceed` is only defensible on `field-behaviour` or `field-committed`. `web-only` and `field-intent` cap at `narrow`.
+  > If this assumption is materially the same as one already killed (list below), say so and weight the earlier kill reason unless research shows it no longer holds — put its id in `resembles_killed_idea` (I3).
   > Be willing to kill. A kill returns founder attention, which is scarcer than money.
   > Return only the JSON object specified. No preamble.
 
@@ -187,7 +188,8 @@ The prompt asks for **behaviour, not intent** (I1) — what people currently do 
   "strongest_failure_reason": "plainly, unhedged",
   "what_would_change_verdict": "…",
   "evidence_quality": "thin | adequate | strong",
-  "who_to_talk_to": "required when evidence_basis is none / web-only / field-intent, else null"
+  "who_to_talk_to": "required when evidence_basis is none / web-only / field-intent, else null",
+  "resembles_killed_idea": "id of a previously-killed idea this assumption is materially the same as (I3), else null"
 }
 ```
 

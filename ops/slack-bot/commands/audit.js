@@ -12,6 +12,7 @@ const {
 	readLatestResearch,
 	readFieldNotes,
 	readOutcomes,
+	readGraveyardDigest,
 	updateState,
 	IDEAS_DIR,
 	nowIso,
@@ -37,6 +38,9 @@ const SYSTEM_PROMPT = [
 	"  • `field-committed` — someone paid, pre-ordered, signed up, or (in the prototype outcomes) actually did the thing",
 	"",
 	"`proceed` is only defensible on `field-behaviour` or `field-committed`. `web-only` and `field-intent` cap at `narrow` — published info and stated intent tell you a market might exist; they don't tell you anyone will buy.",
+	"",
+	"Previously killed ideas are listed below (I3). If this assumption is materially the same as one already killed, say so explicitly and weight the earlier kill reason — unless the research shows the reason no longer holds. Put the killed idea's id in `resembles_killed_idea`, else null.",
+	"",
 	"Be willing to kill. A kill returns founder attention, which is scarcer than money.",
 	"Return only the JSON object specified. No preamble.",
 ].join("\n");
@@ -49,6 +53,7 @@ const REQUIRED_FIELDS = [
 	"what_would_change_verdict",
 	"evidence_quality",
 	"who_to_talk_to",
+	"resembles_killed_idea", // I3: killed-idea id this assumption echoes, or null
 ];
 const VALID_VERDICTS = ["proceed", "narrow", "kill"];
 // I1: graded. Ordered weakest -> strongest.
@@ -84,6 +89,9 @@ function parseAuditResponse(text) {
 	}
 	if (!VALID_VERDICTS.includes(obj.verdict)) return null;
 	if (!VALID_EVIDENCE_BASIS.includes(obj.evidence_basis)) return null;
+	// I3: resembles_killed_idea is a string id or null (not undefined --
+	// "present in the object" is already checked via REQUIRED_FIELDS).
+	if (obj.resembles_killed_idea !== null && typeof obj.resembles_killed_idea !== "string") return null;
 	return obj;
 }
 
@@ -145,10 +153,11 @@ const SCHEMA_INSTRUCTION = `Return exactly one JSON object with these fields and
   "strongest_failure_reason": string,
   "what_would_change_verdict": string,
   "evidence_quality": one of ["thin", "adequate", "strong"],
-  "who_to_talk_to": string, required when evidence_basis is "none", "web-only" or "field-intent", otherwise null
+  "who_to_talk_to": string, required when evidence_basis is "none", "web-only" or "field-intent", otherwise null,
+  "resembles_killed_idea": the id (string) of a previously-killed idea this assumption is materially the same as, otherwise null
 }`;
 
-async function runAudit({ assumption, researchMd, fieldNotesMd, outcomesMd }) {
+async function runAudit({ assumption, researchMd, fieldNotesMd, outcomesMd, graveyardDigest }) {
 	const parts = [`Assumption:\n${assumption}`, `Research report:\n${researchMd}`];
 	// I1: the raw field notes, verbatim, for the model to grade itself.
 	if (fieldNotesMd && fieldNotesMd.trim()) {
@@ -158,6 +167,10 @@ async function runAudit({ assumption, researchMd, fieldNotesMd, outcomesMd }) {
 	// signup / pre-order / payment here is what makes `field-committed`.
 	if (outcomesMd && outcomesMd.trim()) {
 		parts.push(`Prototype outcomes (real people seeing the built thing):\n${outcomesMd}`);
+	}
+	// I3: what has already been killed, and why.
+	if (graveyardDigest && graveyardDigest.trim()) {
+		parts.push(`Previously killed ideas (all founders):\n${graveyardDigest}`);
 	}
 	const messages = [
 		{ role: "system", content: SYSTEM_PROMPT },
@@ -296,6 +309,7 @@ async function handleAuditCommand({ command, ack, client }) {
 			researchMd: research.md,
 			fieldNotesMd: readFieldNotes(id),
 			outcomesMd: readOutcomes(id),
+			graveyardDigest: readGraveyardDigest(),
 		});
 
 		if (!parsed) {
@@ -380,6 +394,9 @@ async function handleAuditCommand({ command, ack, client }) {
 		if (verdict.who_to_talk_to) {
 			lines.push(`*Who to talk to:* ${verdict.who_to_talk_to}`);
 		}
+		if (verdict.resembles_killed_idea) {
+			lines.push(`*⚠️ Resembles killed idea:* \`${verdict.resembles_killed_idea}\` — the auditor weighed that kill reason (I3).`);
+		}
 		await client.chat.postMessage({
 			channel: researchChannel,
 			thread_ts: auditThreadTs || research.json.slack_thread_ts,
@@ -433,5 +450,6 @@ module.exports = {
 	handleAuditCommand,
 	runAudit,
 	parseAuditResponse,
+	appendToGraveyard,
 	enforceEvidenceGate,
 };

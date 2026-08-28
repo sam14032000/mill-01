@@ -60,6 +60,29 @@ CITATION_SAMPLE_SIZE = 3
 FETCH_TIMEOUT_S = 10
 FETCH_CHAR_LIMIT = 6000
 
+# I5: assumptions here are Bangalore batter, Indian GST filings, Pune
+# hardware. A generic pass under-serves them -- USD pricing, US
+# competitors, no local regulatory context. When the assumption is
+# India-anchored, steer the research toward India-specific sources.
+import re as _re
+
+_INDIA_RE = _re.compile(
+    r"\b(india|indian|bangalore|bengaluru|mumbai|delhi|pune|chennai|hyderabad|kolkata|"
+    r"ahmedabad|jaipur|kochi|gurgaon|gurugram|noida|gst|gstn|gstr|itc|tds|"
+    r"rupee|rupees|inr|rbi|sebi|upi|npci|aadhaar|mca|itr|cleartax|tally|razorpay|"
+    r"zerodha|flipkart|swiggy|zomato|paytm|phonepe|jio|dpiit|udyam)\b"
+    r"|startup\s*india|₹|\brs\.?\s*\d",
+    _re.IGNORECASE,
+)
+
+INDIA_ANCHORED = bool(_INDIA_RE.search(ASSUMPTION))
+
+INDIA_DIRECTIVE = (
+    "This assumption concerns an Indian market. Prioritise India-specific sources: "
+    "local competitors, pricing in ₹, Indian regulatory and tax context, and Indian "
+    "community discussion. A US comparable is context, not evidence -- say so when you use one."
+)
+
 client = OpenAI(base_url=os.environ["OPENAI_API_BASE"], api_key=os.environ["OPENAI_API_KEY"])
 
 
@@ -150,8 +173,12 @@ async def main():
     total_tokens_in = 0
     total_tokens_out = 0
 
+    # I5: for an India-anchored assumption, prepend the directive to the
+    # query so it steers both sub-query planning and the written report.
+    query = f"{INDIA_DIRECTIVE}\n\nAssumption to research: {ASSUMPTION}" if INDIA_ANCHORED else ASSUMPTION
+
     r = GPTResearcher(
-        query=ASSUMPTION,
+        query=query,
         report_type="research_report",  # NOT "deep" -- depth degrades factual accuracy, citation metrics stay flat
         report_source="hybrid" if has_field else "web",
     )
@@ -180,6 +207,13 @@ async def main():
         total_tokens_out += gap_to
         report += "\n\n## Gap output\n\n" + gap_text
 
+    if INDIA_ANCHORED:
+        report = (
+            "> _I5: this assumption was detected as India-anchored; the pass was steered "
+            "toward India-specific sources (₹ pricing, local competitors, Indian regulatory context)._\n\n"
+            + report
+        )
+
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
     (OUT / f"research-{stamp}.md").write_text(report)
 
@@ -195,6 +229,7 @@ async def main():
         "field_notes_file": field_notes_files[0] if field_notes_files else None,
         "field_notes_files": field_notes_files,  # in case more than one exists
         "citation_issues": issues,
+        "india_anchored": INDIA_ANCHORED,
         "research_stub": False,
         "ts": stamp,
         "tokens_in": total_tokens_in,

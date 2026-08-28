@@ -144,7 +144,8 @@ Per idea, track the chain: `capture_ts → first_brainstorm → research → aud
 | Profile diffs approved vs proposed | > 50% | D-30 |
 | Cost per idea killed | falling | D-24 |
 | Median capture → verdict latency | < 10 days | throughput |
-| Graveyard resurrections | tracked | D-10 |
+| Graveyard resurrections the audit *caught* (`resembles_killed_idea` non-null) vs missed | caught share rising | I3 |
+| Ideas killed with reason `stale` | non-zero but not dominant — some inattention-kills are healthy; if most kills are `stale` the gate isn't being reached | I4 |
 
 ---
 

@@ -609,3 +609,21 @@ Once those three jobs were traced to their actual owners, there was no fourth th
 **Paired with I2 (outcomes at dismount).** The strongest evidence a mill can produce — someone clicked, signed up, paid when shown the prototype — previously had nowhere to live. On `[Dismount]` or auto-expiry the bot asks who saw it and what they did (with the ngrok request count as a fact to react to), writes the reply to `ideas/<id>/outcomes.md`, and feeds that file into audit context. A recorded signup or payment there is what makes `field-committed`.
 
 **Revisit when:** never, without an explicit decision to lower the bar. If `field-behaviour` share stays at zero across a month of real use (tracked in `EVAL.md`), the mill has become a substitute for the conversations rather than preparation for them — which is a signal about how it's being used, not a reason to relax the grade.
+
+---
+
+### D-50 · Audit reads the graveyard; ideas move or die; research is told it's in India
+
+Three refinements from `docs/IMPROVEMENTS.md` (I3–I5), grouped because each is small and none reverses a prior decision — they close gaps at the evidence layer.
+
+**I3 — the auditor reads every founder's graveyard.** `/audit` context now includes a compact digest of all three `graveyard.md` files (id, assumption, kill reason, date — a few hundred tokens). The audit output gains `resembles_killed_idea` (an id or null). The prompt: if the assumption is materially the same as one already killed, say so and weight the earlier kill reason unless the research shows it no longer holds. `EVAL.md` already tracked graveyard resurrections as a weak proxy for gate quality; nothing stopped them until now.
+
+**I4 — a 14-day staleness nudge.** `ops/slack-bot/staleness.js` runs a daily in-process sweep (same pattern as the weekly/nightly schedulers). An idea at `open` or `researched` with no state change for 14 days gets one nudge in its project channel with a `[Kill it]` button; again at 30 days; then nothing. The button records `stale` as the kill reason — a legitimate verdict: an idea nobody has returned to in two weeks has been answered by inattention, and a parked idea is parked attention. `EVAL.md` targets a <10-day median capture-to-verdict; this is the first mechanism behind it.
+
+**I5 — India-anchored research.** `ops/research.py` detects an India-anchored assumption (a keyword/₹/`Rs N` regex) and prepends a directive: prioritise India-specific sources — local competitors, ₹ pricing, Indian regulatory and tax context — and treat a US comparable as context, not evidence. The `india_anchored` flag goes into the research JSON.
+
+**Deliberately not adopted (from IMPROVEMENTS.md):** synthetic AI customer personas (a machine for generating the fake `field-supported` evidence D-49's gate exists to block); numeric idea scoring (a number without linked evidence is autocomplete dressed as a confidence interval — verdicts stay proceed/narrow/kill with a reason); deeper research passes (depth degrades factual accuracy; the fix for weak verdicts is better evidence grading — D-49 — not deeper passes).
+
+**Pending:** IMPROVEMENTS.md I5 also calls for a Tavily-vs-Exa retriever comparison ("who else does this in India" is semantic, Exa's shape). Deferred until there are real assumptions from actual use — running it on invented inputs would decide the wrong thing. Tracked in `ops/BUILD-LOG.md`.
+
+**Revisit when:** the staleness thresholds prove wrong in practice (14/30 days), or the graveyard digest grows past a few hundred tokens and needs trimming harder.
