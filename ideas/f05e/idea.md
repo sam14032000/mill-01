@@ -13,4 +13,5 @@ The idea is a pure-software compliance middleware enabling cross-border trade fo
 
 ## Assumption
 
-_Not set yet — this chat didn't run `/attack`. `/test` needs a named, falsifiable assumption; run `/attack <idea>` in the project's Brainstorm thread first._
+At least 25% of Indian D2C brands shipping 300–2,000 cross-border orders per month currently pay >₹25,000/month to manual CA retainers or third-party customs agents specifically for export documentation and e-BRC reconciliation, rather than relying on the free bundled compliance tools provided by logistics aggregators like Shiprocket X.
+
