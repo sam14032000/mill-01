@@ -21,7 +21,10 @@ const { handleTestCommand } = require("./commands/test");
 const { handleAuditCommand } = require("./commands/audit");
 const { handleProtoCommand } = require("./commands/proto");
 const { handleSpinoffCommand } = require("./commands/spinoff");
-const { getSession } = require("./chat-session");
+const { getSession, readOriginContext } = require("./chat-session");
+
+// How many recent turns of the thread to hand a command as context.
+const CONTEXT_TURNS = Number(process.env.MILL_CMD_CONTEXT_TURNS) || 14;
 
 const HANDLERS = {
 	attack: handleAttackCommand,
@@ -87,6 +90,29 @@ function threadSubject(threadTs) {
 	return parts.join("\n\n").trim() || lastUserTurn(threadTs);
 }
 
+// The running conversation a command is being invoked from -- recent
+// turns, plus the project origin if this is a stage thread. Commands
+// that plan queries or resolve referring expressions (/find, /test) use
+// this so "research these" isn't searched literally (ROOT CAUSE B).
+// Returns "" when there's no session for the thread.
+function threadContextText(threadTs) {
+	const s = threadTs ? getSession(threadTs) : null;
+	if (!s || !Array.isArray(s.turns)) return "";
+	const lines = [];
+	if (s.kind === "project" && s.ideaId) {
+		const origin = readOriginContext(s.ideaId);
+		if (origin) lines.push(origin, "---");
+	} else if (s.topic) {
+		lines.push(`Chat topic: ${s.topic}`, "");
+	}
+	const recent = s.turns.slice(-CONTEXT_TURNS);
+	for (const t of recent) {
+		if (!t.text?.trim()) continue;
+		lines.push(`${t.role === "user" ? "Founder" : "Mill"}: ${t.text.trim()}`);
+	}
+	return lines.join("\n").trim();
+}
+
 async function dispatchCommand({ action, text, channelId, userId, threadTs, client }) {
 	const handler = HANDLERS[action];
 	if (!handler) return { ok: false, reason: "unknown_action" };
@@ -106,6 +132,10 @@ async function dispatchCommand({ action, text, channelId, userId, threadTs, clie
 		text: effectiveText,
 		thread_ts: threadTs || undefined,
 		via: "shim", // invocation-path marker; handlers ignore it
+		// The conversation this command was invoked from. Handlers that
+		// build search queries or resolve "these"/"this" (/find, /test)
+		// read it; the rest ignore it (ROOT CAUSE B).
+		thread_context: threadContextText(threadTs),
 	};
 
 	// Handlers deliver input-validation refusals ("needs a named

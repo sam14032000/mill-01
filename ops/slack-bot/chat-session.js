@@ -22,7 +22,31 @@ const { callFlash } = require("./llm");
 const { readProfile, readCaptures, hasProfile } = require("./context");
 const { channelId } = require("./config");
 const { withPromoteButton } = require("./promote-button");
-const { findIdeaByChannel, updateState } = require("./ideas");
+const { findIdeaByChannel, updateState, readOriginChat, readIdeaMd } = require("./ideas");
+
+// A promoted idea's stage threads must see where the chat that spawned
+// them got to (ROOT CAUSE B). origin-chat.md is the full transcript;
+// idea.md carries the distilled summary + assumption. Both go in the
+// cached prefix. Cap the raw transcript so a marathon chat doesn't blow
+// the context budget -- past the cap, the idea.md summary alone carries
+// it (that's what the summary is for).
+const ORIGIN_CHAT_CHAR_CAP = Number(process.env.MILL_ORIGIN_CHAT_CHAR_CAP) || 24000;
+
+function readOriginContext(ideaId) {
+	if (!ideaId) return "";
+	const parts = [];
+	const ideaMd = readIdeaMd(ideaId);
+	if (ideaMd && ideaMd.trim()) parts.push(`idea.md (origin, summary, assumption):\n\n${ideaMd.trim()}`);
+	const chat = readOriginChat(ideaId);
+	if (chat && chat.trim()) {
+		const trimmed =
+			chat.length > ORIGIN_CHAT_CHAR_CAP
+				? `${chat.slice(0, ORIGIN_CHAT_CHAR_CAP)}\n\n_[origin chat truncated for context; full transcript in ideas/${ideaId}/origin-chat.md]_`
+				: chat;
+		parts.push(`Origin chat transcript (the conversation this project was promoted from):\n\n${trimmed}`);
+	}
+	return parts.join("\n\n---\n\n");
+}
 const { COMMAND_STAGE, repostAnchors } = require("./project-channel");
 
 const STORE_DIR =
@@ -188,6 +212,21 @@ function buildContextMessages(session) {
 			role: "system",
 			content: `Recent captures from this founder:\n\n${captures.join("\n")}`,
 		});
+	}
+
+	// Project stage thread: load the origin chat so the thread isn't
+	// starting from nothing (ROOT CAUSE B). Stable within a session, so it
+	// belongs in the cached prefix beside the profile.
+	if (session.kind === "project" && session.ideaId) {
+		const origin = readOriginContext(session.ideaId);
+		if (origin) {
+			messages.push({
+				role: "system",
+				content:
+					`This is the *${session.stage || "project"}* thread for idea ${session.ideaId}. ` +
+					`The conversation so far in THIS thread is below; the project's origin is here:\n\n${origin}`,
+			});
+		}
 	}
 
 	if (session.topic) {
@@ -388,6 +427,7 @@ module.exports = {
 	addTurn,
 	markPromoted,
 	buildContextMessages,
+	readOriginContext,
 	maybeCompact,
 	fullTranscript,
 	drainForNightlyCapture,

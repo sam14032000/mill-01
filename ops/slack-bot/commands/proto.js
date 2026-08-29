@@ -183,6 +183,16 @@ async function handleProtoCommand({ command, ack, client }) {
 		return;
 	}
 
+	// Bug 1: model call + sandbox run is an invisible stretch. One breadcrumb.
+	if (millChannel) {
+		await client.chat
+			.postMessage({
+				channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
+				text: `_Building the prototype for \`${id}\`…_`,
+			})
+			.catch(() => {});
+	}
+
 	try {
 		const { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runProto({ assumption });
 

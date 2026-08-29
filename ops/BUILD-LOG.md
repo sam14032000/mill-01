@@ -314,3 +314,34 @@ Blocker found in live use: Slack rejects slash commands typed inside a thread ("
 Also fixed: the promote button was not rendering on bot replies inside `#chats` threads — `chat-turn.js` now routes every reply through `buildReplyBlocks`.
 
 Docs: **D-51** added to `docs/DECISIONS.md`; `docs/PROJECTS.md` (new "Running commands in threads" section + stage-thread / chat-command notes), `docs/COMMANDS.md` (new "Invocation paths" section), `docs/build-guide-projects.md` (14.4 rewritten, 15.2 + 16.3 notes). Bot restarted clean (Socket Mode connected, watchdog armed, 1 session restored). **Conformance 26/26.**
+
+---
+
+## D-52 — one request/one answer, thread-aware commands, feedback, mrkdwn
+
+Five bugs from first real use; four were two design errors (D-52).
+
+**Root Cause A — conversational layer and command layer both answered.** `chat-turn.js` was a straight pipeline: always call the conversational model, always post its prose, then decorate with an offer button. "Now attack this idea" got a prose attack *and* a button to run the real `/attack`. Rewrote `handleChatTurn` as a branch taken *before* the model call:
+- `detectRegexIntent` hit + `validateSuggestion` ok → `execute()` (dispatch the command), **no model call**, no prose, no offer.
+- model trailer `confidence: "high"` + valid → `execute()`, the prose reply is **discarded, never stored as a turn**.
+- `confidence: "medium"` + valid → prose reply **+** one-tap offer (the only path that still offers).
+- `low`/`null` → prose only.
+`intent.js`'s `PROMPT_TRAILER_INSTRUCTION` rewritten: tells the model not to do a command's job in prose (ack in one line and stop), and defines high/medium/low explicitly with "when unsure, choose low". `_rcab.js` verifies: plain turn → prose no offer; "ok now attack this idea properly" → runs `/attack`, no second prose attack, nothing stored; incidental mention → nothing; loose "part of me wants to see the sharpest case against this" → prose + `medium` offer.
+
+**The medium bar is measured.** Offer button `value` now carries `confidence` (always `"medium"`); `run_suggested` in `index.js` emits an `offer_tap` telemetry event with `offer_tap_confidence`. `eval-event.js` gained `executed_action` / `execution_source` (`regex` | `model_high` | `offer_tap`) / `discarded_reply`. `EVAL.md` Layer 2 adds the medium-offer tap-rate metric — high rate ⇒ the model is calling commands "medium" and the bar is wrong.
+
+**Root Cause B — commands got the message, not the conversation.**
+- `command-shim.js`: `dispatchCommand` now assembles `command.thread_context` = recent turns (`MILL_CMD_CONTEXT_TURNS`, 14) + `readOriginContext(ideaId)` for a project stage thread.
+- `intent.js`: `isAnaphoric()` / `ANAPHORIC_RE` ("these", "this", "what we discussed", or under ~6 words).
+- `commands/find.js`: `resolveTopic()` — when the ask is anaphoric and thread context exists, a `flash-fast` call restates it as a concrete standalone subject before `planQueries`; the posted result shows "you asked: … — resolved from the thread". `/find` also now threads into any session (`getSession(thread_ts)` first), not just `#chats` — it was posting to channel root in project threads.
+- `commands/test.js`: `runResearchPass` takes `threadContext`, folded into the gap-question prompt (context, not evidence).
+- `chat-session.js`: `readOriginContext(ideaId)` = `idea.md` + length-capped (`MILL_ORIGIN_CHAT_CHAR_CAP`, 24000) `origin-chat.md`; `buildContextMessages` loads it into the cached prefix of every `kind: "project"` session. `_rcab.js` verifies a promoted idea's Brainstorm thread answers "where did we leave off" from the origin chat and does not claim a blank slate.
+- `ideas.js`: `readOriginChat(id)` added.
+
+**Bug 1 — no processing feedback.** `chat-turn.js` posts `_Thinking…_` / `_On it — running /X…_` immediately and `chat.update`s it in place. `run_suggested` acks the tap with a visible line. `commands/test.js` and `commands/proto.js` post a breadcrumb across their long stretch. **TOO_VAGUE across promotion:** `promotion.js` `extractTooVague()` scans the transcript; `ideas.js` `promoteIdea({tooVagueDetail})` writes the needed specifics into `idea.md`'s Assumption section and `state.json.assumption_blocked_on`; the Brainstorm seed says what's missing instead of a generic "run `/attack`".
+
+**Formatting — Markdown → Slack mrkdwn.** New `mrkdwn.js`: `toSlackMrkdwn()` converts `**bold**`/`__b__` → `*b*`, `## heading` → `*heading*`, line-start `- `/`* `/`+ ` → `• `, leaving fenced/inline code alone. `wrapClientFormatting()` idempotently patches `client.chat.postMessage`/`update` to convert `text` + mrkdwn block fields — applied to `app.client` and via `app.use` to every listener's client, one choke point. Post-process, not a prompt instruction (the models revert to Markdown regardless). Response length/verbosity untouched.
+
+**Thread scroll position — investigated, reported, not built.** Slack's thread-open scroll is client-side with no API surface; `conversations.mark` only moves the bot's own cursor. What's controllable: `chat.getPermalink` (jumps to a message), `pins.add` + in-place `chat.update`, channel topic. Recommended a pinned per-project "current state" card; **held for an explicit go-ahead** per the founder's instruction to confirm the constraint first.
+
+Docs: **D-52** in `DECISIONS.md`; `PROJECTS.md` / `COMMANDS.md` "Running commands / Invocation paths" rewritten; `build-guide-projects.md` 14.4/14.5/15.3/16.3; `EVAL.md` Layer 2 metrics + schema note. Tests: `_rcab.js` (A/B/Bug1/mrkdwn, all green on live `flash-fast`), `_d51gates.js` gate parity still 6/6, `_d51test.js` units pass. Bot restarted clean. **Conformance 26/26.**

@@ -5,13 +5,23 @@
 // message router before the DM-capture path. Returns true if the message
 // was consumed.
 //
-// D-51: slash commands don't work in Slack threads. This handler already
-// sees every conversational turn, so it also (a) reads a structured
-// action-suggestion trailer off the same reply call it's already making,
-// (b) runs a fast regex for unambiguous phrasing, and (c) appends a
-// one-tap offer to the reply when an intent is detected AND applies to
-// the idea's current state. The offer never interrupts: it's appended to
-// the normal reply, ignoring it costs nothing.
+// ROOT CAUSE A (first real use): the conversational layer and the
+// command layer both answered the same request -- "attack this idea"
+// produced a prose attack AND an offer to run the real /attack, neither
+// authoritative. Fixed by branching *before* the conversational model
+// runs:
+//
+//   regex intent, valid          -> execute the command, no prose reply
+//   model says high-confidence   -> execute the command, discard prose
+//   model says medium-confidence -> prose reply + a one-tap offer
+//   low / none                   -> prose reply only
+//
+// The conversational model is also told (PROMPT_TRAILER_INSTRUCTION) not
+// to perform a command's job in prose. "Reply + offer for the same
+// action" is now structurally impossible.
+//
+// Bug 1: every path posts an immediate placeholder and updates it in
+// place, so the founder is never staring at nothing.
 
 const { founderForUserId, channelId } = require("./config");
 const { callFlash } = require("./llm");
@@ -37,10 +47,23 @@ const {
 	splitReplyTrailer,
 	PROMPT_TRAILER_INSTRUCTION,
 } = require("./intent");
+const { dispatchCommand } = require("./command-shim");
 
 const MODEL = "flash-fast";
 const STAGE = "chat";
 const OFFER_TTL_MIN = Math.round((Number(process.env.MILL_OFFER_TTL_MS) || 2 * 60 * 60 * 1000) / 60000);
+
+// The state a suggested action is validated against before it's executed
+// or offered (the risk: /audit before research, /proto on a killed idea).
+function buildValidationCtx(session, isProject) {
+	const ideaId = session.ideaId || null;
+	return {
+		inChats: !isProject,
+		project: isProject && ideaId ? readState(ideaId) : null,
+		assumption: isProject && ideaId ? readAssumption(ideaId) : null,
+		research: isProject && ideaId ? readLatestResearch(ideaId) : null,
+	};
+}
 
 async function handleChatTurn({ message, client }) {
 	if (message.bot_id) return false;
@@ -83,8 +106,73 @@ async function handleChatTurn({ message, client }) {
 	addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
 
 	const isProject = session.kind === "project";
+	const stageName = isProject ? "project_turn" : STAGE;
+	const ideaId = session.ideaId || null;
+	const ctx = buildValidationCtx(session, isProject);
+	const triggerTurnIndex = session.turns.length - 1;
 
-	// --- the one model call, with the action-suggestion trailer asked for ---
+	const post = (text, extra = {}) =>
+		client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text, ...extra });
+	const update = (ts, text, extra = {}) =>
+		client.chat.update({ channel: message.channel, ts, text, ...extra }).catch(() => {});
+
+	// Runs the real command handler via the shim. The command owns the
+	// response from here -- no prose reply, no offer, no prose turn.
+	const execute = async (action, source, { discardedReply = null, placeholderTs = null } = {}) => {
+		if (placeholderTs) await update(placeholderTs, `_On it — running \`/${action}\`…_`);
+		else await post(`_On it — running \`/${action}\`…_`);
+		try {
+			await dispatchCommand({
+				action,
+				text, // the shim rebuilds the subject / resolves anaphora from the thread
+				channelId: message.channel,
+				userId: message.user,
+				threadTs: session.threadTs,
+				client,
+			});
+		} catch (err) {
+			console.error(`chat-turn: execute ${action} failed (${session.threadTs}): ${err.message}`);
+			await post(`_\`/${action}\` didn't run: ${err?.message || err}_`);
+		}
+		emit(
+			buildEvalEvent({
+				stage: stageName,
+				model: MODEL,
+				founder: session.ownerFounder,
+				ideaId,
+				status: "ok",
+				reasonCode: `executed_${source}`,
+				suggestedAction: null,
+				suggestionConfidence: null,
+				regexAction: source === "regex" ? action : null,
+				offerMade: false,
+				offerAction: null,
+				offerSuppressedReason: null,
+				executedAction: action,
+				executionSource: source,
+				discardedReply: Boolean(discardedReply),
+			}),
+		);
+	};
+
+	// ---- 1. regex fast path: execute directly, no conversational call ----
+	const regexHit = detectRegexIntent(text);
+	let regexSuppressed = null;
+	if (regexHit) {
+		const v = validateSuggestion(regexHit.action, ctx);
+		if (v.ok) {
+			await execute(regexHit.action, "regex");
+			return true;
+		}
+		// Regex matched but the action doesn't apply yet (e.g. "audit this"
+		// before research). Fall through to a conversational reply that can
+		// explain why; record the reason.
+		regexSuppressed = v.reason;
+	}
+
+	// ---- 2. the one conversational model call ----
+	const placeholderTs = await post("_Thinking…_").then((r) => r.ts).catch(() => null);
+
 	const messages = buildContextMessages(session);
 	messages.splice(1, 0, { role: "system", content: PROMPT_TRAILER_INSTRUCTION });
 
@@ -101,69 +189,75 @@ async function handleChatTurn({ message, client }) {
 		cacheHit = res.cacheHit;
 	} catch (err) {
 		console.error(`chat-turn: model call failed (${session.threadTs}): ${err.message}`);
-		emit(buildEvalEvent({ stage: isProject ? "project_turn" : STAGE, model: MODEL, founder: session.ownerFounder, status: "failed", reasonCode: "model_call_failed" }));
-		await client.chat
-			.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: `_(couldn't generate a reply: ${err?.message || err})_` })
-			.catch(() => {});
+		emit(buildEvalEvent({ stage: stageName, model: MODEL, founder: session.ownerFounder, status: "failed", reasonCode: "model_call_failed" }));
+		const msg = `_(couldn't generate a reply: ${err?.message || err})_`;
+		if (placeholderTs) await update(placeholderTs, msg);
+		else await post(msg);
 		return true;
 	}
 	const wallClockS = (Date.now() - t0) / 1000;
 
 	const { reply: replyText, suggested_action, confidence } = splitReplyTrailer(raw);
 
-	// --- intent: regex fast path wins; else a high-confidence model suggestion ---
-	const regexHit = detectRegexIntent(text);
-	const intent =
-		regexHit ||
-		(confidence === "high" && suggested_action ? { action: suggested_action, source: "model" } : null);
-
-	// --- validate against actual idea state before offering (the risk:
-	//     /audit before research, /proto on a killed idea) ---
-	let offer = null;
-	let offerSuppressed = null;
-	if (intent) {
-		const ideaId = session.ideaId || null;
-		const ctx = {
-			inChats: !isProject,
-			project: isProject && ideaId ? readState(ideaId) : null,
-			assumption: isProject && ideaId ? readAssumption(ideaId) : null,
-			research: isProject && ideaId ? readLatestResearch(ideaId) : null,
-		};
-		const v = validateSuggestion(intent.action, ctx);
-		if (v.ok) offer = { action: intent.action, offeredAt: Date.now(), ideaId, turnIndex: session.turns.length - 1 };
-		else offerSuppressed = v.reason;
+	// ---- 3. high-confidence model intent: execute, discard the prose ----
+	if (!regexSuppressed && confidence === "high" && suggested_action) {
+		const v = validateSuggestion(suggested_action, ctx);
+		if (v.ok) {
+			await execute(suggested_action, "model_high", { discardedReply: replyText, placeholderTs });
+			// The discarded prose is NOT recorded as a turn.
+			try {
+				await maybeCompact(session);
+			} catch (err) {
+				console.error(`chat-turn: compaction failed (${session.threadTs}): ${err.message}`);
+			}
+			return true;
+		}
 	}
 
-	// A5: only replyText (trailer-stripped, no offer chrome) is a turn.
+	// ---- 4. genuine conversation: prose reply, offer only on medium ----
+	let offer = null;
+	let offerSuppressed = regexSuppressed;
+	if (confidence === "medium" && suggested_action) {
+		const v = validateSuggestion(suggested_action, ctx);
+		if (v.ok) {
+			offer = {
+				action: suggested_action,
+				confidence: "medium",
+				offeredAt: Date.now(),
+				ideaId,
+				turnIndex: triggerTurnIndex,
+			};
+		} else {
+			offerSuppressed = offerSuppressed || v.reason;
+		}
+	}
+	// low / null confidence -> no offer (the stated bar).
+
+	// Only the trailer-stripped prose is a turn.
 	addTurn(session, { role: "assistant", text: replyText });
 
-	await client.chat.postMessage({
-		channel: message.channel,
-		thread_ts: session.threadTs,
-		text: replyText,
-		blocks: buildReplyBlocks(replyText, {
-			promote: !isProject, // PROJECTS.md P2: promote button on every #chats reply
-			offer,
-			threadTs: session.threadTs,
-			ttlMin: OFFER_TTL_MIN,
-		}),
+	const blocks = buildReplyBlocks(replyText, {
+		promote: !isProject,
+		offer,
+		threadTs: session.threadTs,
+		ttlMin: OFFER_TTL_MIN,
 	});
+	if (placeholderTs) await update(placeholderTs, replyText, { blocks });
+	else await post(replyText, { blocks });
 
 	try {
 		const marker = await maybeCompact(session);
-		if (marker) {
-			await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: marker });
-		}
+		if (marker) await post(marker);
 	} catch (err) {
 		console.error(`chat-turn: compaction failed (${session.threadTs}): ${err.message}`);
 	}
 
 	emit(
 		buildEvalEvent({
-			stage: isProject ? "project_turn" : STAGE,
+			stage: stageName,
 			model: MODEL,
 			founder: session.ownerFounder,
-			ideaId: session.ideaId || null,
+			ideaId,
 			tokensIn: usage?.prompt_tokens ?? 0,
 			tokensOut: usage?.completion_tokens ?? 0,
 			costUsd,
@@ -171,14 +265,18 @@ async function handleChatTurn({ message, client }) {
 			wallClockS,
 			status: "ok",
 			reasonCode: session.stage ? `stage_${session.stage}` : "turn",
-			// D-51 telemetry -- logged every turn, nulls included, so an
-			// over-eager prompt (offers on >~1/5 of turns) shows here.
-			suggestedAction: suggested_action, // model's raw suggestion (may be non-null at low confidence)
-			suggestionConfidence: confidence, // model's confidence
+			// D-51 telemetry -- every turn, nulls included. suggestion_confidence
+			// + offer_made + (on a later tap) an offer_tap event let EVAL see
+			// whether mediums get tapped, i.e. whether the bar is right.
+			suggestedAction: suggested_action,
+			suggestionConfidence: confidence,
 			regexAction: regexHit ? regexHit.action : null,
 			offerMade: Boolean(offer),
 			offerAction: offer ? offer.action : null,
 			offerSuppressedReason: offerSuppressed,
+			executedAction: null,
+			executionSource: null,
+			discardedReply: false,
 		}),
 	);
 	return true;

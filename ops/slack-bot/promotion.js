@@ -32,6 +32,20 @@ function extractAssumption(session) {
 	return null;
 }
 
+// If /attack ran in the chat and returned TOO_VAGUE instead of an
+// assumption, that feedback -- the specifics needed before the idea can
+// be attacked -- must survive promotion, not be lost in the transition
+// (Bug 1). Most recent TOO_VAGUE line wins.
+function extractTooVague(session) {
+	for (let i = session.turns.length - 1; i >= 0; i--) {
+		const t = session.turns[i];
+		if (t.role !== "assistant") continue;
+		const m = t.text.match(/TOO_VAGUE:\s*(.+?)(?:\n\n|\n_|$)/s);
+		if (m) return m[1].trim().replace(/\s+/g, " ");
+	}
+	return null;
+}
+
 async function summarizeChat(session) {
 	const transcript = fullTranscript(session);
 	try {
@@ -82,6 +96,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 	// -> Do not create the idea. A half-promoted idea is worse than none.")
 	const transcript = fullTranscript(session);
 	const assumption = extractAssumption(session);
+	const tooVagueDetail = assumption ? null : extractTooVague(session);
 	const summary = await summarizeChat(session);
 
 	const id = generateIdeaId();
@@ -113,6 +128,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 			founder,
 			topic,
 			assumption,
+			tooVagueDetail,
 			originChatMd: transcript,
 			originChatTs: session.threadTs,
 			summary,
@@ -141,7 +157,9 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 
 	const assumptionLine = assumption
 		? `*Assumption:* ${assumption}`
-		: "_No assumption yet — run `/attack` in Brainstorm, then `/test`._";
+		: tooVagueDetail
+			? `*No assumption yet.* \`/attack\` in the chat flagged this as too vague to attack — it needs: ${tooVagueDetail}\nPin those down in Brainstorm, then run \`/attack\`.`
+			: "_No assumption yet — run `/attack` in Brainstorm, then `/test`._";
 
 	// 15.3 step 4: seed the Brainstorm thread with the origin-chat summary
 	// and a link back to the chat.

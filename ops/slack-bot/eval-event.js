@@ -46,6 +46,16 @@ function buildEvalEvent({
 	offerMade,
 	offerAction,
 	offerSuppressedReason,
+	// ROOT CAUSE A: when a turn's intent was executed as a command
+	// instead of answered in prose. executionSource is "regex" |
+	// "model_high" | "offer_tap". discardedReply marks a prose reply the
+	// model produced that we suppressed because the command owns it.
+	executedAction,
+	executionSource,
+	discardedReply,
+	// On an offer_tap event: the confidence the offer was made at, so
+	// EVAL can see whether mediums get tapped (bar-too-low signal).
+	offerTapConfidence,
 }) {
 	const event = {
 		founder,
@@ -69,6 +79,14 @@ function buildEvalEvent({
 		event.offer_made = Boolean(offerMade);
 		event.offer_action = offerAction ?? null;
 		event.offer_suppressed_reason = offerSuppressedReason ?? null;
+		event.executed_action = executedAction ?? null;
+		event.execution_source = executionSource ?? null;
+		event.discarded_reply = Boolean(discardedReply);
+	}
+	if (offerTapConfidence !== undefined) {
+		event.offer_action = offerAction ?? null;
+		event.offer_tap_confidence = offerTapConfidence ?? null;
+		event.execution_source = "offer_tap";
 	}
 	return event;
 }

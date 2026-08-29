@@ -51,6 +51,26 @@ const REGEX_INTENT = [
 	[RX(`${CLAUSE_START}(show my themes|what have i been circling)\\b|\\brecurring (preoccupations|themes)\\b`), "themes"],
 ];
 
+// A message that only makes sense against the conversation it sits in --
+// "research these", "look this up", "what we just discussed". A command
+// built from the raw text of one of these searches for the wrong thing
+// (ROOT CAUSE B): /find on "research the existence of these problem
+// statements" planned queries about validation methodology because
+// "these" was never resolved. When this matches (or the text is too
+// thin to stand alone), the command resolves its subject from thread
+// context first.
+const ANAPHORIC_RE =
+	/\b(these|this|that|those|it|them|the (?:above|following|idea|problem|problems|assumption|point|points|thing|things))\b|\bwhat (?:we|you|i) (?:just )?(?:discussed|said|talked about|covered|mentioned)\b|\bthe (?:same|other) (?:one|thing)\b/i;
+
+function isAnaphoric(text, { minStandaloneWords = 6 } = {}) {
+	const t = String(text || "").trim();
+	if (!t) return true;
+	if (ANAPHORIC_RE.test(t)) return true;
+	// Very short asks ("look into pricing", "find competitors") also lean
+	// on the surrounding conversation for what they're about.
+	return t.split(/\s+/).length < minStandaloneWords;
+}
+
 // Returns { action, source: "regex" } or null.
 function detectRegexIntent(text) {
 	const t = String(text || "");
@@ -126,12 +146,18 @@ function splitReplyTrailer(raw) {
 
 const PROMPT_TRAILER_INSTRUCTION = [
 	"",
+	"You have sibling commands that do specific jobs properly: attack, find, cross, blindspot, themes, test, proto, spinoff, audit.",
+	"If the founder is asking for one of those in THIS message, do NOT do that job yourself in prose — a prose attack competing with the real /attack is exactly the confusion to avoid. Acknowledge in one short sentence ('Running the attack on this now.') and stop. The command will produce the real output.",
+	"Only answer in full prose when they are thinking out loud, not requesting an action.",
+	"",
 	"After your reply, on its own line, output exactly:",
 	TRAILER,
 	'{"suggested_action": <one of "attack","find","cross","blindspot","themes","test","proto","spinoff","audit", or null>, "confidence": "high"|"medium"|"low"}',
 	"Decide whether the founder is, in THIS message, asking you to run one of those actions on the current idea right now.",
-	'"high" only when they explicitly asked ("attack this", "search for X", "what would the others say"). Incidental mentions ("the counterargument is obvious", "someone might attack this") are not a request — use null or "low".',
-	"Under-suggest. An offer on every message trains the founder to ignore them.",
+	'"high" = they explicitly asked, imperative and unambiguous ("attack this", "search for X", "what would the others say"). The command runs immediately; do not also answer in prose.',
+	'"medium" = it reads like they probably want it but the phrasing is loose or embedded ("we should probably pressure-test this", "wonder what the others think"). A button is offered; you still reply normally.',
+	'"low" / null = incidental mention ("the counterargument is obvious", "someone might attack this"). No offer.',
+	"Under-suggest. When unsure between medium and low, choose low.",
 	"The reply above the line must read exactly as it would without this instruction — the trailer is metadata, not part of the conversation.",
 ].join("\n");
 
@@ -139,6 +165,8 @@ module.exports = {
 	ACTIONS,
 	PROJECT_ONLY,
 	detectRegexIntent,
+	isAnaphoric,
+	ANAPHORIC_RE,
 	parseMention,
 	validateSuggestion,
 	splitReplyTrailer,

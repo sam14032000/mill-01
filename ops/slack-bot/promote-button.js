@@ -53,6 +53,10 @@ function buildReplyBlocks(text, { promote = false, offer = null, threadTs, ttlMi
 				// tap runs the command against THAT turn's text, and the
 				// offer goes stale once the conversation has moved past it.
 				turnIndex: offer.turnIndex ?? null,
+				// the model confidence this offer was made at (always
+				// "medium" now -- highs execute directly). Logged on tap so
+				// EVAL can see whether the medium bar is right.
+				confidence: offer.confidence || null,
 			}),
 		});
 	}

@@ -116,11 +116,18 @@ Do not collapse these paths.
 **Slack rejects slash commands inside threads (D-51).** A chat is a thread, so inside it these run one of two ways, both handled in `ops/slack-bot/`:
 
 - **`@Mill <command> [args]`** — `app.event("app_mention")` in `index.js` strips the mention, `parseMention()` in `intent.js` maps the first word to an action, `command-shim.js` builds the `{command, ack, client}` shape and calls the real handler. Immediate.
-- **A tapped offer** — `chat-turn.js` reads a `---MILL-ACTION---` trailer off the same conversational reply call (plus a regex fast path in `intent.js` for unambiguous phrasing), validates the suggested action against idea state (`validateSuggestion`), and appends a one-tap button via `promote-button.js`'s `buildReplyBlocks`. `app.action("run_suggested")` in `index.js` runs it through the same shim. Offer TTL is `MILL_OFFER_TTL_MS`, default 2h; a tap past TTL or past the triggering turn refuses.
+- **Plain-words request** — `chat-turn.js` branches *before* the conversational model call (D-52):
+  - regex intent (`intent.js`), action valid for state → run the command, no conversational reply;
+  - model trailer `confidence: high` + valid → run the command, discard the prose;
+  - `confidence: medium` + valid → reply normally **and** append a one-tap offer button;
+  - `low` / `null` → reply only.
+  `app.action("run_suggested")` runs a tapped offer through the same shim. Offer TTL `MILL_OFFER_TTL_MS`, default 2h; a tap past TTL or past the triggering turn refuses. Every offer is `medium` now (highs execute), so the button `value` records `confidence: "medium"` and `run_suggested` emits an `offer_tap` telemetry event — EVAL watches the medium tap rate for a too-low bar.
 
-The shim adds nothing and bypasses nothing — `/proto`'s named-assumption refusal, `/audit`'s stub/no-research refusal, the C-07 downgrade and the five-touch cap all live in the handlers and fire on every path. `command-shim.js` captures any `ack({text})` refusal and reposts it as a thread message so an input-validation refusal is visible on the `@Mill`/offer path exactly as it is for a slash command.
+The shim adds nothing and bypasses nothing — `/proto`'s named-assumption refusal, `/audit`'s stub/no-research refusal, the C-07 downgrade and the five-touch cap all live in the handlers and fire on every path. `command-shim.js` captures any `ack({text})` refusal and reposts it as a thread message so an input-validation refusal is visible on the `@Mill`/offer path exactly as it is for a slash command. It also assembles `thread_context` (recent turns + `origin-chat.md` in a project) onto the `command` object; `/find` and `/test` use it to resolve referring expressions.
 
-`suggested_action` is logged in telemetry on every turn including nulls (`chat-turn.js` → `eval-event.js`), so an over-eager prompt firing offers on more than ~1/5 of turns shows up rather than degrading silently.
+`suggested_action`, `suggestion_confidence`, `executed_action`/`execution_source` and `offer_made` are logged on every turn including nulls (`chat-turn.js` → `eval-event.js`), so an over-eager prompt shows up rather than degrading silently.
+
+Every message turn and button tap posts an immediate placeholder (`_Thinking…_` / `_On it — running /X…_`) updated in place via `chat.update` (Bug 1) — the founder is never left unsure anything is happening.
 
 **`/attack` writes nothing here.** Returns the case against plus the `ASSUMPTION:` line, then presents the promote button pre-filled with that assumption. No idea, no `state.json`, no directory.
 
@@ -131,6 +138,8 @@ The shim adds nothing and bypasses nothing — `/proto`'s named-assumption refus
 **It is never evidence.** Visually distinct from a research report, with a footer saying so. On promotion it transcribes as conversation, never as research.
 
 This is load-bearing: `/find` masquerading as research routes straight around the audit's web-only cap, and that's how a `proceed` gets built on three headlines.
+
+**Anaphora resolution (D-52).** If the ask is anaphoric ("research *these*", "look *this* up") or too thin to stand alone, `resolveTopic()` in `commands/find.js` runs a `flash-fast` call against `command.thread_context` first, turning it into a concrete standalone subject, and the posted result shows both ("you asked: … — resolved from the thread"). `/find` threads into whatever session the thread has — a `#chats` chat or a project stage thread — not just `#chats`.
 
 ## 14.6 Compaction
 
@@ -185,7 +194,7 @@ Never silently refuse. Always offer the button.
 3. Create the project channel (Part 16 — until then, flat structure)
 4. Seed Brainstorm with a summary of the origin chat and a link back
 5. Post links in the chat thread and `#mill-ideas`
-6. Set the assumption if one came from `/attack`; otherwise note `/test` needs one
+6. Set the assumption if one came from `/attack`. If instead `/attack` returned `TOO_VAGUE`, carry those specifics forward (D-52): `promoteIdea` writes them into `idea.md`'s Assumption section and `state.json.assumption_blocked_on`, and the Brainstorm seed says what's still needed — not a generic "run `/attack`".
 
 Promoting late must lose nothing. That's what makes the gate free.
 
@@ -223,6 +232,8 @@ Five messages posted at creation. Store `thread_ts` for each in `state.json`:
 Every command posts to its stage thread. **Context keyed on `thread_ts`** — one channel, four parallel conversations, and channel-level binding leaks research findings into brainstorm silently.
 
 Stage threads are threads, so commands run by `@Mill <command>` or a tapped offer, not a slash command (D-51, and see 14.4). `commandDestination()` in `chat-session.js` already resolves an `@Mill`/offer invocation carrying `thread_ts` to the right stage session; a slash command from the channel body with no `thread_ts` falls back to the stage the command maps to.
+
+**Stage sessions load the origin (D-52).** `buildContextMessages` pulls `readOriginContext(ideaId)` — `idea.md`'s summary + a length-capped `origin-chat.md` — into the cached prefix of every project stage session (`kind: "project"`). Without it a promoted idea's threads start blank and "where did we leave off" gets answered "blank slate" despite the transcript sitting on disk. Verify by promoting a chat and asking that question in Brainstorm.
 
 ## 16.4 Retire `#research`
 

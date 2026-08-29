@@ -37,13 +37,15 @@ The promotion is a gate, in the same sense the audit is. Most ideas should never
 |---|---|---|
 | **Slash command** | Typed in a channel's main compose box (not a thread) | Runs immediately |
 | **`@Mill <command> [args]`** | Mentioning the bot inside any thread, e.g. `@Mill attack` or `@Mill find dosa batter prices` | Runs immediately |
-| **Tapped offer** | Say what you want in plain words ("attack this", "what would the others say"). If the intent is unambiguous the bot appends a one-tap button to its normal reply | Runs on tap |
+| **Plain-words request** | Say what you want ("attack this", "look up what iD Fresh charges"). Clear phrasing runs the command directly with a one-line ack; loosely-phrased asks get a one-tap button on the normal reply | Immediate, or on tap |
 
-The offer **never interrupts** — it is appended to the conversational reply and ignoring it costs nothing. It is made only on high confidence (explicit phrasing), deliberately under-offering; an incidental mention ("the counterargument is obvious") produces no offer. Offers **expire after two hours** and refuse if the conversation has moved past the turn that triggered them — a command built from a thread you can no longer see is exactly the confidently-wrong output the mill exists to prevent.
+**One request gets one answer (D-52).** When you clearly ask for a command — imperative, unambiguous — the bot runs the actual command; it does **not** also write a competing prose version. Only when the phrasing is loose ("part of me wants to see the sharpest case against this") does it reply normally and *offer* a button. An incidental mention ("the counterargument is obvious") produces neither. The offer never interrupts — ignoring it costs nothing — **expires after two hours**, and refuses if the conversation has moved past the turn that triggered it.
 
-**Every gate fires identically on all three paths.** `@Mill` and the offer button both run the real command handler unchanged: `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and C-07 web-only downgrade, the five-touch cap. There is no shortcut path around a gate.
+**Every gate fires identically on all paths.** `@Mill`, a directly-run request, and the offer button all run the real command handler unchanged: `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and C-07 web-only downgrade, the five-touch cap. There is no shortcut path around a gate.
 
 When a command needs a subject and none is given (`@Mill attack` with no text, or a tapped offer), the bot rebuilds it from the thread — the topic plus recent substantive turns — so the brainstorm commands see the idea under discussion, not the word "attack". `/proto` is the exception: it still refuses without an explicitly named assumption.
+
+**Commands see the conversation, not just your message (D-52).** A command invoked from a thread is handed that thread's running context — recent turns, plus the project's `origin-chat.md` in a stage thread. `/find` and `/test` resolve referring expressions ("research *these*", "look *this* up") against it before building queries, and every project stage thread can answer "where did we leave off" from the origin chat.
 
 ---
 

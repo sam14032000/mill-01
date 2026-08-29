@@ -653,3 +653,36 @@ Three refinements from `docs/IMPROVEMENTS.md` (I3–I5), grouped because each is
 **Also fixed here.** The promote button (D-15 / PROJECTS.md P2) was not rendering on bot replies inside `#chats` threads — `chat-turn.js` now builds every reply through `promote-button.js`'s `buildReplyBlocks`, and the `promote_chat` action resolves its target thread from the interaction payload when the stored value is a placeholder.
 
 **Revisit when:** Slack ships slash-command support in threads (then paths 2–3 become convenience, not necessity), or the telemetry shows offers firing on >~1/5 of turns despite the prompt (then the regex/confidence bar needs raising).
+
+---
+
+### D-52 · One request, one answer: intent executes the command instead of racing a prose reply
+
+Five bugs surfaced on first real use. Four collapsed into two design errors — not bugs, errors in how the conversational layer and the command layer were wired together.
+
+**Root cause A — both layers answered the same request.** "Now attack this idea" produced a prose attack written by the conversational model *and* an "Attack this idea" button offering to run the real `/attack`. Two attacks, neither authoritative, and nothing tells the founder the prose one lacks what `/attack` actually contributes (a falsifiable assumption with a number and a named alternative, the `TOO_VAGUE` refusal, idea creation). D-51 bolted intent detection onto the *side* of the conversational turn — it changed which buttons rendered, never whether the conversational model ran or what it was told.
+
+**The fix is a branch in `chat-turn.js`, before the conversational model call:**
+
+| Signal | Behaviour |
+|---|---|
+| Regex intent (`intent.js`), action valid for state | Execute the command. **No conversational model call.** A one-line ack, then the handler owns the response. |
+| Model returns `confidence: high` + valid action | Execute the command. The prose reply is **discarded, not stored as a turn.** |
+| Model returns `confidence: medium` + valid action | Prose reply **plus** a one-tap offer. The only path that still offers. |
+| `low` / `null` | Prose reply only. |
+
+The conversational system prompt now also tells the model: if the founder is asking for something a command does, don't do that job in prose — acknowledge in one sentence and stop. "Reply + offer for the same action" is now structurally impossible: either the command ran (ack + handler output, no offer) or it was genuine discussion (prose + at most a medium offer).
+
+**The medium bar is watched, not assumed.** Every turn logs `suggestion_confidence` and `offer_made`; every tap emits an `offer_tap` event carrying the confidence the offer was made at (`execution_source: "offer_tap"`). If mediums get tapped often, the model is calling things "medium" that were really commands and the bar is too low — `EVAL.md` tracks the medium-offer tap rate for exactly this.
+
+**Root cause B — commands got the invoking message, not the conversation.** `/find` on "research the existence of these problem statements" planned queries about validation methodology because "these" was never resolved. And a promoted project's stage threads reported "blank slate" despite `origin-chat.md` holding all 28 turns — nothing loaded it.
+
+- `command-shim.js` now assembles `thread_context` (recent turns + `origin-chat.md` for a project) and passes it to every command.
+- `/find` (and `/test`'s gap questions) resolve referring expressions against that context before building queries — `intent.js`'s `isAnaphoric()` gates a `flash-fast` resolve step; the output shows the founder what was actually searched. `/find` is also no longer project-blind (it threaded to channel root there).
+- `chat-session.js`'s `buildContextMessages` loads `readOriginContext(ideaId)` (idea.md summary + capped transcript) into the cached prefix of **every** project stage session. Verify: promote a chat, ask "where did we leave off" in Brainstorm — it answers from the origin chat.
+
+**Bug 1 (feedback) and the mrkdwn fix, folded in.** Every message turn and button tap now posts an immediate placeholder and updates it in place (`chat.update`); `/test` and `/proto` post a breadcrumb across their long stretch. `/attack`'s `TOO_VAGUE` output now survives promotion — `promoteIdea` writes the needed specifics into `idea.md` and `state.json.assumption_blocked_on` instead of the generic "run `/attack`". And `mrkdwn.js` converts `**bold**`/`## heading`/`- bullet` to Slack mrkdwn at one outbound choke point (a wrapped `client.chat.postMessage`/`update`), because the models emit standard Markdown no matter what the prompt says.
+
+**Thread scroll position** — investigated, reported, **not** worked around. Slack's thread-open scroll behaviour is client-side with no API surface; a pinned, in-place-updated "current state" card per project channel is the one thing that would genuinely help and is deferred to an explicit decision.
+
+**Revisit when:** the medium-offer tap rate in `EVAL.md` is high enough that the confidence bar needs re-cutting, or Slack changes thread-scroll behaviour.

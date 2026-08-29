@@ -96,7 +96,7 @@ async function runFieldEvidencePhase({ client, researchChannel, founderUserId, i
 // generate plausible-sounding filler. The one real model call this
 // makes is the gap-output question generation, which asks questions
 // rather than asserting facts, so it doesn't carry the same risk.
-async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFile, threadTs }) {
+async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFile, threadTs, threadContext }) {
 	// I1: /test does NOT grade the field evidence. It records that raw
 	// notes exist ("field-raw"); the audit reads them and assigns one of
 	// none/web-only/field-intent/field-behaviour/field-committed.
@@ -116,7 +116,12 @@ async function runResearchPass({ id, assumption, hasFieldEvidence, fieldNotesFil
 				content:
 					"Given a business assumption with no evidence gathered yet, output exactly three specific questions that would resolve whether it's true, and for each question name the kind of person who could answer it. Do not answer the questions yourself. Do not assert anything about the market.",
 			},
-			{ role: "user", content: assumption },
+			{
+				role: "user",
+				content: threadContext
+					? `Assumption:\n${assumption}\n\nContext from the conversation this came out of (use it to make the questions specific; do not treat it as evidence):\n${threadContext}`
+					: assumption,
+			},
 		];
 		const t0 = Date.now();
 		const { content, usage, costUsd: callCost, cacheHit } = await callFlash(messages, { model: MODEL, maxTokens: 2048 });
@@ -273,12 +278,24 @@ async function handleTestCommand({ command, ack, client }) {
 			parentThreadTs,
 		});
 
+		// Bug 1: the research pass is the invisible stretch -- the field
+		// prompt above is visible, the report below is visible, this gap
+		// isn't. One breadcrumb.
+		await client.chat
+			.postMessage({
+				channel: researchChannel,
+				thread_ts: threadTs,
+				text: `_${hasFieldEvidence ? "Field notes logged. " : ""}Running the research pass for \`${id}\`…_`,
+			})
+			.catch(() => {});
+
 		const { evidenceBasis, reportMd, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runResearchPass({
 			id,
 			assumption,
 			hasFieldEvidence,
 			fieldNotesFile,
 			threadTs,
+			threadContext: command.thread_context || "",
 		});
 
 		updateState(id, { state: "researched" });

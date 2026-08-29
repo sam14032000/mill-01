@@ -5,8 +5,9 @@ const { callFlash } = require("../llm");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { search } = require("../tavily");
-const { findLatestSessionForUser, addTurn } = require("../chat-session");
+const { getSession, findLatestSessionForUser, addTurn } = require("../chat-session");
 const { withPromoteButton } = require("../promote-button");
+const { isAnaphoric } = require("../intent");
 
 const MODEL = "flash-fast";
 const STAGE = "find";
@@ -32,6 +33,35 @@ const SUMMARY_PROMPT = [
 	"Be brief. Plain prose. Do not present this as verified fact -- it is a surface scan.",
 ].join("\n");
 
+// ROOT CAUSE B: "research these problem statements" / "look this up" only
+// mean something against the conversation. When the ask is anaphoric or
+// too thin to stand alone AND we have thread context, resolve it to a
+// concrete standalone subject before planning queries. Returns the
+// resolved subject (or the original text if there's nothing to resolve
+// against / the call fails).
+const RESOLVE_PROMPT = [
+	"A founder in a chat asked for a web search. Their exact words may lean on the conversation ('research these', 'look this up', 'what we discussed').",
+	"Using the conversation, restate WHAT TO SEARCH FOR as a single concrete, standalone subject — a phrase or question a search engine could take with no other context.",
+	"Resolve every referring expression against the conversation. Do not add scope they didn't ask for. Output only the resolved subject, one line, no preamble.",
+].join("\n");
+
+async function resolveTopic(rawTopic, threadContext) {
+	if (!threadContext || !isAnaphoric(rawTopic)) return rawTopic;
+	try {
+		const { content } = await callFlash(
+			[
+				{ role: "system", content: RESOLVE_PROMPT },
+				{ role: "user", content: `Conversation:\n${threadContext}\n\nThe founder's search request: "${rawTopic}"` },
+			],
+			{ model: MODEL, maxTokens: 256 },
+		);
+		const resolved = (content || "").trim().split("\n")[0].trim();
+		return resolved.length >= 3 ? resolved : rawTopic;
+	} catch {
+		return rawTopic;
+	}
+}
+
 async function planQueries(topic) {
 	try {
 		const { content } = await callFlash(
@@ -51,7 +81,7 @@ async function planQueries(topic) {
 	}
 }
 
-async function runFind(topic) {
+async function runFind(topic, { rawTopic } = {}) {
 	const queries = await planQueries(topic);
 	const t0 = Date.now();
 	const hits = await search(queries);
@@ -81,6 +111,7 @@ async function runFind(topic) {
 
 	const body =
 		`*🔎 Surface search:* ${topic}\n` +
+		(rawTopic && rawTopic !== topic ? `_(you asked: “${rawTopic}” — resolved from the thread)_\n` : "") +
 		`_Queries: ${queries.map((q) => `\`${q}\``).join(", ")}_\n\n` +
 		`${content || "_no usable results_"}` +
 		(sourceList.length ? `\n\n_Scanned:_ ${sourceList.map((u) => `<${u}>`).join(" · ")}` : "") +
@@ -112,22 +143,29 @@ async function handleFindCommand({ command, ack, client }) {
 
 	await ack();
 
-	// Thread it into the founder's active #chats session if there is one
-	// (slash commands don't carry thread_ts -- see chat-session.js).
+	// Thread it into whatever session this thread has -- a #chats chat or
+	// a project stage thread (ROOT CAUSE B: /find was project-blind and
+	// posted to channel root there). Fall back to the founder's active
+	// #chats session for a bare slash command with no thread_ts.
 	const chatsChannel = channelId("chats");
 	const session =
-		command.channel_id === chatsChannel
+		(command.thread_ts && getSession(command.thread_ts)) ||
+		(command.channel_id === chatsChannel
 			? findLatestSessionForUser(command.user_id, chatsChannel)
-			: null;
+			: null);
+	const threadTs = command.thread_ts || (session ? session.threadTs : undefined);
 	const dest = command.channel_id || channelId("mill");
 
 	try {
-		const r = await runFind(topic);
+		// ROOT CAUSE B: resolve "these"/"this"/thin asks against the thread
+		// before planning queries.
+		const resolved = await resolveTopic(topic, command.thread_context);
+		const r = await runFind(resolved, { rawTopic: topic });
 
 		const post = { channel: dest, text: r.body };
-		if (session) {
-			post.thread_ts = session.threadTs;
-			post.blocks = withPromoteButton(r.body, session.threadTs); // 15.1
+		if (threadTs) {
+			post.thread_ts = threadTs;
+			post.blocks = withPromoteButton(r.body, threadTs); // 15.1
 		}
 		await client.chat.postMessage(post);
 

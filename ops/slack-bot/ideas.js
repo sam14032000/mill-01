@@ -84,14 +84,16 @@ function createIdea({ id, founder, originText, caseText, assumption }) {
 // `open` with the assumption unset and /test is told it needs one.
 // Writes idea.md, origin-chat.md (the FULL transcript -- promoting late
 // must lose nothing), and state.json.
-function promoteIdea({ id, founder, topic, assumption, originChatMd, originChatTs, summary, channelId = null, threads = {} }) {
+function promoteIdea({ id, founder, topic, assumption, tooVagueDetail = null, originChatMd, originChatTs, summary, channelId = null, threads = {} }) {
 	const dir = path.join(IDEAS_DIR, id);
 	fs.mkdirSync(dir, { recursive: true });
 	const ts = nowIso();
 
 	const assumptionSection = assumption
 		? assumption
-		: "_Not set yet — this chat didn't run `/attack`. `/test` needs a named, falsifiable assumption; run `/attack <idea>` in the project's Brainstorm thread first._";
+		: tooVagueDetail
+			? `_Not set — \`/attack\` in the origin chat returned TOO_VAGUE. Specifics still needed before this can be attacked: ${tooVagueDetail}_`
+			: "_Not set yet — this chat didn't run `/attack`. `/test` needs a named, falsifiable assumption; run `/attack <idea>` in the project's Brainstorm thread first._";
 
 	const ideaMd = [
 		`# ${id}`,
@@ -128,6 +130,9 @@ function promoteIdea({ id, founder, topic, assumption, originChatMd, originChatT
 		// pre-filled /attack assumption is visible in state without parsing
 		// markdown -- build-guide-projects 15 verification checks state.json.
 		assumption: assumption || null,
+		// Bug 1: /attack's TOO_VAGUE feedback, carried so the project knows
+		// what's still missing instead of a generic "run /attack".
+		assumption_blocked_on: assumption ? null : tooVagueDetail || null,
 		channel_id: channelId,
 		threads, // { brainstorm, research, audit, prototype, documents }
 		parent: null,
@@ -166,6 +171,18 @@ function findIdeaByChannel(channelId) {
 function readIdeaMd(id) {
 	try {
 		return fs.readFileSync(path.join(IDEAS_DIR, id, "idea.md"), "utf8");
+	} catch {
+		return null;
+	}
+}
+
+// The full origin-chat transcript captured at promotion. Every project
+// stage thread needs this as context -- without it a promoted idea's
+// threads start from nothing and "where did we leave off" gets answered
+// "blank slate" despite all the turns sitting on disk (ROOT CAUSE B).
+function readOriginChat(id) {
+	try {
+		return fs.readFileSync(path.join(IDEAS_DIR, id, "origin-chat.md"), "utf8");
 	} catch {
 		return null;
 	}
@@ -326,6 +343,7 @@ module.exports = {
 	appendOutcome,
 	readState,
 	readIdeaMd,
+	readOriginChat,
 	readAssumption,
 	readLatestResearch,
 	updateState,

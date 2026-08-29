@@ -35,6 +35,9 @@ const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evo
 const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
 const { startSocketHealth } = require("./socket-health");
+const { wrapClientFormatting } = require("./mrkdwn");
+const { emit } = require("./telemetry");
+const { buildEvalEvent } = require("./eval-event");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -48,6 +51,16 @@ const app = new App({
 	token: process.env.SLACK_BOT_TOKEN,
 	appToken: process.env.SLACK_APP_TOKEN,
 	socketMode: true,
+});
+
+// The models emit standard Markdown; Slack doesn't parse it. Convert
+// every outbound chat.postMessage / chat.update at one choke point (see
+// mrkdwn.js). app.client covers listeners that reuse it; the middleware
+// below covers any per-request client Bolt hands a listener.
+wrapClientFormatting(app.client);
+app.use(async ({ client, next }) => {
+	wrapClientFormatting(client);
+	await next();
 });
 
 // Inbound-event log, kept permanently. Before this line there was zero
@@ -261,6 +274,25 @@ app.action(RUN_ACTION_ID, async ({ ack, body, client }) => {
 			return;
 		}
 	}
+
+	// Bug 1: acknowledge the tap visually before the command's own output
+	// lands.
+	await post(`_On it — running \`/${v.action}\`…_`);
+
+	// Confidence-vs-tap telemetry (your ask): every offer is made at
+	// "medium" now (highs execute directly). If mediums get tapped often,
+	// the bar is too low -- this makes it countable instead of inferred.
+	emit(
+		buildEvalEvent({
+			stage: sess?.kind === "project" ? "project_turn" : "chat",
+			founder,
+			ideaId: v.ideaId || sess?.ideaId || null,
+			status: "ok",
+			reasonCode: "offer_tapped",
+			offerAction: v.action,
+			offerTapConfidence: v.confidence || "unknown",
+		}),
+	);
 
 	// Run against the exact turn that triggered the offer, not "latest".
 	const triggerText =
