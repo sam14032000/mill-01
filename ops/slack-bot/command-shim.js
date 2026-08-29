@@ -125,7 +125,7 @@ function threadContextText(threadTs, channelId) {
 	return lines.join("\n").trim();
 }
 
-async function dispatchCommand({ action, text, channelId, userId, threadTs, client, progressTs = null, progressChannel = null }) {
+async function dispatchCommand({ action, text, channelId, userId, threadTs, client, progressTs = null, progressChannel = null, broad = undefined }) {
 	const handler = HANDLERS[action];
 	if (!handler) return { ok: false, reason: "unknown_action" };
 	let effectiveText = (text || "").trim();
@@ -152,6 +152,8 @@ async function dispatchCommand({ action, text, channelId, userId, threadTs, clie
 		thread_context: threadContextText(threadTs, channelId),
 		// Bug 1: the "On it — running /x…" placeholder to land the result in.
 		progress: progressTs ? { ts: progressTs, channel: progressChannel || channelId } : null,
+		// D-53 Mode 2: /find broad breadth when the founder pushed for it.
+		...(broad !== undefined ? { broad } : {}),
 	};
 
 	// The result lands in the placeholder instead of a second message.

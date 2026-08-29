@@ -140,7 +140,7 @@ Log per event to `telemetry/YYYY-MM.jsonl`. Without this, Layer 3 has nothing to
 
 Per idea, track the chain: `capture_ts → first_brainstorm → research → audit → verdict → prototype? → touches → outcome`.
 
-`chat` / `project_turn` events carry the agent-loop fields (D-53): `tools_called` (array — usually empty or one name), `tools_ignored` (parallel calls dropped, founder-paced), `iterations` (model steps this turn, normally 1), `replied_without_tool` (bool). `proto` events carry `build_iterations` and `build_succeeded` (D-53 Phase 2). The old D-51/D-52 classifier fields (`suggested_action`, `suggestion_confidence`, `regex_action`, `offer_*`, `interrogative`, `routing_suppressed`, `executed_action`) are gone with the classifier.
+`chat` / `project_turn` events carry the agent-loop fields (D-53): `tools_called` (array — usually empty or one name), `tools_ignored` (parallel calls dropped, founder-paced), `iterations` (model steps this turn, normally 1), `replied_without_tool` (bool), `search_initiated_by` (`"agent"` = inline quick fact check | `"founder"` = the founder asked / broad mode | `null`). `find` events also carry `search_initiated_by` (always `"founder"`). `proto` events carry `build_iterations` and `build_succeeded` (D-53 Phase 2). The old D-51/D-52 classifier fields (`suggested_action`, `suggestion_confidence`, `regex_action`, `offer_*`, `interrogative`, `routing_suppressed`, `executed_action`) are gone with the classifier.
 
 **Required derived metrics**
 
@@ -158,6 +158,7 @@ Per idea, track the chain: `capture_ts → first_brainstorm → research → aud
 | Graveyard resurrections the audit *caught* (`resembles_killed_idea` non-null) vs missed | caught share rising | I3 |
 | Ideas killed with reason `stale` | non-zero but not dominant — some inattention-kills are healthy; if most kills are `stale` the gate isn't being reached | I4 |
 | **Agent tool rate** — conversational turns with `tools_called` non-empty ÷ all `chat`/`project_turn` turns | context, not a fixed target. A sharp move up or down means the agent is over- or under-calling tools; it's one prompt lever now (`agent.js` `SYSTEM_PROMPT`), so a bad trend is a prompt fix, not code. (D-53) |
+| **Agent-initiated search rate** — `chat`/`project_turn` events with `search_initiated_by: "agent"` ÷ all such turns | should stay **below ~1/5**. Higher means the inline-fact-check trigger is too loose — the agent is fact-checking its own uncertainty instead of answering, which turns every turn into a fact-check and kills the brainstorm. It's a prompt lever (`agent.js` "WEB FACTS" block); a bad rate is a wording fix. (D-53 Mode 1) |
 | **Multi-step turns** — turns with `iterations > 1` ÷ all turns | should be **near zero**. `iterations > 1` only happens when a tool was blocked by a precondition and the agent looped to explain it. A rising rate means the agent keeps trying tools that don't apply. (D-53) |
 | **`/proto` build convergence** — `proto` events with `build_succeeded: true` ÷ `proto` events where `build_iterations > 0` | should be **high**. A low rate means the build loop isn't fixing what it starts, and `MILL_PROTO_BUILD_ITERS` or the fix prompt needs work. (D-53 Phase 2) |
 

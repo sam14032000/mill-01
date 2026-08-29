@@ -753,7 +753,10 @@ def check_c23():
     mismatches = []
     unmatched = 0
     checked = 0
-    for event in sample:
+    seen = set()  # event ids already accounted for as a co-timed sibling
+    for i, event in enumerate(sample):
+        if i in seen:
+            continue
         model = event["model"]
         candidates = by_model_group.get(model, [])
         if not candidates:
@@ -764,10 +767,7 @@ def check_c23():
         # [ts - wall_clock_s - buffer, ts + buffer]. Summing every row
         # in that window handles stages that make more than one real
         # LLM call per event (cross.js's two parallel founder reads,
-        # attack.js's/proto.js's/audit.js's retry-on-parse-failure), not
-        # just the single-call case -- a fixed single-nearest-row match
-        # would wrongly flag a correctly-summed multi-call event as a
-        # mismatch, since its total genuinely exceeds any one row.
+        # attack.js's/proto.js's/audit.js's retry-on-parse-failure).
         event_epoch = parse_telemetry_ts(event["ts"]).timestamp()
         wall_clock = event.get("wall_clock_s", 0) or 0
         window_start = event_epoch - wall_clock - MATCH_WINDOW_BUFFER_S
@@ -776,12 +776,31 @@ def check_c23():
         if not in_window:
             unmatched += 1
             continue
+        # D-53: one turn can emit two same-model events for one set of
+        # LiteLLM rows -- e.g. the agent's turn event plus the `find`
+        # event when the agent runs a broad search (agent.js call + the
+        # find handler's resolve/plan/summarise calls). Sum every sampled
+        # event of the same model whose window overlaps, and compare that
+        # sum to the spend-row sum, so a correctly-split pair isn't
+        # double-flagged.
+        siblings = [event]
+        for j in range(i + 1, len(sample)):
+            if j in seen:
+                continue
+            o = sample[j]
+            if o["model"] != model:
+                continue
+            o_epoch = parse_telemetry_ts(o["ts"]).timestamp()
+            if window_start <= o_epoch <= window_end:
+                siblings.append(o)
+                seen.add(j)
         checked += 1
-        logged = event["cost_usd"]
+        logged = sum(s["cost_usd"] for s in siblings)
         real = sum(in_window)
-        tolerance = max(TOLERANCE_ABS_USD, TOLERANCE_REL * real)
+        tolerance = max(TOLERANCE_ABS_USD, TOLERANCE_REL * real) * max(1, len(siblings))
         if abs(logged - real) > tolerance:
-            mismatches.append(f"{event['ts']} stage={event['stage']} model={model}: telemetry cost_usd={logged} vs LiteLLM spend(window sum)={real} across {len(in_window)} row(s) (tolerance {tolerance:.5f})")
+            label = "+".join(s["stage"] for s in siblings)
+            mismatches.append(f"{event['ts']} stage={label} model={model}: telemetry cost_usd(sum)={logged} vs LiteLLM spend(window sum)={real} across {len(in_window)} row(s) (tolerance {tolerance:.5f})")
 
     if mismatches:
         return Result(

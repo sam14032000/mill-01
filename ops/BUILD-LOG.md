@@ -432,3 +432,21 @@ The D-51/D-52 intent classifier (regex + `suggested_action`/`confidence` + a gro
 Tests: `_agent.js` 14/14, `_protoloop.js` 15/15, `_bug12.js` 12/12, `_statecard.js` 24/24, `_d51gates.js` 6/6. Obsolete scaffolds removed (`_rcab.js`, `_interrog.js`, `_d51test.js`). Conformance 26/26 (C-06 audit-context path unchanged — tools call the same handlers). Bot restarted clean.
 
 Docs: **D-53** in `DECISIONS.md` (amends D-43's premise, keeps its conclusion); `COMMANDS.md` / `PROJECTS.md` invocation sections rewritten to two paths; `EVAL.md` metric + telemetry-field swap; `ops/dsh-investigation.md`.
+
+---
+
+## D-53 follow-up — mill-flash budget + two research modes
+
+**`mill-flash` budget $0.50 → $1.00/day** via LiteLLM `/key/update` (key value + spend preserved; models still `["flash-fast"]`, `budget_duration` still `1d`). D-53 put a `flash-fast` agent-loop call on *every* conversational turn — previously only slash/brainstorm hit `flash-fast` — and today's spend had already reached $0.502 and was tripping the cap. `docs/build-guide.md` Part 7.3 and D-23 updated in the same commit (live-config convention).
+
+**Mode 1 — inline surface search, agent-initiated.** `search.js` `inlineFactSearch(query)` — 1–2 Tavily queries (`maxQueries:2, maxResults:3`), returns a ~1600-char findings string. `tools.js`: `find` schema gains `mode: "quick" | "broad"`; `mode:"quick"` → `inlineFactSearch`, `{posted:false, search:"agent", result}` → the agent loop continues, the model folds the fact into its prose reply. `agent.js` appends the exact marker `_(quick web check — not verified, not evidence)_` if the reply doesn't already carry a not-evidence phrase. **Trigger wording is in `agent.js`'s "WEB FACTS" block** — narrow by design: "search when you need a concrete fact to answer well, not when you feel unsure"; "I'm not certain" is not a trigger; if searching on >~1/5 of turns you're fact-checking uncertainty, stop.
+
+**Mode 2 — broad, founder-pushed.** `tavily.js` `search(queries, {maxQueries, maxResults})` and `searchOne(query, {maxResults})` parameterized. `commands/find.js` `runFind(topic, {broad})`: broad → `planQueries(max:5)` + `search({maxQueries:5, maxResults:8})`, header `*🔎 Surface search (broad):*`. `command.broad` threaded via `dispatchCommand`. Every founder invocation of `find` (slash, `@Mill`, or the agent's broad mode because the founder asked) → `broad:true`, `search_initiated_by:"founder"`. Still `search_depth:"basic"` — breadth, not a research pass.
+
+**Telemetry.** `search_initiated_by: "agent" | "founder" | null` on `chat`/`project_turn` and `find` events (`eval-event.js`). `EVAL.md` Layer 2: agent-initiated search rate metric, target <~1/5 of turns — a loose trigger shows in telemetry rather than inferred.
+
+**C-23 hardened.** The agent's broad-search turn emits two same-model events for one set of LiteLLM rows (the agent call + the `find` handler's resolve/plan/summarise calls). C-23 now sums co-timed same-model sampled events and compares that sum to the spend-row sum, so a correctly-split pair isn't double-flagged. (Third time this co-timed-event shape has hit C-23; fixed properly rather than bumping the cutoff again.)
+
+Tests: `_agent.js` now 24/24 incl. founder-broad (posted block, `search_initiated_by:founder`), agent-inline ("is India's GST threshold ₹20 or ₹40 lakh" → folded "₹20 lakh for service exporters…" + marker, no block, `search_initiated_by:agent`), and the guard (uncertainty/abstraction "i'm not sure this holds together" → no search). `_protoloop.js` 15/15, `_bug12.js` 12/12, `_d51gates.js` 6/6. Conformance 26/26. Bot restarted clean.
+
+Docs: D-53 gains the research-modes section; `COMMANDS.md`/`PROJECTS.md` `/find` spec; `EVAL.md` metric + field; `build-guide.md`/D-23 for the budget.

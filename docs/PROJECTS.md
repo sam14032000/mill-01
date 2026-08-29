@@ -75,11 +75,11 @@ This is the intended path into a project: think, attack, promote.
 
 ### `/find` — surface only
 
-1–3 Tavily queries, results summarised in-thread. No report file, no citation re-check, no `evidence_basis`.
+Tavily queries, results summarised in-thread. No report file, no citation re-check, no `evidence_basis`. Founder invocations (`/find`, `@Mill find`, or asking the agent to dig in) run **broad** — up to 5 sub-queries, 8 results each; breadth, not depth (D-53). The agent may also run a **quick** inline check on its own — 1–2 queries folded into a reply — when it needs one concrete missing fact; that carries a `_(quick web check — not verified, not evidence)_` marker and no separate block.
 
-**It is never evidence.** Output must be visually distinct from a research report and must carry a footer saying so. If a chat is later promoted, `/find` results are transcribed as conversation, never as research. Only `/test` produces evidence an audit can rule on.
+**It is never evidence** — in either mode. Output must be visually distinct from a research report and carry a footer saying so. If a chat is later promoted, `/find` results are transcribed as conversation, never as research. Only `/test` produces evidence an audit can rule on.
 
-This distinction is load-bearing. Confusing surface search with research is how a `proceed` verdict gets built on three headlines.
+This distinction is load-bearing. Confusing surface search with research is how a `proceed` verdict gets built on three headlines — and an agent-initiated search the founder didn't ask for is more at risk of being mistaken for evidence, not less.
 
 ### Persistence
 

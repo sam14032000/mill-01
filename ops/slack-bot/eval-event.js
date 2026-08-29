@@ -50,6 +50,11 @@ function buildEvalEvent({
 	// build/fix/re-run attempts, and whether it ended up running clean.
 	buildIterations,
 	buildSucceeded,
+	// D-53 research modes: who initiated a web search this event covers --
+	// "agent" (inline quick fact check) | "founder" (/find, @Mill find, or
+	// the agent's broad mode because the founder asked). EVAL Layer 2
+	// watches the agent-initiated rate.
+	searchInitiatedBy,
 }) {
 	const event = {
 		founder,
@@ -75,6 +80,9 @@ function buildEvalEvent({
 	if (buildIterations !== undefined) {
 		event.build_iterations = buildIterations ?? 0;
 		event.build_succeeded = buildSucceeded ?? null;
+	}
+	if (searchInitiatedBy !== undefined) {
+		event.search_initiated_by = searchInitiatedBy ?? null;
 	}
 	return event;
 }

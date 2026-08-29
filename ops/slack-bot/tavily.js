@@ -13,7 +13,7 @@ const https = require("node:https");
 const ENDPOINT = "https://api.tavily.com/search";
 const MAX_RESULTS_PER_QUERY = 5;
 
-function searchOne(query) {
+function searchOne(query, { maxResults = MAX_RESULTS_PER_QUERY } = {}) {
 	const key = process.env.TAVILY_API_KEY;
 	if (!key) return Promise.reject(new Error("TAVILY_API_KEY not set"));
 
@@ -21,7 +21,7 @@ function searchOne(query) {
 		api_key: key,
 		query,
 		search_depth: "basic",
-		max_results: MAX_RESULTS_PER_QUERY,
+		max_results: maxResults,
 		include_answer: true,
 	});
 
@@ -68,10 +68,12 @@ function searchOne(query) {
 	});
 }
 
-// Runs up to 3 queries. `queries` is a string[] (caller decides how many).
-async function search(queries) {
-	const capped = queries.slice(0, 3);
-	return Promise.all(capped.map(searchOne));
+// `queries` is a string[]. Defaults are the shallow /find shape (3
+// queries, 5 results each); the D-53 broad mode passes larger caps
+// (breadth, not depth -- search_depth stays "basic").
+async function search(queries, { maxQueries = 3, maxResults = MAX_RESULTS_PER_QUERY } = {}) {
+	const capped = queries.slice(0, maxQueries);
+	return Promise.all(capped.map((q) => searchOne(q, { maxResults })));
 }
 
 module.exports = { search, searchOne, MAX_RESULTS_PER_QUERY };

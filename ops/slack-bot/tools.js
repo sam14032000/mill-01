@@ -15,6 +15,7 @@
 
 const { dispatchCommand } = require("./command-shim");
 const { validateSuggestion, REASON_MESSAGE, PROJECT_ONLY } = require("./intent");
+const { inlineFactSearch } = require("./search");
 
 // OpenAI tool schema per command. Descriptions are what the model
 // routes on -- kept close to docs/COMMANDS.md's one-liners.
@@ -51,8 +52,15 @@ const SCHEMAS = [
 	{
 		name: "find",
 		description:
-			"Surface web search (1-3 queries, summarised inline). NOT evidence. Use when the founder asks to look something up / search / find prices / competitors / whether something exists.",
-		parameters: { type: "object", properties: { query: { type: "string", description: "the concrete thing to search for, with referring expressions resolved" } }, required: ["query"] },
+			"Surface web search. NOT evidence. Two modes: mode:\"quick\" — mid-answer, when YOU need one concrete missing fact (a price, a rule/threshold, a market number, a date, whether a named company exists); 1-2 queries, you fold the result into your prose reply. mode:\"broad\" — only when the FOUNDER explicitly asks you to look something up / dig in / research a question; more queries, posted as a separate block. Do not use quick mode just because you feel unsure or the founder is being abstract.",
+		parameters: {
+			type: "object",
+			properties: {
+				query: { type: "string", description: "the concrete thing to search for, with 'this'/'these' resolved yourself" },
+				mode: { type: "string", enum: ["quick", "broad"], description: "quick = your own inline fact check; broad = the founder asked" },
+			},
+			required: ["query"],
+		},
 	},
 	{
 		name: "test",
@@ -129,6 +137,21 @@ async function runTool(name, args, ctx) {
 		return { posted: false, result: "did not run `spinoff`: it needs the new idea. Ask the founder what to spin off." };
 	}
 
+	// D-53 Mode 1: agent-initiated inline fact check. Does NOT post a
+	// block -- the findings come back as the tool result and the agent
+	// folds them into its prose reply (agent.js adds the not-evidence
+	// marker).
+	if (name === "find" && args.mode === "quick") {
+		const { findings, queryCount } = await inlineFactSearch(argText("find", args));
+		return {
+			posted: false,
+			search: "agent",
+			result:
+				`INLINE WEB CHECK (${queryCount} quer${queryCount === 1 ? "y" : "ies"}) — surface search, NOT evidence. ` +
+				`Use this to answer, then end your reply with: _(quick web check — not verified, not evidence)_\n\n${findings}`,
+		};
+	}
+
 	try {
 		await dispatchCommand({
 			action: name,
@@ -139,11 +162,13 @@ async function runTool(name, args, ctx) {
 			client: ctx.client,
 			progressTs: ctx.progressTs,
 			progressChannel: ctx.progressChannel,
+			// D-53 Mode 2: the founder pushed for this -> broad breadth.
+			...(name === "find" ? { broad: true } : {}),
 		});
 	} catch (err) {
 		return { posted: false, result: `\`${name}\` errored: ${err?.message || err}. Tell the founder it failed.` };
 	}
-	return { posted: true, result: `\`${name}\` ran; its output is in the thread.` };
+	return { posted: true, search: name === "find" ? "founder" : undefined, result: `\`${name}\` ran; its output is in the thread.` };
 }
 
 module.exports = { toolSpecs, runTool, TOOL_NAMES, PROJECT_ONLY };

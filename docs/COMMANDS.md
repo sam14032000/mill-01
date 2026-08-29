@@ -248,9 +248,11 @@ Opens a disposable thinking thread in `#chats`; plain replies are conversational
 
 ### `/find <query>` — projects phase (see `docs/PROJECTS.md`)
 
-Surface web lookup (1–3 Tavily queries, `flash-fast` summary) posted inline. **Never evidence** — carries a not-evidence footer, is visually distinct from a research report, and on promotion transcribes as conversation, never as research. `/search` is a Slack-reserved name, hence `/find`. Only `/test` produces something an audit can rule on.
+Surface web lookup, `flash-fast` summary, posted as a distinct `*🔎 Surface search*` block. **Never evidence** — carries a not-evidence footer, is visually distinct from a research report, and on promotion transcribes as conversation, never as research. `/search` is a Slack-reserved name, hence `/find`. Only `/test` produces something an audit can rule on.
 
 When the ask leans on the conversation ("research *these*", "look *this* up") or is too thin to stand alone, `/find` resolves it against the thread's context to a concrete standalone subject before planning queries, and shows what it resolved to (D-52). It threads into a project stage thread, not just `#chats`.
+
+**Two modes (D-53).** Any founder invocation — `/find`, `@Mill find`, or the agent's `find(mode:"broad")` because you asked it to dig in — runs **broad**: up to 5 sub-queries, 8 results each (breadth, not depth). Separately, the agent may call `find(mode:"quick")` **on its own**, mid-reply, when it needs one concrete missing fact to answer well (a price, a rule, a market number) — 1–2 queries, folded into the prose reply with the `_(quick web check — not verified, not evidence)_` marker, no separate block. It is told to do this only for a missing fact, never for general uncertainty. `search_initiated_by` (`agent`/`founder`) is logged on every search.
 
 ---
 

@@ -23,10 +23,11 @@ const NOT_EVIDENCE_FOOTER =
 	"\n\n---\n> 🔎 _Surface search, not research. No sources were verified and this is *not evidence*. " +
 	"Only `/test` inside a project produces something an audit can rule on._";
 
-const QUERY_PLANNER_PROMPT = [
-	"Turn this into 1 to 3 focused web search queries. More than one only if the ask has genuinely distinct parts.",
-	"Output only the queries, one per line, no numbering, no commentary.",
-].join("\n");
+const queryPlannerPrompt = (max) =>
+	[
+		`Turn this into 1 to ${max} focused web search queries. More than one only if the ask has genuinely distinct parts to cover.`,
+		"Output only the queries, one per line, no numbering, no commentary.",
+	].join("\n");
 
 const SUMMARY_PROMPT = [
 	"Summarise these web search results for a founder thinking through an idea.",
@@ -63,11 +64,11 @@ async function resolveTopic(rawTopic, threadContext) {
 	}
 }
 
-async function planQueries(topic) {
+async function planQueries(topic, { max = 3 } = {}) {
 	try {
 		const { content } = await callFlash(
 			[
-				{ role: "system", content: QUERY_PLANNER_PROMPT },
+				{ role: "system", content: queryPlannerPrompt(max) },
 				{ role: "user", content: topic },
 			],
 			{ model: MODEL, maxTokens: 512 },
@@ -76,16 +77,21 @@ async function planQueries(topic) {
 			.split("\n")
 			.map((l) => l.replace(/^[-*\d.\s]+/, "").trim())
 			.filter(Boolean);
-		return lines.length ? lines.slice(0, 3) : [topic];
+		return lines.length ? lines.slice(0, max) : [topic];
 	} catch {
 		return [topic];
 	}
 }
 
-async function runFind(topic, { rawTopic } = {}) {
-	const queries = await planQueries(topic);
+// broad (D-53 Mode 2, founder-pushed): more distinct sub-queries and more
+// results per query -- breadth, not recursion depth (still search_depth
+// "basic", still NOT a research pass).
+async function runFind(topic, { rawTopic, broad = false } = {}) {
+	const maxQueries = broad ? 5 : 3;
+	const maxResults = broad ? 8 : 5;
+	const queries = await planQueries(topic, { max: maxQueries });
 	const t0 = Date.now();
-	const hits = await search(queries);
+	const hits = await search(queries, { maxQueries, maxResults });
 
 	const corpus = hits
 		.map((h) => {
@@ -111,7 +117,7 @@ async function runFind(topic, { rawTopic } = {}) {
 		.slice(0, 8);
 
 	const body =
-		`*🔎 Surface search:* ${topic}\n` +
+		`*🔎 Surface search${broad ? " (broad)" : ""}:* ${topic}\n` +
 		(rawTopic && rawTopic !== topic ? `_(you asked: “${rawTopic}” — resolved from the thread)_\n` : "") +
 		`_Queries: ${queries.map((q) => `\`${q}\``).join(", ")}_\n\n` +
 		`${content || "_no usable results_"}` +
@@ -157,11 +163,16 @@ async function handleFindCommand({ command, ack, client }) {
 	const threadTs = command.thread_ts || (session ? session.threadTs : undefined);
 	const dest = command.channel_id || channelId("mill");
 
+	// Founder-invoked /find (slash, @Mill, or the agent's broad mode) is
+	// founder-pushed by definition -> broad breadth. `command.broad`
+	// is set false only by a path that wants the shallow shape.
+	const broad = command.broad !== false;
+
 	try {
 		// ROOT CAUSE B: resolve "these"/"this"/thin asks against the thread
 		// before planning queries.
 		const resolved = await resolveTopic(topic, command.thread_context);
-		const r = await runFind(resolved, { rawTopic: topic });
+		const r = await runFind(resolved, { rawTopic: topic, broad });
 
 		const post = { channel: dest, text: r.body };
 		if (threadTs) {
@@ -186,7 +197,8 @@ async function handleFindCommand({ command, ack, client }) {
 				cacheHitRatio: r.cacheHitRatio,
 				wallClockS: r.wallClockS,
 				status: "ok",
-				reasonCode: `queries_${r.queryCount}`,
+				reasonCode: `${broad ? "broad" : "quick"}_queries_${r.queryCount}`,
+				searchInitiatedBy: "founder", // D-53: /find, @Mill find, or the agent's broad mode
 			}),
 		);
 	} catch (err) {

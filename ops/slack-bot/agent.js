@@ -42,7 +42,15 @@ const SYSTEM_PROMPT = [
 	"Call at most one tool. The founder drives the next step; do not chain commands.",
 	"When you call a tool, produce no prose — the tool posts the real output.",
 	"Prose replies: short and concrete. Engage with what they said, push on the weak point, ask for the number or the named alternative when a claim is vague. No headings, no essays.",
+	"",
+	"WEB FACTS. You have `find`.",
+	"- `find` with mode:\"quick\": use it MID-ANSWER only when answering well needs one specific, checkable fact you don't have — a price, a market-size number, a named regulation or filing threshold, a date, or whether a specific named company or product actually exists. One or two queries. Fold the finding into your prose reply — do NOT post it as a separate block — and end the reply with the exact marker: _(quick web check — not verified, not evidence)_",
+	"- Do NOT search because you feel unsure, want to double-check, or the founder is being abstract. \"I'm not certain\" is not a trigger. \"I need this number / rule / name to answer correctly, and my answer is wrong or vague without it\" is. Most turns need no search — if you'd be searching on more than about one turn in five, you're fact-checking uncertainty, which kills the brainstorm. Reason from what you know instead.",
+	"- `find` with mode:\"broad\": only when the founder explicitly asks you to look something up, dig into a question, or research it. Posts a separate surface-search block, more queries, more results. Still not evidence — only `test` produces something an audit can rule on.",
 ].join("\n");
+
+const INLINE_MARKER = "_(quick web check — not verified, not evidence)_";
+const NOT_EVIDENCE_RE = /not evidence|not verified|quick web check|surface (web )?check/i;
 
 function parseArgs(tc) {
 	try {
@@ -84,6 +92,7 @@ async function runTurn({ session, message, client }) {
 	let calls = 0;
 	const toolsCalled = [];
 	let toolsIgnored = 0;
+	let searchInitiatedBy = null; // "agent" (inline quick) | "founder" (broad) | null
 	const t0 = Date.now();
 
 	for (let step = 0; step < MAX_STEPS; step++) {
@@ -114,6 +123,7 @@ async function runTurn({ session, message, client }) {
 
 			const before = session.turns.length;
 			const out = await runTool(name, args, { ...ctx, progressTs: placeholderTs, progressChannel: message.channel });
+			if (out.search) searchInitiatedBy = out.search; // "agent" (inline) | "founder" (broad)
 
 			// Keep the thread transcript continuous even when the handler
 			// (project-stage branch) didn't record its own turn -- else the
@@ -132,6 +142,7 @@ async function runTurn({ session, message, client }) {
 						tokensIn, tokensOut, costUsd, cacheHitRatio: calls ? cacheHits / calls : 0,
 						wallClockS: (Date.now() - t0) / 1000, status: "ok", reasonCode: `tool_${name}`,
 						toolsCalled, toolsIgnored, iterations: step + 1, repliedWithoutTool: false,
+						searchInitiatedBy,
 					}),
 				);
 				return true;
@@ -152,10 +163,17 @@ async function runTurn({ session, message, client }) {
 			continue;
 		}
 
-		addTurn(session, { role: "assistant", text: replyText });
-		const blocks = withPromoteButton(replyText, session.threadTs);
-		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: replyText, blocks }).catch(() => {});
-		else await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: replyText, blocks }).catch(() => {});
+		// D-53 Mode 1: an agent-initiated inline search ran this turn --
+		// guarantee the not-evidence marker even if the model forgot it.
+		const finalReply =
+			searchInitiatedBy === "agent" && !NOT_EVIDENCE_RE.test(replyText)
+				? `${replyText}\n\n${INLINE_MARKER}`
+				: replyText;
+
+		addTurn(session, { role: "assistant", text: finalReply });
+		const blocks = withPromoteButton(finalReply, session.threadTs);
+		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: finalReply, blocks }).catch(() => {});
+		else await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: finalReply, blocks }).catch(() => {});
 
 		try {
 			const marker = await maybeCompact(session);
@@ -181,6 +199,7 @@ async function runTurn({ session, message, client }) {
 				toolsIgnored,
 				iterations: step + 1,
 				repliedWithoutTool: true,
+				searchInitiatedBy,
 			}),
 		);
 		return true;

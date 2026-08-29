@@ -394,7 +394,7 @@ MASTER=$(grep LITELLM_MASTER_KEY .env | cut -d= -f2)
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"key_alias":"mill-flash","models":["flash-fast"],
-       "max_budget":0.50,"budget_duration":"1d",
+       "max_budget":1.00,"budget_duration":"1d",
        "rpm_limit":60}'
 
 # research: /test only
@@ -415,7 +415,7 @@ curl -s -X POST http://127.0.0.1:4000/key/generate \
 # Skip on a from-scratch build; there are three virtual keys, not four.
 ```
 
-The daily amounts on `mill-audit` and `mill-mech` are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later. `mill-flash`/`mill-research` are sized directly from measured per-command cost (`ops/BUILD-LOG.md`), not from D-23's undifferentiated $60 Gemini line — $0.50/day covers roughly 80+ interactive exchanges at the measured ~$0.006/call ceiling; $3.00/day covers roughly two research passes at ~$1.50 each.
+The daily amounts on `mill-audit` and `mill-mech` are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later. `mill-flash`/`mill-research` are sized directly from measured per-command cost (`ops/BUILD-LOG.md`), not from D-23's undifferentiated $60 Gemini line — `mill-flash` is **$1.00/day** and `mill-research` **$3.00/day** (roughly two research passes at ~$1.50 each). `mill-flash` was $0.50/day through the D-51 build; D-53 put a `flash-fast` agent-loop call on *every* conversational turn (not just slash commands), observed peak reached $0.50/day and tripped the cap, so it was raised to $1.00 via `/key/update` (D-23).
 
 **Application code routes to the correct key automatically, keyed off model name** (`ops/slack-bot/llm.js`), so a caller can't accidentally put a `/test` call on the interactive budget or vice versa by getting the key wrong.
 
