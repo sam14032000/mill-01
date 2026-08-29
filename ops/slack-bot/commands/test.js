@@ -281,14 +281,15 @@ async function handleTestCommand({ command, ack, client }) {
 
 		// Bug 1: the research pass is the invisible stretch -- the field
 		// prompt above is visible, the report below is visible, this gap
-		// isn't. One breadcrumb.
-		await client.chat
-			.postMessage({
-				channel: researchChannel,
-				thread_ts: threadTs,
-				text: `_${hasFieldEvidence ? "Field notes logged. " : ""}Running the research pass for \`${id}\`…_`,
-			})
-			.catch(() => {});
+		// isn't. /test can't collapse into the "On it…" placeholder (it
+		// has an interactive field-evidence wait mid-flow), so instead
+		// update the placeholder in place to reflect the stage, and post
+		// the report as its own message.
+		const stageLine = (t) =>
+			command.progress
+				? client.chat.update({ channel: command.progress.channel, ts: command.progress.ts, text: t }).catch(() => {})
+				: client.chat.postMessage({ channel: researchChannel, thread_ts: threadTs, text: t }).catch(() => {});
+		await stageLine(`_${hasFieldEvidence ? "Field notes logged. " : ""}Running the research pass for \`${id}\`…_`);
 
 		const { evidenceBasis, reportMd, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runResearchPass({
 			id,
@@ -324,6 +325,7 @@ async function handleTestCommand({ command, ack, client }) {
 			}),
 		);
 
+		await stageLine(`_Research pass for \`${id}\` complete — report below ↓_`);
 		const reportPost = await client.chat.postMessage({
 			channel: researchChannel,
 			thread_ts: threadTs,

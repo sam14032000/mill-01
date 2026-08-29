@@ -6,6 +6,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile, readCaptures, hasProfile, parseDocMention, readDocIndex, readProjectDocs } = require("../context");
 const { commandDestination, postCommandResult } = require("../chat-session");
+const { composeIdeaInput } = require("../intent");
 
 const MODEL = "flash-fast";
 const STAGE = "think";
@@ -37,7 +38,7 @@ const SYSTEM_PROMPT_NO_PROFILE = [
 // profile-informed. With no profile, this swaps in a prompt that never
 // asks for that framing, and the reply is prefixed so the founder knows
 // what they're getting isn't personalized.
-async function runThink({ founder, ideaText, project }) {
+async function runThink({ founder, ideaText, project, threadContext = "" }) {
 	const profile = readProfile(founder);
 	const hasRealProfile = hasProfile(founder);
 	const captures = readCaptures(founder, { maxEntries: 20, maxTokens: 8000 });
@@ -76,7 +77,7 @@ async function runThink({ founder, ideaText, project }) {
 				? `Recent captures from this founder:\n\n${captures.join("\n")}`
 				: "(no recent captures)",
 		},
-		{ role: "user", content: mention ? rest : ideaText },
+		{ role: "user", content: composeIdeaInput(mention ? rest : ideaText, threadContext) },
 	);
 
 	const t0 = Date.now();
@@ -125,6 +126,7 @@ async function handleThinkCommand({ command, ack, client }) {
 			founder,
 			ideaText,
 			project: dest.project || null,
+			threadContext: command.thread_context || "",
 		});
 
 		emit(

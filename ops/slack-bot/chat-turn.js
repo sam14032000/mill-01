@@ -117,10 +117,17 @@ async function handleChatTurn({ message, client }) {
 		client.chat.update({ channel: message.channel, ts, text, ...extra }).catch(() => {});
 
 	// Runs the real command handler via the shim. The command owns the
-	// response from here -- no prose reply, no offer, no prose turn.
+	// response from here -- no prose reply, no offer, no prose turn. Its
+	// terminal result lands in the "On it…" placeholder (Bug 1), so
+	// progressTs must always be a real message ts.
 	const execute = async (action, source, { discardedReply = null, placeholderTs = null } = {}) => {
-		if (placeholderTs) await update(placeholderTs, `_On it — running \`/${action}\`…_`);
-		else await post(`_On it — running \`/${action}\`…_`);
+		let progressTs = placeholderTs;
+		if (progressTs) {
+			await update(progressTs, `_On it — running \`/${action}\`…_`);
+		} else {
+			const r = await post(`_On it — running \`/${action}\`…_`).catch(() => null);
+			progressTs = r?.ts || null;
+		}
 		try {
 			await dispatchCommand({
 				action,
@@ -129,6 +136,8 @@ async function handleChatTurn({ message, client }) {
 				userId: message.user,
 				threadTs: session.threadTs,
 				client,
+				progressTs,
+				progressChannel: message.channel,
 			});
 		} catch (err) {
 			console.error(`chat-turn: execute ${action} failed (${session.threadTs}): ${err.message}`);

@@ -22,6 +22,7 @@ const {
 	updateState,
 } = require("./ideas");
 const { toSlackMrkdwn } = require("./mrkdwn");
+const { commitAndPush } = require("./git");
 
 // One warning per process if the pin scope is missing -- don't spam the
 // log on every transition.
@@ -118,6 +119,14 @@ async function upsertStateCard(client, id, { latestTs = null, latestChannel = nu
 			const posted = await client.chat.postMessage({ channel: state.channel_id, text, blocks });
 			cardTs = posted.ts;
 			updateState(id, { state_card_ts: cardTs });
+			// The state.json write above must reach the repo -- callers
+			// commit their own paths at varying points (some before the card
+			// exists), so commit it here rather than rely on the next one.
+			await commitAndPush(
+				[`ideas/${id}/state.json`],
+				`idea ${id}: state card`,
+				(reason) => console.error(`state-card: commit failed for ${id}: ${reason}`),
+			);
 			await client.pins.add({ channel: state.channel_id, timestamp: cardTs }).catch((err) => {
 				const code = err?.data?.error || "";
 				if (code === "already_pinned") return;

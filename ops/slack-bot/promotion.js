@@ -178,16 +178,10 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 		});
 
 	// D-52 follow-up: create the pinned current-state card for the new
-	// project channel. This writes state_card_ts into state.json, so
-	// commit again (the first commit above ran before the channel/card
-	// existed) — otherwise a restart before the next command loses the ts
-	// and a duplicate card gets posted.
+	// project channel. upsertStateCard commits its own state.json write
+	// (state_card_ts), since the promotion commit above ran before the
+	// channel existed.
 	await upsertStateCard(client, id, { latestTs: seedPost?.ts, latestChannel: project.channelId });
-	await commitAndPush(
-		[`ideas/${id}/state.json`],
-		`idea ${id}: state card pinned`,
-		(reason) => console.error(`git commit/push failed for ${id} state card: ${reason}`),
-	);
 
 	// 15.3 step 5: announce in #mill-ideas and link the new channel.
 	if (millChannel) {

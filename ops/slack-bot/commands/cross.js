@@ -6,6 +6,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile, hasProfile } = require("../context");
 const { commandDestination, postCommandResult } = require("../chat-session");
+const { composeIdeaInput } = require("../intent");
 
 const MODEL = "flash-fast";
 const STAGE = "cross";
@@ -36,7 +37,7 @@ function otherFounders(sender) {
 // confident, plausible-sounding reading anyway (see context.js's
 // hasProfile for the full story; shared across every command that
 // reads a profile into its prompt, not redefined per command).
-async function readAs(readerFounder, ideaText) {
+async function readAs(readerFounder, ideaText, threadContext = "") {
 	const profile = readProfile(readerFounder);
 
 	if (!hasProfile(readerFounder)) {
@@ -59,7 +60,7 @@ async function readAs(readerFounder, ideaText) {
 			role: "system",
 			content: `${readerFounder}'s profile (how they fail):\n\n${profile}`,
 		},
-		{ role: "user", content: ideaText },
+		{ role: "user", content: composeIdeaInput(ideaText, threadContext) },
 	];
 
 	const t0 = Date.now();
@@ -79,9 +80,9 @@ async function readAs(readerFounder, ideaText) {
 	};
 }
 
-async function runCross({ founder, ideaText }) {
+async function runCross({ founder, ideaText, threadContext = "" }) {
 	const [readerA, readerB] = otherFounders(founder);
-	const [a, b] = await Promise.all([readAs(readerA, ideaText), readAs(readerB, ideaText)]);
+	const [a, b] = await Promise.all([readAs(readerA, ideaText, threadContext), readAs(readerB, ideaText, threadContext)]);
 
 	const parts = [
 		`*Through ${a.founder}'s lens:*\n${a.responseText}`,
@@ -135,6 +136,7 @@ async function handleCrossCommand({ command, ack, client }) {
 		const { responseText, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runCross({
 			founder,
 			ideaText,
+			threadContext: command.thread_context || "",
 		});
 
 		emit(

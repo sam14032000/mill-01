@@ -8,6 +8,7 @@ const { search } = require("../tavily");
 const { getSession, findLatestSessionForUser, addTurn } = require("../chat-session");
 const { withPromoteButton } = require("../promote-button");
 const { isAnaphoric } = require("../intent");
+const { postResult } = require("../reply");
 
 const MODEL = "flash-fast";
 const STAGE = "find";
@@ -167,7 +168,7 @@ async function handleFindCommand({ command, ack, client }) {
 			post.thread_ts = threadTs;
 			post.blocks = withPromoteButton(r.body, threadTs); // 15.1
 		}
-		await client.chat.postMessage(post);
+		await postResult(client, post);
 
 		if (session) {
 			addTurn(session, { role: "user", text: `/find ${topic}`, userId: command.user_id });

@@ -48,6 +48,7 @@ function readOriginContext(ideaId) {
 	return parts.join("\n\n---\n\n");
 }
 const { COMMAND_STAGE, repostAnchors } = require("./project-channel");
+const { postResult } = require("./reply");
 
 const STORE_DIR =
 	process.env.MILL_CHAT_STORE_DIR ||
@@ -407,7 +408,9 @@ async function postCommandResult(client, dest, { text, invocation, userId }) {
 	if (dest.threadTs) msg.thread_ts = dest.threadTs;
 	// 15.1: every bot reply in a chat thread carries the promote button.
 	if (dest.session) msg.blocks = withPromoteButton(text, dest.session.threadTs);
-	const posted = await client.chat.postMessage(msg);
+	// Bug 1: land in the "On it — running /x…" placeholder when there is
+	// one (reply.js). Falls back to a plain post otherwise.
+	const posted = await postResult(client, msg);
 	if (dest.session) {
 		if (invocation) addTurn(dest.session, { role: "user", text: invocation, userId: userId || null });
 		addTurn(dest.session, { role: "assistant", text });

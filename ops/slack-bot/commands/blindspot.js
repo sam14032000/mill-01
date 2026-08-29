@@ -6,6 +6,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readDynamics } = require("../context");
 const { commandDestination, postCommandResult } = require("../chat-session");
+const { composeIdeaInput } = require("../intent");
 
 const MODEL = "flash-fast";
 const STAGE = "blindspot";
@@ -19,7 +20,7 @@ const SYSTEM_PROMPT = [
 
 // Context per docs/COMMANDS.md: [1][3] -- system prompt, shared/dynamics.md.
 // Deliberately no individual profile (D-27: this is about all three).
-async function runBlindspot({ ideaText }) {
+async function runBlindspot({ ideaText, threadContext = "" }) {
 	const dynamics = readDynamics();
 
 	const messages = [
@@ -28,7 +29,7 @@ async function runBlindspot({ ideaText }) {
 			role: "system",
 			content: `Shared blind spots (where all three founders converge too fast):\n\n${dynamics || "(no shared blind spots recorded yet)"}`,
 		},
-		{ role: "user", content: ideaText },
+		{ role: "user", content: composeIdeaInput(ideaText, threadContext) },
 	];
 
 	const t0 = Date.now();
@@ -69,7 +70,10 @@ async function handleBlindspotCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { responseText, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runBlindspot({ ideaText });
+		const { responseText, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runBlindspot({
+			ideaText,
+			threadContext: command.thread_context || "",
+		});
 
 		emit(
 			buildEvalEvent({

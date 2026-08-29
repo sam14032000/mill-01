@@ -10,6 +10,8 @@ const { readProfile } = require("../context");
 const { findLatestSessionForUser, addTurn, commandDestination, ensureStageThread } = require("../chat-session");
 const { withPromoteButton } = require("../promote-button");
 const { upsertStateCard } = require("../state-card");
+const { composeIdeaInput } = require("../intent");
+const { postResult } = require("../reply");
 
 const MODEL = "flash-fast";
 const STAGE = "attack";
@@ -64,15 +66,18 @@ function parseAttackResponse(responseText) {
 // tokensIn/tokensOut/wallClockS accumulate across both attempts if a
 // retry happens, so telemetry (and cost) reflect everything actually
 // spent on this invocation, not just the last call.
-async function runAttack({ founder, ideaText }) {
+async function runAttack({ founder, ideaText, threadContext = "" }) {
 	const profile = readProfile(founder);
+	// ROOT CAUSE B: invoked from a thread, the idea is the conversation --
+	// "let's start by attacking it" is a pointer into it, not the idea.
+	const userContent = composeIdeaInput(ideaText, threadContext);
 	const messages = [
 		{ role: "system", content: SYSTEM_PROMPT },
 		{
 			role: "system",
 			content: `Founder profile (how they fail):\n\n${profile || "(no profile recorded yet)"}`,
 		},
-		{ role: "user", content: ideaText },
+		{ role: "user", content: userContent },
 	];
 
 	let responseText = "";
@@ -153,7 +158,7 @@ async function handleAttackCommand({ command, ack, client }) {
 			msg.thread_ts = threadTs;
 			msg.blocks = withPromoteButton(text, threadTs); // 15.1
 		}
-		return client.chat.postMessage(msg);
+		return postResult(client, msg);
 	};
 
 	if (!millChannel && !inChat) {
@@ -163,7 +168,11 @@ async function handleAttackCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS, parsed } = await runAttack({ founder, ideaText });
+		const { tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS, parsed } = await runAttack({
+			founder,
+			ideaText,
+			threadContext: command.thread_context || "",
+		});
 
 		if (inChat) {
 			// Chat mode: post the result, record it in the session so
@@ -225,7 +234,7 @@ async function handleAttackCommand({ command, ack, client }) {
 					);
 				}
 			}
-			const posted = await client.chat.postMessage({ channel: pdest.channel, thread_ts: pdest.threadTs, text: out });
+			const posted = await postResult(client, { channel: pdest.channel, thread_ts: pdest.threadTs, text: out });
 			// D-52: refresh the pinned state card (assumption may now be set).
 			await upsertStateCard(client, pdest.project.id, { latestTs: posted?.ts, latestChannel: pdest.channel });
 			emit(

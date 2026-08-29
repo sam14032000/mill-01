@@ -21,6 +21,7 @@ const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
 const { upsertStateCard } = require("../state-card");
+const { postResult } = require("../reply");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -264,8 +265,9 @@ async function handleAuditCommand({ command, ack, client }) {
 
 	// No research at all yet.
 	if (!research) {
-		await client.chat.postMessage({
+		await postResult(client, {
 			channel: researchChannel,
+			...(auditThreadTs ? { thread_ts: auditThreadTs } : {}),
 			text: `\`/audit\` refuses to rule on \`${id}\`: no research has run. Use \`/test ${id}\` first.`,
 		});
 		emit(
@@ -285,7 +287,7 @@ async function handleAuditCommand({ command, ack, client }) {
 	// every report in this deployment predates Part 11 (GPT Researcher),
 	// so absence of the flag never means real research happened.
 	if (research.json.research_stub !== false) {
-		await client.chat.postMessage({
+		await postResult(client, {
 			channel: researchChannel,
 			thread_ts: auditThreadTs || research.json.slack_thread_ts,
 			text: `\`/audit\` refuses to rule on \`${id}\`: no research has run — the report on file is a stub (Part 11's research pipeline isn't built). No verdict.`,
@@ -329,7 +331,7 @@ async function handleAuditCommand({ command, ack, client }) {
 					reasonCode: "malformed_verdict_after_retry",
 				}),
 			);
-			await client.chat.postMessage({
+			await postResult(client, {
 				channel: researchChannel,
 				thread_ts: auditThreadTs || research.json.slack_thread_ts,
 				text: `\`/audit\` failed for \`${id}\`: the model didn't return a valid verdict after one retry. No verdict posted.`,
@@ -398,7 +400,7 @@ async function handleAuditCommand({ command, ack, client }) {
 		if (verdict.resembles_killed_idea) {
 			lines.push(`*⚠️ Resembles killed idea:* \`${verdict.resembles_killed_idea}\` — the auditor weighed that kill reason (I3).`);
 		}
-		const verdictPost = await client.chat.postMessage({
+		const verdictPost = await postResult(client, {
 			channel: researchChannel,
 			thread_ts: auditThreadTs || research.json.slack_thread_ts,
 			text: lines.join("\n"),

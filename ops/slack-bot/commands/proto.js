@@ -12,6 +12,7 @@ const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
 const { upsertStateCard } = require("../state-card");
+const { postResult } = require("../reply");
 const { DEFAULT_MIN: MOUNT_DEFAULT_MIN } = require("../mount");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
@@ -166,7 +167,7 @@ async function handleProtoCommand({ command, ack, client }) {
 	// completed touches, so this is the 6th attempt.
 	if (touchCount >= TOUCH_CAP) {
 		if (millChannel) {
-			await client.chat.postMessage({
+			await postResult(client, {
 				channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
 				text: "Touch cap reached. Either this assumption was answered three touches ago, or you've decided to build this — which is a different conversation with a different budget.",
 			});
@@ -184,14 +185,13 @@ async function handleProtoCommand({ command, ack, client }) {
 		return;
 	}
 
-	// Bug 1: model call + sandbox run is an invisible stretch. One breadcrumb.
-	if (millChannel) {
-		await client.chat
-			.postMessage({
-				channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
-				text: `_Building the prototype for \`${id}\`…_`,
-			})
-			.catch(() => {});
+	// Bug 1: model call + sandbox run is an invisible stretch. Update the
+	// "On it…" placeholder in place if there is one, else drop a breadcrumb.
+	const bread = `_Building the prototype for \`${id}\`…_`;
+	if (command.progress && command.progress.channel === millChannel) {
+		await client.chat.update({ channel: command.progress.channel, ts: command.progress.ts, text: bread }).catch(() => {});
+	} else if (millChannel) {
+		await client.chat.postMessage({ channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}), text: bread }).catch(() => {});
 	}
 
 	try {
@@ -214,7 +214,7 @@ async function handleProtoCommand({ command, ack, client }) {
 				}),
 			);
 			if (millChannel) {
-				await client.chat.postMessage({
+				await postResult(client, {
 					channel: millChannel, ...(protoThreadTs ? { thread_ts: protoThreadTs } : {}),
 					text: `\`/proto\` failed for \`${id}\`: the model didn't return a parseable artifact after one retry.`,
 				});
@@ -299,7 +299,7 @@ async function handleProtoCommand({ command, ack, client }) {
 					{ type: "actions", elements: [{ type: "button", action_id: "proto_mount", text: { type: "plain_text", text: `Mount touch ${touchN}` }, value: `${id}::${touchN}::${MOUNT_DEFAULT_MIN}` }] },
 				];
 			}
-			const protoPost = await client.chat.postMessage(msg);
+			const protoPost = await postResult(client, msg);
 			// D-52: state is now `prototyping` at touch N -- refresh the card.
 			if (pdest.project) await upsertStateCard(client, id, { latestTs: protoPost?.ts, latestChannel: millChannel });
 		}

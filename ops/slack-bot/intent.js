@@ -71,6 +71,22 @@ function isAnaphoric(text, { minStandaloneWords = 6 } = {}) {
 	return t.split(/\s+/).length < minStandaloneWords;
 }
 
+// ROOT CAUSE B, in the commands it matters most for. A brainstorm command
+// invoked from a thread ("attack this", "let's start by attacking it")
+// judged vagueness against that trailing message alone -- ignoring the
+// mechanism / customer / incumbent laid out in the thread and
+// origin-chat.md. When thread context is present, the idea IS the
+// conversation; the trailing message is a pointer into it, added only if
+// it carries content of its own.
+function composeIdeaInput(text, threadContext) {
+	const t = String(text || "").trim();
+	if (!threadContext || !threadContext.trim()) return t;
+	if (!t || isAnaphoric(t)) {
+		return `${threadContext}\n\n---\n(The idea to work on is the one in the conversation above.)`;
+	}
+	return `${threadContext}\n\n---\nThe founder's latest message: ${t}\n\n(Work on the idea in the conversation above, focused by that message.)`;
+}
+
 // Returns { action, source: "regex" } or null.
 function detectRegexIntent(text) {
 	const t = String(text || "");
@@ -166,6 +182,7 @@ module.exports = {
 	PROJECT_ONLY,
 	detectRegexIntent,
 	isAnaphoric,
+	composeIdeaInput,
 	ANAPHORIC_RE,
 	parseMention,
 	validateSuggestion,

@@ -100,6 +100,11 @@ function wrapClientFormatting(client) {
 			return orig.call(this, args);
 		};
 	}
+	// Default terminal-result poster (reply.js). withProgress() overrides
+	// this per-dispatch to land in a placeholder; here it's just a post.
+	if (typeof client.chat.postResult !== "function") {
+		client.chat.postResult = (msg) => client.chat.postMessage(msg);
+	}
 	client.__mrkdwnWrapped = true;
 	return client;
 }

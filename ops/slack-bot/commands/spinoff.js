@@ -10,6 +10,7 @@ const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { createProjectChannel } = require("../project-channel");
 const { upsertStateCard } = require("../state-card");
+const { postResult } = require("../reply");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -72,9 +73,7 @@ async function handleSpinoffCommand({ command, ack, client }) {
 	);
 
 	await ensureStageThread(client, pdest);
-	await client.chat
-		.postMessage({ channel: parent.channel_id, thread_ts: pdest.threadTs, text: `🌱 Spun off <#${child.channelId}> (\`${id}\`) — ${ideaText}` })
-		.catch(() => {});
+	await postResult(client, { channel: parent.channel_id, thread_ts: pdest.threadTs, text: `🌱 Spun off <#${child.channelId}> (\`${id}\`) — ${ideaText}` }).catch(() => {});
 	const childSeed = await client.chat
 		.postMessage({ channel: child.channelId, thread_ts: child.threads.brainstorm, text: `Child of <#${parent.channel_id}> (\`${parent.id}\`). Run \`/attack\` here to set an assumption, then \`/test\`.` })
 		.catch(() => null);

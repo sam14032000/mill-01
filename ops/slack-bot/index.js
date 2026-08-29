@@ -226,6 +226,10 @@ app.event("app_mention", async ({ event, client }) => {
 		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`. Or run the slash command from the channel body.");
 		return;
 	}
+	// Bug 1: immediate placeholder the command's result lands in.
+	const onit = await client.chat
+		.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text: `_On it — running \`/${parsed.action}\`…_` })
+		.catch(() => null);
 	await dispatchCommand({
 		action: parsed.action,
 		text: parsed.rest,
@@ -233,6 +237,8 @@ app.event("app_mention", async ({ event, client }) => {
 		userId: event.user,
 		threadTs: event.thread_ts,
 		client,
+		progressTs: onit?.ts || null,
+		progressChannel: event.channel,
 	}).catch((e) => console.error(`app_mention dispatch failed (${parsed.action}):`, e));
 });
 
@@ -275,9 +281,11 @@ app.action(RUN_ACTION_ID, async ({ ack, body, client }) => {
 		}
 	}
 
-	// Bug 1: acknowledge the tap visually before the command's own output
-	// lands.
-	await post(`_On it — running \`/${v.action}\`…_`);
+	// Bug 1: acknowledge the tap immediately; the command's result lands
+	// in this same message rather than posting separately.
+	const onit = await client.chat
+		.postMessage({ channel, thread_ts: v.threadTs, text: `_On it — running \`/${v.action}\`…_` })
+		.catch(() => null);
 
 	// Confidence-vs-tap telemetry (your ask): every offer is made at
 	// "medium" now (highs execute directly). If mediums get tapped often,
@@ -306,6 +314,8 @@ app.action(RUN_ACTION_ID, async ({ ack, body, client }) => {
 		userId: body.user?.id,
 		threadTs: v.threadTs,
 		client,
+		progressTs: onit?.ts || null,
+		progressChannel: channel,
 	}).catch((e) => console.error(`run_suggested dispatch failed (${v.action}):`, e));
 });
 

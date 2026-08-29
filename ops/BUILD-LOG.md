@@ -366,3 +366,29 @@ Wired into every state transition: `promotion.js` (after brainstorm seed; + a se
 Tests: `_statecard.js` — 26/26 (nextStep per state; first upsert posts+pins+topic+persists; second updates in place with no re-post/re-pin; vanished target → repost; missing scope → posts + warns once + no throw; channel-less → no-op). Conformance 26/26. `_rcab.js` / `_d51gates.js` still green. Bot restarted clean.
 
 Docs: D-52 thread-scroll paragraph rewritten (built, not deferred); `PROJECTS.md` "The pinned state card" + `state.json` example; `build-guide-projects.md` 16.4.
+
+---
+
+## D-52 amendment — placeholder replacement + /attack thread context
+
+Two bugs from live use in a project Brainstorm thread.
+
+**Bug 1 — placeholder not replaced.** `chat-turn.js` `execute()` updated the "_On it — running /attack…_" placeholder, then the handler posted its result as a *separate* message. Fix:
+- **`reply.js`** (new). `postResult(client, msg)` — a handler's one terminal message. `withProgress(client, {progressTs, progressChannel})` — returns a client (via `Object.create`, isolated per dispatch) whose `chat.postResult` redirects its **first** call targeting `progressChannel` into `chat.update({ts: progressTs})`; subsequent calls and other-channel calls (a kill's `#graveyard` post) pass through. Also exposes `chat.progress = {ts, channel}` for multi-message commands.
+- **`mrkdwn.js`** `wrapClientFormatting` now also sets a default `client.chat.postResult = postMessage` so the slash-command path (no placeholder) and bare mock clients work unchanged.
+- **`command-shim.js`** `dispatchCommand({..., progressTs, progressChannel})`: wraps the client with `withProgress`, sets `command.progress`, reposts a captured `ack({text})` refusal via `postResult` (so gate refusals land in the placeholder too).
+- **`chat-turn.js`** `execute()`: always resolves a real `progressTs` (posts the "On it…" line if there wasn't a "_Thinking…_" placeholder) and passes it.
+- **`index.js`**: `app_mention` now posts an "On it…" placeholder and passes it; `run_suggested` captures its "On it…" ts and passes it.
+- Handlers' terminal posts switched to `postResult`: `chat-session.js` `postCommandResult` (covers think/cross/blindspot/themes), `attack.js` (chat + project branches), `find.js`, `audit.js` (verdict + no-research/stub/malformed refusals; `#graveyard` stays `postMessage`), `proto.js` (result + touch-cap + unparseable; the build breadcrumb edits `command.progress` in place), `spinoff.js` (spun-off notice). `/test` edits the placeholder through its stages (`stageLine`) and posts the report separately — it has a mid-flow interactive wait.
+
+**Bug 2 — `/attack` `TOO_VAGUE` despite full thread context.** Confirmed: `command.thread_context` was populated by the shim but `attack.js` never read it (same miss as `find.js`). Traced: "Let's start by attacking it" isn't a bare imperative (`isBareImperative` → false, no verb immediately after "let's"), so `threadSubject`/blanking didn't fire, and `runAttack` got just that sentence. Fix:
+- **`intent.js`** `composeIdeaInput(text, threadContext)` — thread context present ⇒ the idea is the conversation; the trailing message is a pointer, appended only if non-anaphoric and substantive.
+- Wired into `runAttack`, `runThink`, `runCross`, `runBlindspot` (each takes `threadContext`, handler passes `command.thread_context`).
+- `command-shim.js` `threadContextText(threadTs, channelId)` — now also falls back to `findIdeaByChannel(channelId)` → `readOriginContext` when there's no live session for the thread (`@Mill attack` as the first message in a stage thread).
+- `/test` already folded `thread_context` into its gap-question prompt (previous session). `/audit` still deliberately ignores it (D-28).
+
+**`state-card.js`** now commits its own `state_card_ts` write (`commitAndPush(['ideas/<id>/state.json'])` on card creation) — callers commit at varying points, some before the card exists. Removed the redundant explicit commit from `promotion.js`. (This surfaced as `ideas/f05e/state.json` sitting uncommitted after a live run — committed here.)
+
+Tests: **`_bug12.js`** — composeIdeaInput unit; `withProgress` unit (first→update, second→post, other-channel→post); live `/attack` in a project Brainstorm thread with the mechanism/customer/incumbent in-thread → placeholder updated with the result, no separate result message, assumption with a number + named alternative (not `TOO_VAGUE`); `@Mill proto` no-assumption refusal lands in the placeholder. `_rcab.js` / `_d51gates.js` / `_d51test.js` / `_statecard.js` green. Conformance 26/26. Bot restarted clean.
+
+Docs: D-52 amendment in `DECISIONS.md`.
