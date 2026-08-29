@@ -112,4 +112,60 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 	return { content, usage: data.usage, costUsd, cacheHit };
 }
 
-module.exports = { callFlash };
+// Tool-calling variant for the agent loop (agent.js). Same auth / cost /
+// timeout handling as callFlash, but passes `tools`/`tool_choice` and
+// returns the raw assistant message (which may carry `tool_calls`
+// instead of, or alongside, `content`) plus `finish_reason`. Unlike
+// callFlash it does NOT throw on empty content -- a tool_calls response
+// legitimately has no content.
+async function callFlashTools(messages, { model = "flash-fast", maxTokens = 2048, tools, toolChoice = "auto" } = {}) {
+	const keyEnvVar = KEY_ENV_BY_MODEL[model];
+	if (!keyEnvVar) throw new Error(`callFlashTools: no key mapping for model "${model}"`);
+	const key = process.env[keyEnvVar];
+	if (!key) throw new Error(`${keyEnvVar} not set`);
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+	let res;
+	try {
+		res = await fetch(`${LITELLM_BASE_URL}/chat/completions`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				model,
+				messages,
+				max_tokens: maxTokens,
+				...(tools && tools.length ? { tools, tool_choice: toolChoice } : {}),
+			}),
+			signal: controller.signal,
+		});
+	} catch (err) {
+		if (err.name === "AbortError") throw new Error(`${model} tool call timed out after ${REQUEST_TIMEOUT_MS}ms`);
+		throw err;
+	} finally {
+		clearTimeout(timeout);
+	}
+
+	if (!res.ok) {
+		const body = await res.text().catch(() => "");
+		throw new Error(`${model} tool call failed: HTTP ${res.status} ${body.slice(0, 300)}`);
+	}
+
+	const cacheHit = res.headers.get("x-litellm-cache-key") != null;
+	const costUsd = cacheHit ? 0 : Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
+
+	const data = await res.json();
+	const choice = data.choices?.[0] || {};
+	const msg = choice.message || {};
+	return {
+		content: typeof msg.content === "string" ? msg.content : null,
+		toolCalls: Array.isArray(msg.tool_calls) ? msg.tool_calls : [],
+		finishReason: choice.finish_reason || null,
+		usage: data.usage,
+		costUsd,
+		cacheHit,
+	};
+}
+
+module.exports = { callFlash, callFlashTools };

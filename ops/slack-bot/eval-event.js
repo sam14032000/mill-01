@@ -36,31 +36,20 @@ function buildEvalEvent({
 	evidenceBasis = null,
 	reasonCode = null,
 	status,
-	// D-51: conversational-turn action-intent fields. Only appear on chat
-	// / project_turn events (chat-turn.js passes them every turn, nulls
-	// included, so an over-eager suggestion prompt is visible in telemetry
-	// rather than degrading silently). undefined here -> omitted.
-	suggestedAction,
-	suggestionConfidence,
-	regexAction,
-	offerMade,
-	offerAction,
-	offerSuppressedReason,
-	// ROOT CAUSE A: when a turn's intent was executed as a command
-	// instead of answered in prose. executionSource is "regex" |
-	// "model_high" | "offer_tap". discardedReply marks a prose reply the
-	// model produced that we suppressed because the command owns it.
-	executedAction,
-	executionSource,
-	discardedReply,
-	// On an offer_tap event: the confidence the offer was made at, so
-	// EVAL can see whether mediums get tapped (bar-too-low signal).
-	offerTapConfidence,
-	// D-52 amendment: was the turn phrased as a question, and did that
-	// stop a route from firing ("interrogative"). Aggregated in EVAL to
-	// catch over-eager routing without hunting one command at a time.
-	interrogative,
-	routingSuppressed,
+	// Agent-loop fields (agent.js), on `chat` / `project_turn` events.
+	// The old D-51/D-52 intent-classifier fields (suggested_action,
+	// confidence, regex_action, offer_*, interrogative, routing_suppressed,
+	// executed_action) are gone with the classifier -- the agent decides,
+	// and what it did is: which tool(s) it called (or none), how many
+	// model steps, whether it replied without a tool.
+	toolsCalled,
+	toolsIgnored,
+	iterations,
+	repliedWithoutTool,
+	// Phase 2: /proto's inner build loop -- how many sandbox
+	// build/fix/re-run attempts, and whether it ended up running clean.
+	buildIterations,
+	buildSucceeded,
 }) {
 	const event = {
 		founder,
@@ -77,23 +66,15 @@ function buildEvalEvent({
 		reason_code: reasonCode,
 		status,
 	};
-	if (offerMade !== undefined) {
-		event.suggested_action = suggestedAction ?? null;
-		event.suggestion_confidence = suggestionConfidence ?? null;
-		event.regex_action = regexAction ?? null;
-		event.offer_made = Boolean(offerMade);
-		event.offer_action = offerAction ?? null;
-		event.offer_suppressed_reason = offerSuppressedReason ?? null;
-		event.executed_action = executedAction ?? null;
-		event.execution_source = executionSource ?? null;
-		event.discarded_reply = Boolean(discardedReply);
-		event.interrogative = Boolean(interrogative);
-		event.routing_suppressed = routingSuppressed ?? null;
+	if (toolsCalled !== undefined) {
+		event.tools_called = Array.isArray(toolsCalled) ? toolsCalled : [];
+		event.tools_ignored = toolsIgnored ?? 0;
+		event.iterations = iterations ?? 1;
+		event.replied_without_tool = Boolean(repliedWithoutTool);
 	}
-	if (offerTapConfidence !== undefined) {
-		event.offer_action = offerAction ?? null;
-		event.offer_tap_confidence = offerTapConfidence ?? null;
-		event.execution_source = "offer_tap";
+	if (buildIterations !== undefined) {
+		event.build_iterations = buildIterations ?? 0;
+		event.build_succeeded = buildSucceeded ?? null;
 	}
 	return event;
 }

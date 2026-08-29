@@ -408,3 +408,27 @@ Live use: "Didn't we also remedy the MoR solution by considering a layer of auto
 Tests: **`_interrog.js`** — the exact reported turn on a thread that just ran `/attack` → conversational answer about the prior discussion, `interrogative: true`, `executed_action: null`; controls: "now attack this" and "can you attack this?" both still route. `_rcab.js` / `_bug12.js` / `_d51gates.js` green. Conformance 26/26. Bot restarted clean.
 
 Docs: D-52 amendment in `DECISIONS.md`; "a question is not a request" in `COMMANDS.md` / `PROJECTS.md`; `EVAL.md` metric + telemetry field list.
+
+---
+
+## D-53 — one agent loop above the commands; /proto build loop
+
+The D-51/D-52 intent classifier (regex + `suggested_action`/`confidence` + a growing guard cascade) is replaced by a tool-calling agent loop. Spike first: `flash-fast` tool-calling through LiteLLM, 6/6 on the scenarios the classifier kept failing (recall question, "can you attack this?", imperative, thinking-out-loud), consistent across 4 runs.
+
+**Phase 1 — agent loop.**
+- `llm.js` `callFlashTools(messages, {tools, toolChoice})` — same auth/cost/timeout as `callFlash`, returns `{content, toolCalls, finishReason, usage, costUsd, cacheHit}`, doesn't throw on empty content.
+- `tools.js` (new) — 9 OpenAI tool schemas + adapters. Each adapter runs `validateSuggestion` as a fast precondition, then `dispatchCommand` (the shim) — no handler re-implemented. Returns `{posted, result}`: `posted` → the command owns the response, agent stops; `!posted` (precondition block / error) → agent loops once and the model relays it.
+- `agent.js` (new) — `runTurn({session, message, client})`. System prompt: default to prose; call a tool only on an explicit imperative in the latest message; a question/musing is not a request; prior tool output is context not a signal; one tool per turn, no prose after a tool call. Posts a "Thinking…" placeholder, runs one model step, either dispatches a tool (into the placeholder via the progress redirect) or posts a prose reply + promote button. Records a `kind:"command"` marker turn if the handler didn't record its own (project-stage branch doesn't), so the transcript stays continuous. Telemetry per turn: `tools_called`, `tools_ignored`, `iterations`, `replied_without_tool`.
+- `chat-turn.js` — gutted to session-resolution + `agent.runTurn()`.
+- `intent.js` — `detectRegexIntent`, `REGEX_INTENT`, `QUESTION_LEAD`/`isInterrogative`/`shouldRouteToCommand`/`isExplicitRunRequest`, `splitReplyTrailer`/`PROMPT_TRAILER_INSTRUCTION` all removed. Kept: `parseMention`, `validateSuggestion` (+ `REASON_MESSAGE`), `composeIdeaInput`, `isAnaphoric`.
+- Offer mechanism removed: `promote-button.js` down to the promote button only; `index.js` `run_suggested` / `RUN_ACTION_ID` / `OFFER_TTL_MS` deleted; `eval-event.js` D-51/D-52 fields → agent fields.
+- **Session state stays exportable** (the hard requirement): only `{role, text, ...}` turns are persisted — no `tool_calls`/`tool_call_id`/`function` envelopes ever hit `chat-session.js`'s disk mirror. Verified in `_agent.js`.
+- `@Mill`, slash commands, buttons unchanged — deliberate invocations, straight to `command-shim`, gates intact (`_d51gates.js` still 6/6).
+
+**Phase 2 — `/proto` inner build loop.** `runProto` now, for an executable artifact: build → run in the Part 10 sandbox → on non-zero exit, feed the file + stderr (+ timeout/error) back to the model for a full-file fix → re-run. Capped at `MILL_PROTO_BUILD_ITERS` (default 3); stops early if the same stderr repeats (no progress). Non-executable artifacts (`.html`/`.md`) skip the loop. `proto/<n>/build-log.md` records every attempt. `scratchRunner` is injectable for tests. Build iterations ≠ touches (touch cap still 5, separate counter). Entirely inside `run.sh` — D-06/D-48 unchanged. Telemetry: `build_iterations`, `build_succeeded`. `_protoloop.js`: converges / caps at 3 / no-progress stop / non-executable skip, all green. ~$0.014 for a 3-iteration build.
+
+**dsh investigation** (`ops/dsh-investigation.md`) — time-boxed, metadata only. Confirmed: `@deepseek-ai/dsh@0.1.1-rc.2`, MIT, Cordis-plugin architecture, ships `dsh-headless` (embed bundle, no Host/HTTP/browser). Both load-bearing questions unanswerable from metadata: (1) embed footprint on 2 GB — designed path exists but ~40 sub-packages + native addons, unmeasured; (2) sandbox seam — `dsh-tool-bash` has "sandbox-escalation support" but whether our `run.sh` is a drop-in function or dsh owns the container (→ full D-06/D-48 re-audit) needs the `.d.ts`. Recommendation: **not now** (pre-1.0, the exact D-03 concern), strong "revisit at 1.0" with a 5-step spike. Founders' decision; reopens D-43.
+
+Tests: `_agent.js` 14/14, `_protoloop.js` 15/15, `_bug12.js` 12/12, `_statecard.js` 24/24, `_d51gates.js` 6/6. Obsolete scaffolds removed (`_rcab.js`, `_interrog.js`, `_d51test.js`). Conformance 26/26 (C-06 audit-context path unchanged — tools call the same handlers). Bot restarted clean.
+
+Docs: **D-53** in `DECISIONS.md` (amends D-43's premise, keeps its conclusion); `COMMANDS.md` / `PROJECTS.md` invocation sections rewritten to two paths; `EVAL.md` metric + telemetry-field swap; `ops/dsh-investigation.md`.

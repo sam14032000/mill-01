@@ -72,20 +72,18 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ---
 
-## Invocation paths
+## Invocation paths (D-53)
 
-Slack rejects slash commands typed inside a thread (D-51). Since chats and project stages are threads, the slash forms below are only usable from a channel's main compose box. Inside a thread, a command is reached by:
+Slack rejects slash commands typed inside a thread (D-51). Two ways to reach a command:
 
-- **`@Mill <command> [args]`** — mention the bot, runs immediately.
-- **Plain-words request** — say what you want. A clear, unambiguous ask ("attack this", "look up iD Fresh pricing) runs the command directly with a one-line ack. A loosely-phrased ask gets a one-tap button appended to the normal reply. An incidental mention gets neither. (D-52.)
+- **Deliberate** — a slash command from a channel's main compose box, `@Mill <command> [args]` in a thread, or a Block Kit button. Runs the command immediately, straight through `command-shim.js`. No model decides anything.
+- **Conversational** — you just say something in a chat or project-stage thread. The **agent loop** (`agent.js`) gets the tool set + the thread context and decides: run one command, or reply in prose. Its default is to reply. It calls a tool only when the latest message is an explicit instruction to run that job ("attack this", "look up X", "run the research pass"). A statement, a musing, or a question ("didn't we…", "what about…", "is that defensible?") gets a prose answer — a question is a request only if it explicitly asks to run something ("can you attack this?"). Prior tool output in the thread is context, never a signal to run it again.
 
-**One request, one answer (D-52).** When intent is clear the conversational model does **not** also produce a prose version of the command's output — the command owns the response. The offer path fires only on genuinely loose phrasing (`confidence: medium`); `high` and the regex fast path execute directly and discard any prose the model produced. Offers expire after 2h and refuse if the conversation has moved on.
+When the agent runs a tool it produces **no prose** — the command owns the response, posted into the "Thinking…" placeholder. It runs at most one tool per turn; the founder drives the next step.
 
-**A question is not a request.** A turn phrased as a question — "didn't we…", "what about…", "why does…", "is it…" — is recall or clarification and **never auto-routes to a command**, on any path, unless it explicitly asks to run one ("can you attack this?"). It gets a conversational answer (and may still get a one-tap offer). Classification is judged from the latest message alone — a thread that just ran `/attack` does not pull the next question toward another.
+**Gates stay in the commands, enforced regardless of caller.** `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and the C-07 web-only→`narrow` downgrade, the five-touch cap, `/attack`'s `TOO_VAGUE`. The agent's tool adapters run a fast state precondition first (so it can say "can't do that yet — no research has run") but the handler's own gate is the real enforcement.
 
-All paths call the same handler. Every gate — `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and the C-07 web-only→`narrow` downgrade, the five-touch cap, the `TOO_VAGUE` refusal — fires identically regardless of path. `@Mill`, a directly-run request, and the offer button are not a shortcut around validation.
-
-When a subject is needed and none is supplied (`@Mill attack` alone, or a tapped offer), the shim rebuilds it from the thread topic plus recent substantive turns for the brainstorm commands. `/proto` is exempt: it still refuses without an explicit named assumption. Commands invoked from a thread also receive that thread's context (recent turns + a project's `origin-chat.md`); `/find` and `/test` resolve "these"/"this" against it before building queries.
+When a brainstorm command is invoked from a thread, it receives that thread's context (recent turns + a project's `origin-chat.md`) and treats the conversation as the idea; `/find` and `/test` resolve "these"/"this" against it before building queries. `/proto` still refuses without an explicit named assumption.
 
 ---
 

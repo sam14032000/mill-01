@@ -23,7 +23,7 @@ const { handleFindCommand } = require("./commands/find");
 const { handleThreadMessage } = require("./thread-wait");
 const { handleChatTurn } = require("./chat-turn");
 const chatSession = require("./chat-session");
-const { PROMOTE_ACTION_ID, RUN_ACTION_ID } = require("./promote-button");
+const { PROMOTE_ACTION_ID } = require("./promote-button");
 const { parseMention } = require("./intent");
 const { dispatchCommand } = require("./command-shim");
 const { promoteChat } = require("./promotion");
@@ -36,8 +36,6 @@ const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
 const { startSocketHealth } = require("./socket-health");
 const { wrapClientFormatting } = require("./mrkdwn");
-const { emit } = require("./telemetry");
-const { buildEvalEvent } = require("./eval-event");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -212,9 +210,8 @@ app.action("proto_extend", async ({ ack, body }) => {
 // D-51: `@Mill <cmd> <args>` in a thread runs the command immediately
 // (slash commands don't work in threads; app_mention events do). Goes
 // through command-shim.js -> the real handler, so every gate fires
-// exactly as it would for a slash invocation.
-const OFFER_TTL_MS = Number(process.env.MILL_OFFER_TTL_MS) || 2 * 60 * 60 * 1000;
-
+// exactly as it would for a slash invocation. This is a *deliberate*
+// invocation -- it does not go through the agent loop.
 app.event("app_mention", async ({ event, client }) => {
 	const founder = founderForUserId(event.user);
 	if (!founder) return; // D-40
@@ -240,83 +237,6 @@ app.event("app_mention", async ({ event, client }) => {
 		progressTs: onit?.ts || null,
 		progressChannel: event.channel,
 	}).catch((e) => console.error(`app_mention dispatch failed (${parsed.action}):`, e));
-});
-
-// D-51: a tapped intent offer. Expires (2h) and refuses if the
-// conversation has moved on -- a stale command builds a confidently-wrong
-// assumption, which is what this system exists to prevent.
-app.action(RUN_ACTION_ID, async ({ ack, body, client }) => {
-	await ack();
-	let v;
-	try {
-		v = JSON.parse(body.actions?.[0]?.value || "{}");
-	} catch {
-		return;
-	}
-	const founder = founderForUserId(body.user?.id);
-	const channel = body.channel?.id;
-	if (!founder || !channel || !v.action) return;
-	const post = (text) => client.chat.postMessage({ channel, thread_ts: v.threadTs, text }).catch(() => {});
-
-	const staleMsg = `That offer's gone stale and the conversation's moved on — say \`@Mill ${v.action}\` (or run \`/${v.action}\` from the channel) if you still want it. A command built from a conversation you can't see any more is exactly the kind of confidently-wrong output this system exists to prevent.`;
-
-	if (Date.now() - (v.offeredAt || 0) > OFFER_TTL_MS) {
-		await post(staleMsg);
-		return;
-	}
-	const sess = chatSession.getSession(v.threadTs);
-	// moved on: promoted, compacted past the triggering turn, or >8 turns
-	// of conversation since the offer.
-	if (sess) {
-		if (sess.promoted && sess.kind !== "project") {
-			await post(`This chat was already promoted — \`/${v.action}\` belongs in the project now.`);
-			return;
-		}
-		if (
-			typeof v.turnIndex === "number" &&
-			(v.turnIndex < (sess.compactedThrough || 0) || sess.turns.length - v.turnIndex > 8)
-		) {
-			await post(staleMsg);
-			return;
-		}
-	}
-
-	// Bug 1: acknowledge the tap immediately; the command's result lands
-	// in this same message rather than posting separately.
-	const onit = await client.chat
-		.postMessage({ channel, thread_ts: v.threadTs, text: `_On it — running \`/${v.action}\`…_` })
-		.catch(() => null);
-
-	// Confidence-vs-tap telemetry (your ask): every offer is made at
-	// "medium" now (highs execute directly). If mediums get tapped often,
-	// the bar is too low -- this makes it countable instead of inferred.
-	emit(
-		buildEvalEvent({
-			stage: sess?.kind === "project" ? "project_turn" : "chat",
-			founder,
-			ideaId: v.ideaId || sess?.ideaId || null,
-			status: "ok",
-			reasonCode: "offer_tapped",
-			offerAction: v.action,
-			offerTapConfidence: v.confidence || "unknown",
-		}),
-	);
-
-	// Run against the exact turn that triggered the offer, not "latest".
-	const triggerText =
-		sess && typeof v.turnIndex === "number" && sess.turns[v.turnIndex]?.role === "user"
-			? sess.turns[v.turnIndex].text
-			: "";
-	await dispatchCommand({
-		action: v.action,
-		text: triggerText,
-		channelId: channel,
-		userId: body.user?.id,
-		threadTs: v.threadTs,
-		client,
-		progressTs: onit?.ts || null,
-		progressChannel: channel,
-	}).catch((e) => console.error(`run_suggested dispatch failed (${v.action}):`, e));
 });
 
 // I4: [Kill it] on a staleness nudge -- always reason `stale`.

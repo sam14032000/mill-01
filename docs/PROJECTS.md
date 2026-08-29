@@ -31,21 +31,18 @@ The promotion is a gate, in the same sense the audit is. Most ideas should never
 
 ## Running commands in threads
 
-**Slack does not deliver slash commands typed inside a thread** ("That slash command is not supported in threads"). Chats and project stages are both threads, so a slash command is only usable from a channel's main compose box. This is a platform constraint, not a design choice — see D-51. Three ways to reach a command:
+**Slack does not deliver slash commands typed inside a thread** ("That slash command is not supported in threads"). Chats and project stages are both threads, so a slash command is only usable from a channel's main compose box. This is a platform constraint, not a design choice — see D-51. Two ways to reach a command (D-53):
 
-| Path | How | Confirmation |
-|---|---|---|
-| **Slash command** | Typed in a channel's main compose box (not a thread) | Runs immediately |
-| **`@Mill <command> [args]`** | Mentioning the bot inside any thread, e.g. `@Mill attack` or `@Mill find dosa batter prices` | Runs immediately |
-| **Plain-words request** | Say what you want ("attack this", "look up what iD Fresh charges"). Clear phrasing runs the command directly with a one-line ack; loosely-phrased asks get a one-tap button on the normal reply | Immediate, or on tap |
+| Path | How |
+|---|---|
+| **Deliberate** | A slash command from a channel's compose box, `@Mill <command> [args]` in a thread, or a Block Kit button. Runs the command immediately — no model decides anything. |
+| **Conversational** | Just say something in the thread. The agent loop gets the tool set + the thread context and decides: run one command, or reply in prose. |
 
-**One request gets one answer (D-52).** When you clearly ask for a command — imperative, unambiguous — the bot runs the actual command; it does **not** also write a competing prose version. Only when the phrasing is loose ("part of me wants to see the sharpest case against this") does it reply normally and *offer* a button. An incidental mention ("the counterargument is obvious") produces neither. A turn phrased as a **question** — "didn't we…", "what about…", "why does…" — is recall or clarification: it gets a conversational answer and never auto-runs a command, unless it explicitly asks to ("can you attack this?"). The offer never interrupts — ignoring it costs nothing — **expires after two hours**, and refuses if the conversation has moved past the turn that triggered it.
+**The agent's default is to reply.** It runs a tool only when your latest message is an explicit instruction to run that job ("attack this", "look up what iD Fresh charges", "run the research pass"). A statement, a musing, or a question ("didn't we…", "what about…", "is that defensible?") gets a prose answer — a question is a request only if it explicitly asks to run something ("can you attack this?"). Prior tool output in the thread is context, never a signal to run it again. When it runs a tool it writes **no prose** — the command owns the response. One tool per turn; you drive the next step.
 
-**Every gate fires identically on all paths.** `@Mill`, a directly-run request, and the offer button all run the real command handler unchanged: `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and C-07 web-only downgrade, the five-touch cap. There is no shortcut path around a gate.
+**Every gate fires regardless of path.** `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and C-07 web-only downgrade, the five-touch cap — enforced inside the command handlers. The agent can't route around them.
 
-When a command needs a subject and none is given (`@Mill attack` with no text, or a tapped offer), the bot rebuilds it from the thread — the topic plus recent substantive turns — so the brainstorm commands see the idea under discussion, not the word "attack". `/proto` is the exception: it still refuses without an explicitly named assumption.
-
-**Commands see the conversation, not just your message (D-52).** A command invoked from a thread is handed that thread's running context — recent turns, plus the project's `origin-chat.md` in a stage thread. `/find` and `/test` resolve referring expressions ("research *these*", "look *this* up") against it before building queries, and every project stage thread can answer "where did we leave off" from the origin chat.
+**Commands see the conversation, not just your message.** A brainstorm command invoked from a thread is handed that thread's running context — recent turns, plus the project's `origin-chat.md` in a stage thread — and treats the conversation as the idea. `/find` and `/test` resolve referring expressions ("research *these*") against it before building queries; every project stage thread can answer "where did we leave off" from the origin chat.
 
 ---
 

@@ -21,6 +21,15 @@ const MODEL = "flash-fast";
 const STAGE = "proto";
 const TOUCH_CAP = 5;
 
+// Phase 2: an executable artifact is built, run in the sandbox, and if it
+// exits non-zero the model is given the error and asked to fix it, then
+// re-run -- autonomously, up to this many attempts. These are BUILD
+// iterations, not touches: a touch is the founder asking for another
+// artifact (capped at 5, TOUCH_CAP); a build iteration is the loop
+// getting one artifact to run. All inside the same Part 10 sandbox
+// contract -- no new execution surface (D-06 unchanged).
+const BUILD_MAX = Number(process.env.MILL_PROTO_BUILD_ITERS) || 3;
+
 // Verbatim from docs/COMMANDS.md's /proto system prompt.
 const SYSTEM_PROMPT = [
 	"Build the smallest artifact that tests this one assumption. Default to non-code — landing page, mock flow, fake pricing table, one-pager. Single file.",
@@ -55,14 +64,37 @@ function parseProtoResponse(text) {
 	return { filename, content: match[2] };
 }
 
-async function runProto({ assumption }) {
+const FIX_PROMPT = (assumption, filename, fileContent, command, exitCode, stderr) =>
+	[
+		`This artifact was built to test the assumption: ${assumption}`,
+		`It was run in a locked-down sandbox as: ${command}`,
+		`It exited with code ${exitCode}. stderr:`,
+		"```",
+		stderr.slice(-2000),
+		"```",
+		"",
+		`Current \`${filename}\`:`,
+		"```",
+		fileContent,
+		"```",
+		"",
+		`Return the corrected file in the same format: first line exactly "FILENAME: ${filename}", a blank line, then the complete corrected file and nothing else. Fix the actual cause of the error; do not remove functionality to make it pass.`,
+	].join("\n");
+
+// Generate an artifact and, if it is executable, run it in the sandbox
+// and let the model fix-and-rerun autonomously up to BUILD_MAX times.
+// Returns the final parsed file, the last execution result, and a build
+// log. `scratchRunner` is injectable for tests (defaults to the real
+// Part 10 sandbox).
+async function runProto({ assumption, scratchRunner = null }) {
+	const runOnce = scratchRunner || defaultScratchRun;
+
 	const messages = [
 		{ role: "system", content: SYSTEM_PROMPT },
 		{ role: "system", content: OUTPUT_FORMAT_INSTRUCTION },
 		{ role: "user", content: assumption },
 	];
 
-	let parsed = null;
 	let tokensIn = 0;
 	let tokensOut = 0;
 	let costUsd = 0;
@@ -70,19 +102,72 @@ async function runProto({ assumption }) {
 	let cacheHits = 0;
 	let wallClockS = 0;
 
-	for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+	const gen = async (msgs) => {
 		const t0 = Date.now();
-		const { content, usage, costUsd: callCost, cacheHit } = await callFlash(messages, { model: MODEL, maxTokens: 4096 });
+		const { content, usage, costUsd: cc, cacheHit } = await callFlash(msgs, { model: MODEL, maxTokens: 4096 });
 		wallClockS += (Date.now() - t0) / 1000;
 		tokensIn += usage?.prompt_tokens ?? 0;
 		tokensOut += usage?.completion_tokens ?? 0;
-		costUsd += callCost ?? 0;
+		costUsd += cc ?? 0;
 		calls += 1;
 		if (cacheHit) cacheHits += 1;
-		parsed = parseProtoResponse(content);
+		return parseProtoResponse(content);
+	};
+
+	let parsed = (await gen(messages)) || (await gen(messages)); // one parse retry
+	const cost = () => ({ tokensIn, tokensOut, costUsd, cacheHitRatio: calls ? cacheHits / calls : 0, wallClockS });
+
+	if (!parsed) return { parsed: null, executionResult: null, buildIterations: 0, buildSucceeded: false, buildLog: [], ...cost() };
+
+	const ext = path.extname(parsed.filename);
+	if (!EXECUTORS[ext]) {
+		// Non-executable artifact (landing page, one-pager) -- nothing to run.
+		return { parsed, executionResult: null, buildIterations: 0, buildSucceeded: true, buildLog: [], ...cost() };
 	}
 
-	return { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio: calls ? cacheHits / calls : 0, wallClockS };
+	const buildLog = [];
+	let executionResult = null;
+	let lastStderr = null;
+
+	for (let iter = 1; iter <= BUILD_MAX; iter++) {
+		const command = EXECUTORS[ext](parsed.filename);
+		executionResult = await runOnce({ filename: parsed.filename, content: parsed.content, command });
+		buildLog.push({ iter, command, ok: executionResult.ok, exit: executionResult.exitCode ?? (executionResult.ok ? 0 : 1), stderr: (executionResult.stderr || "").slice(-1200) });
+
+		if (executionResult.ok) return { parsed, executionResult, buildIterations: iter, buildSucceeded: true, buildLog, ...cost() };
+		if (iter === BUILD_MAX) break;
+
+		const stderr = [executionResult.stderr, executionResult.error, executionResult.timedOut ? "(the sandbox killed it — timed out)" : ""].filter(Boolean).join("\n").trim();
+		if (stderr && stderr === lastStderr) {
+			buildLog.push({ iter: iter + 0.5, note: "same error as the previous attempt — stopping (no progress)" });
+			break;
+		}
+		lastStderr = stderr;
+
+		const fixed = await gen([
+			{ role: "system", content: OUTPUT_FORMAT_INSTRUCTION },
+			{ role: "user", content: FIX_PROMPT(assumption, parsed.filename, parsed.content, command, executionResult.exitCode ?? 1, stderr) },
+		]);
+		if (!fixed) {
+			buildLog.push({ iter: iter + 0.5, note: "fix attempt did not return a parseable file — stopping" });
+			break;
+		}
+		parsed = fixed;
+	}
+
+	return { parsed, executionResult, buildIterations: buildLog.filter((e) => e.command).length, buildSucceeded: false, buildLog, ...cost() };
+}
+
+// The real sandbox run (Part 10). Isolated in its own scratch dir per
+// attempt; the whole loop stays inside run.sh -- no new surface.
+async function defaultScratchRun({ filename, content, command }) {
+	const scratchDir = fs.mkdtempSync(path.join(os.homedir(), "scratch", "proto-"));
+	try {
+		fs.writeFileSync(path.join(scratchDir, filename), content, "utf8");
+		return await runInSandbox({ scratchDir, command });
+	} finally {
+		fs.rmSync(scratchDir, { recursive: true, force: true });
+	}
 }
 
 async function handleProtoCommand({ command, ack, client }) {
@@ -195,7 +280,13 @@ async function handleProtoCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runProto({ assumption });
+		const { parsed, executionResult, buildIterations, buildSucceeded, buildLog, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runProto({ assumption });
+
+		if (buildIterations > 1 && command.progress && command.progress.channel === millChannel) {
+			await client.chat
+				.update({ channel: command.progress.channel, ts: command.progress.ts, text: `_Prototype for \`${id}\`: ${buildSucceeded ? "built and running" : `built, ${buildIterations} sandbox attempts`}…_` })
+				.catch(() => {});
+		}
 
 		if (!parsed) {
 			emit(
@@ -225,31 +316,31 @@ async function handleProtoCommand({ command, ack, client }) {
 		const touchN = touchCount + 1;
 		const touchDir = path.join(IDEAS_DIR, id, "proto", String(touchN));
 		fs.mkdirSync(touchDir, { recursive: true });
+		// runProto has already built, run, and (for executables) fix-and-
+		// re-run inside the Part 10 sandbox up to BUILD_MAX times. Persist
+		// the final artifact + its last run output + the build log.
 		fs.writeFileSync(path.join(touchDir, parsed.filename), parsed.content, "utf8");
-
-		const ext = path.extname(parsed.filename);
-		let executionResult = null;
-
-		// Executable output: runs in the Part 10 sandbox. Nothing else
-		// executes -- sandbox.js's runInSandbox is the only function in
-		// this codebase that runs generated content, and it always goes
-		// through Part 10's run.sh.
-		if (EXECUTORS[ext]) {
-			const scratchDir = fs.mkdtempSync(path.join(os.homedir(), "scratch", "proto-"));
-			try {
-				fs.writeFileSync(path.join(scratchDir, parsed.filename), parsed.content, "utf8");
-				executionResult = await runInSandbox({
-					scratchDir,
-					command: EXECUTORS[ext](parsed.filename),
-				});
-				fs.writeFileSync(
-					path.join(touchDir, "output.txt"),
-					`stdout:\n${executionResult.stdout}\n\nstderr:\n${executionResult.stderr}\n`,
-					"utf8",
-				);
-			} finally {
-				fs.rmSync(scratchDir, { recursive: true, force: true });
-			}
+		if (executionResult) {
+			fs.writeFileSync(
+				path.join(touchDir, "output.txt"),
+				`command: ${EXECUTORS[path.extname(parsed.filename)]?.(parsed.filename) || "(none)"}\nexit ok: ${executionResult.ok}\n\nstdout:\n${executionResult.stdout}\n\nstderr:\n${executionResult.stderr}\n`,
+				"utf8",
+			);
+		}
+		if (buildLog.length) {
+			fs.writeFileSync(
+				path.join(touchDir, "build-log.md"),
+				`# Build log — ${id} touch ${touchN}\n\n**Assumption:** ${assumption}\n\n` +
+					buildLog
+						.map((e) =>
+							e.note
+								? `- _${e.note}_`
+								: `## Attempt ${e.iter}\n\`${e.command}\` → exit ${e.exit} (${e.ok ? "ok" : "error"})\n${e.ok ? "" : "```\n" + (e.stderr || "").trim() + "\n```"}`,
+						)
+						.join("\n\n") +
+					`\n\n**Result:** ${buildSucceeded ? "runs clean" : `did not converge in ${BUILD_MAX} attempts`}\n`,
+				"utf8",
+			);
 		}
 
 		updateState(id, { state: "prototyping", touch_count: touchN });
@@ -272,6 +363,9 @@ async function handleProtoCommand({ command, ack, client }) {
 				cacheHitRatio,
 				wallClockS,
 				status: "ok",
+				reasonCode: executionResult ? (buildSucceeded ? `build_ok_${buildIterations}` : `build_failed_${buildIterations}`) : null,
+				buildIterations,
+				buildSucceeded: executionResult ? buildSucceeded : null,
 			}),
 		);
 
@@ -279,10 +373,11 @@ async function handleProtoCommand({ command, ack, client }) {
 			`Touch ${touchN}/${TOUCH_CAP} for \`${id}\`: wrote \`${parsed.filename}\`.`,
 		];
 		if (executionResult) {
+			const attemptNote = buildIterations > 1 ? ` (${buildIterations} sandbox attempts)` : "";
 			lines.push(
 				executionResult.ok
-					? `Ran in sandbox:\n\`\`\`\n${executionResult.stdout.slice(0, 1500)}\n\`\`\``
-					: `Ran in sandbox, exited with an error:\n\`\`\`\n${executionResult.stderr.slice(0, 1500)}\n\`\`\``,
+					? `Ran in sandbox${attemptNote}:\n\`\`\`\n${executionResult.stdout.slice(0, 1500)}\n\`\`\``
+					: `Ran in sandbox${attemptNote}, still exits with an error — see \`proto/${touchN}/build-log.md\`:\n\`\`\`\n${executionResult.stderr.slice(0, 1500)}\n\`\`\``,
 			);
 		}
 		if (touchN === TOUCH_CAP) {
