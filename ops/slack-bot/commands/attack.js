@@ -187,8 +187,8 @@ async function handleAttackCommand({ command, ack, client }) {
 			}
 			await postToDest(out);
 			if (chatSess) {
-				addTurn(chatSess, { role: "user", text: `/attack ${ideaText}`, userId: command.user_id });
-				addTurn(chatSess, { role: "assistant", text: out });
+				addTurn(chatSess, { role: "user", text: `/attack ${ideaText}`, userId: command.user_id, kind: "command" });
+				addTurn(chatSess, { role: "assistant", text: out, kind: "command" });
 			}
 			emit(
 				buildEvalEvent({

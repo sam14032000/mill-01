@@ -81,6 +81,8 @@ Slack rejects slash commands typed inside a thread (D-51). Since chats and proje
 
 **One request, one answer (D-52).** When intent is clear the conversational model does **not** also produce a prose version of the command's output — the command owns the response. The offer path fires only on genuinely loose phrasing (`confidence: medium`); `high` and the regex fast path execute directly and discard any prose the model produced. Offers expire after 2h and refuse if the conversation has moved on.
 
+**A question is not a request.** A turn phrased as a question — "didn't we…", "what about…", "why does…", "is it…" — is recall or clarification and **never auto-routes to a command**, on any path, unless it explicitly asks to run one ("can you attack this?"). It gets a conversational answer (and may still get a one-tap offer). Classification is judged from the latest message alone — a thread that just ran `/attack` does not pull the next question toward another.
+
 All paths call the same handler. Every gate — `/proto`'s named-assumption requirement, `/audit`'s research-stub refusal and the C-07 web-only→`narrow` downgrade, the five-touch cap, the `TOO_VAGUE` refusal — fires identically regardless of path. `@Mill`, a directly-run request, and the offer button are not a shortcut around validation.
 
 When a subject is needed and none is supplied (`@Mill attack` alone, or a tapped offer), the shim rebuilds it from the thread topic plus recent substantive turns for the brainstorm commands. `/proto` is exempt: it still refuses without an explicit named assumption. Commands invoked from a thread also receive that thread's context (recent turns + a project's `origin-chat.md`); `/find` and `/test` resolve "these"/"this" against it before building queries.

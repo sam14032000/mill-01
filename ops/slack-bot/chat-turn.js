@@ -46,6 +46,8 @@ const {
 	validateSuggestion,
 	splitReplyTrailer,
 	PROMPT_TRAILER_INSTRUCTION,
+	isInterrogative,
+	shouldRouteToCommand,
 } = require("./intent");
 const { dispatchCommand } = require("./command-shim");
 
@@ -120,7 +122,16 @@ async function handleChatTurn({ message, client }) {
 	// response from here -- no prose reply, no offer, no prose turn. Its
 	// terminal result lands in the "On it…" placeholder (Bug 1), so
 	// progressTs must always be a real message ts.
-	const execute = async (action, source, { discardedReply = null, placeholderTs = null } = {}) => {
+	// modelCost/modelTokens: when this is the model_high path, the
+	// conversational classifier call that produced the trailer already
+	// cost money -- log it here (its own telemetry emit is skipped
+	// because we return before it). C-23 reconciles logged cost against
+	// LiteLLM's spend and will flag the gap otherwise.
+	const execute = async (
+		action,
+		source,
+		{ discardedReply = null, placeholderTs = null, modelCostUsd = 0, modelTokensIn = 0, modelTokensOut = 0, modelCacheHit = false, modelWallClockS = 0 } = {},
+	) => {
 		let progressTs = placeholderTs;
 		if (progressTs) {
 			await update(progressTs, `_On it — running \`/${action}\`…_`);
@@ -149,6 +160,11 @@ async function handleChatTurn({ message, client }) {
 				model: MODEL,
 				founder: session.ownerFounder,
 				ideaId,
+				tokensIn: modelTokensIn,
+				tokensOut: modelTokensOut,
+				costUsd: modelCostUsd, // the classifier/reply call that got us here
+				cacheHitRatio: modelCacheHit ? 1 : 0,
+				wallClockS: modelWallClockS,
 				status: "ok",
 				reasonCode: `executed_${source}`,
 				suggestedAction: null,
@@ -160,23 +176,38 @@ async function handleChatTurn({ message, client }) {
 				executedAction: action,
 				executionSource: source,
 				discardedReply: Boolean(discardedReply),
+				interrogative: isInterrogative(text),
+				routingSuppressed: null,
 			}),
 		);
 	};
+
+	// A turn phrased as a question ("didn't we…", "what about…") is recall
+	// or clarification, not an instruction -- it does not route to a
+	// command (regex OR high-confidence model), only converses. Found
+	// live: "Didn't we also remedy the MoR solution by considering a
+	// layer of automation…" ran a full /attack prosecution.
+	const routeOk = shouldRouteToCommand(text);
+	const interrogative = isInterrogative(text);
+	let routingSuppressed = null;
 
 	// ---- 1. regex fast path: execute directly, no conversational call ----
 	const regexHit = detectRegexIntent(text);
 	let regexSuppressed = null;
 	if (regexHit) {
-		const v = validateSuggestion(regexHit.action, ctx);
-		if (v.ok) {
-			await execute(regexHit.action, "regex");
-			return true;
+		if (!routeOk) {
+			routingSuppressed = "interrogative";
+		} else {
+			const v = validateSuggestion(regexHit.action, ctx);
+			if (v.ok) {
+				await execute(regexHit.action, "regex");
+				return true;
+			}
+			// Regex matched but the action doesn't apply yet (e.g. "audit
+			// this" before research). Fall through to a conversational reply
+			// that can explain why; record the reason.
+			regexSuppressed = v.reason;
 		}
-		// Regex matched but the action doesn't apply yet (e.g. "audit this"
-		// before research). Fall through to a conversational reply that can
-		// explain why; record the reason.
-		regexSuppressed = v.reason;
 	}
 
 	// ---- 2. the one conversational model call ----
@@ -209,10 +240,21 @@ async function handleChatTurn({ message, client }) {
 	const { reply: replyText, suggested_action, confidence } = splitReplyTrailer(raw);
 
 	// ---- 3. high-confidence model intent: execute, discard the prose ----
-	if (!regexSuppressed && confidence === "high" && suggested_action) {
+	if (!routeOk && confidence === "high" && suggested_action) {
+		routingSuppressed = "interrogative"; // model read a question as a command
+	}
+	if (routeOk && !regexSuppressed && confidence === "high" && suggested_action) {
 		const v = validateSuggestion(suggested_action, ctx);
 		if (v.ok) {
-			await execute(suggested_action, "model_high", { discardedReply: replyText, placeholderTs });
+			await execute(suggested_action, "model_high", {
+				discardedReply: replyText,
+				placeholderTs,
+				modelCostUsd: costUsd,
+				modelTokensIn: usage?.prompt_tokens ?? 0,
+				modelTokensOut: usage?.completion_tokens ?? 0,
+				modelCacheHit: cacheHit,
+				modelWallClockS: wallClockS,
+			});
 			// The discarded prose is NOT recorded as a turn.
 			try {
 				await maybeCompact(session);
@@ -223,10 +265,14 @@ async function handleChatTurn({ message, client }) {
 		}
 	}
 
-	// ---- 4. genuine conversation: prose reply, offer only on medium ----
+	// ---- 4. genuine conversation: prose reply, plus a one-tap offer ----
+	// Offer on a medium-confidence suggestion, OR on a question that read
+	// like a command (blocked from executing above) -- a button keeps the
+	// command discoverable without auto-running it. Never on low/null.
 	let offer = null;
 	let offerSuppressed = regexSuppressed;
-	if (confidence === "medium" && suggested_action) {
+	const offerConf = !routeOk && suggested_action && confidence === "high" ? "medium" : confidence;
+	if (suggested_action && offerConf === "medium") {
 		const v = validateSuggestion(suggested_action, ctx);
 		if (v.ok) {
 			offer = {
@@ -240,7 +286,6 @@ async function handleChatTurn({ message, client }) {
 			offerSuppressed = offerSuppressed || v.reason;
 		}
 	}
-	// low / null confidence -> no offer (the stated bar).
 
 	// Only the trailer-stripped prose is a turn.
 	addTurn(session, { role: "assistant", text: replyText });
@@ -286,6 +331,11 @@ async function handleChatTurn({ message, client }) {
 			executedAction: null,
 			executionSource: null,
 			discardedReply: false,
+			// D-52 amendment: a question that the regex or the model read as
+			// a command, and we declined to route. Lets EVAL see over-eager
+			// routing in aggregate rather than one command at a time.
+			interrogative,
+			routingSuppressed,
 		}),
 	);
 	return true;

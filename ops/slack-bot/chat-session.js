@@ -180,8 +180,13 @@ function findLatestSessionForUser(userId, channel) {
 	return best;
 }
 
-function addTurn(session, { role, text, userId, ts }) {
-	session.turns.push({ role, text, userId: userId || null, ts: ts || null });
+// `kind: "command"` marks a slash-command invocation line or its output
+// recorded into the session. It's still context for the next reply, but
+// the intent classifier is told not to read it as a request (D-52
+// amendment: momentum bias -- a thread that just ran /attack was pulling
+// the next question toward another /attack).
+function addTurn(session, { role, text, userId, ts, kind = null }) {
+	session.turns.push({ role, text, userId: userId || null, ts: ts || null, ...(kind ? { kind } : {}) });
 	persist(session);
 	return session;
 }
@@ -241,9 +246,17 @@ function buildContextMessages(session) {
 		});
 	}
 
-	// Verbatim turns not yet folded into the summary.
+	// Verbatim turns not yet folded into the summary. Command lines and
+	// their output stay in context for the reply, but are marked so the
+	// intent classifier doesn't read them as a fresh request (D-52
+	// amendment: a thread that just ran /attack was biasing the next
+	// question toward another /attack).
 	for (const turn of session.turns.slice(session.compactedThrough)) {
-		messages.push({ role: turn.role, content: turn.text });
+		const content =
+			turn.kind === "command" && turn.role === "assistant"
+				? `[output of a slash-command run earlier in this thread — reference only, not a request]\n\n${turn.text}`
+				: turn.text;
+		messages.push({ role: turn.role, content });
 	}
 	return messages;
 }
@@ -412,8 +425,8 @@ async function postCommandResult(client, dest, { text, invocation, userId }) {
 	// one (reply.js). Falls back to a plain post otherwise.
 	const posted = await postResult(client, msg);
 	if (dest.session) {
-		if (invocation) addTurn(dest.session, { role: "user", text: invocation, userId: userId || null });
-		addTurn(dest.session, { role: "assistant", text });
+		if (invocation) addTurn(dest.session, { role: "user", text: invocation, userId: userId || null, kind: "command" });
+		addTurn(dest.session, { role: "assistant", text, kind: "command" });
 	}
 	return posted;
 }

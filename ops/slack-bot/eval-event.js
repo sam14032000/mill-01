@@ -56,6 +56,11 @@ function buildEvalEvent({
 	// On an offer_tap event: the confidence the offer was made at, so
 	// EVAL can see whether mediums get tapped (bar-too-low signal).
 	offerTapConfidence,
+	// D-52 amendment: was the turn phrased as a question, and did that
+	// stop a route from firing ("interrogative"). Aggregated in EVAL to
+	// catch over-eager routing without hunting one command at a time.
+	interrogative,
+	routingSuppressed,
 }) {
 	const event = {
 		founder,
@@ -82,6 +87,8 @@ function buildEvalEvent({
 		event.executed_action = executedAction ?? null;
 		event.execution_source = executionSource ?? null;
 		event.discarded_reply = Boolean(discardedReply);
+		event.interrogative = Boolean(interrogative);
+		event.routing_suppressed = routingSuppressed ?? null;
 	}
 	if (offerTapConfidence !== undefined) {
 		event.offer_action = offerAction ?? null;

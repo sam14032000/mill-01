@@ -171,8 +171,8 @@ async function handleFindCommand({ command, ack, client }) {
 		await postResult(client, post);
 
 		if (session) {
-			addTurn(session, { role: "user", text: `/find ${topic}`, userId: command.user_id });
-			addTurn(session, { role: "assistant", text: r.body });
+			addTurn(session, { role: "user", text: `/find ${topic}`, userId: command.user_id, kind: "command" });
+			addTurn(session, { role: "assistant", text: r.body, kind: "command" });
 		}
 
 		emit(

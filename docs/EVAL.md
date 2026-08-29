@@ -140,7 +140,7 @@ Log per event to `telemetry/YYYY-MM.jsonl`. Without this, Layer 3 has nothing to
 
 Per idea, track the chain: `capture_ts → first_brainstorm → research → audit → verdict → prototype? → touches → outcome`.
 
-`chat` / `project_turn` events also carry (D-51/D-52): `suggested_action`, `suggestion_confidence`, `regex_action`, `offer_made`, `offer_suppressed_reason`, and — when the turn's intent was run rather than answered in prose — `executed_action` + `execution_source` (`regex` | `model_high` | `offer_tap`). A tapped offer emits its own event with `offer_tap_confidence`.
+`chat` / `project_turn` events also carry (D-51/D-52): `suggested_action`, `suggestion_confidence`, `regex_action`, `offer_made`, `offer_suppressed_reason`, `interrogative` (was the turn phrased as a question), `routing_suppressed` (`"interrogative"` when a question was stopped from auto-running a command), and — when the turn's intent was run rather than answered in prose — `executed_action` + `execution_source` (`regex` | `model_high` | `offer_tap`). A tapped offer emits its own event with `offer_tap_confidence`.
 
 **Required derived metrics**
 
@@ -159,6 +159,7 @@ Per idea, track the chain: `capture_ts → first_brainstorm → research → aud
 | Ideas killed with reason `stale` | non-zero but not dominant — some inattention-kills are healthy; if most kills are `stale` the gate isn't being reached | I4 |
 | Conversational turns that ran a command (`executed_action` non-null) vs offered vs plain reply | context, not a target — shows how often intent detection fires and by which path (`execution_source`: `regex` / `model_high` / `offer_tap`) | D-52 |
 | **Medium-confidence offer tap rate** — `offer_tap` events with `offer_tap_confidence: "medium"` ÷ turns with `offer_made: true` | should be **low**. High means the model is labelling real commands "medium" and the confidence bar needs re-cutting (offers would be better executed directly) | D-52 |
+| **Interrogative over-routing** — turns with `interrogative: true` **and** (`suggested_action` non-null at `high`, i.e. `routing_suppressed: "interrogative"`) ÷ all `interrogative: true` turns | should trend toward **0**. A question that the model reads as a high-confidence command is the model being over-eager; the deterministic guard blocks execution, but a high rate means the classifier prompt needs work. `executed_action` non-null on an `interrogative` turn should be ~0 (only "can you attack this?"-style explicit run-requests). | D-52 amendment |
 
 ---
 

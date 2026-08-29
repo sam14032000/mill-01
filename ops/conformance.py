@@ -671,7 +671,15 @@ MATCH_WINDOW_BUFFER_S = 10
 # fix going forward, not the accuracy of data logged before it existed
 # -- events before this cutoff are excluded from the sample rather than
 # scored against a standard they predate.
-PRICING_FIX_DEPLOYED_AT = "2026-08-27T10:07:12+00:00"
+#
+# Bumped 2026-08-29: the D-52 chat-turn rewrite added an execute() path
+# (regex / model_high intent routing) that returned before its own
+# telemetry emit, so on a model_high route the conversational classifier
+# call's cost was spent but never logged -- C-23 caught the gap on a
+# real f05e turn. Fixed (execute() now logs that call's cost); live
+# events between the D-52 deploy and this fix under-report and are
+# excluded, same rationale as the original cutoff.
+PRICING_FIX_DEPLOYED_AT = "2026-08-29T10:38:41+00:00"
 
 
 def parse_telemetry_ts(ts):

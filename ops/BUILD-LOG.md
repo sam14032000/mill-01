@@ -392,3 +392,19 @@ Two bugs from live use in a project Brainstorm thread.
 Tests: **`_bug12.js`** — composeIdeaInput unit; `withProgress` unit (first→update, second→post, other-channel→post); live `/attack` in a project Brainstorm thread with the mechanism/customer/incumbent in-thread → placeholder updated with the result, no separate result message, assumption with a number + named alternative (not `TOO_VAGUE`); `@Mill proto` no-assumption refusal lands in the placeholder. `_rcab.js` / `_d51gates.js` / `_d51test.js` / `_statecard.js` green. Conformance 26/26. Bot restarted clean.
 
 Docs: D-52 amendment in `DECISIONS.md`.
+
+---
+
+## D-52 amendment 2 — questions don't route; momentum bias; classifier-call cost
+
+Live use: "Didn't we also remedy the MoR solution by considering a layer of automation allowing brands to become MoR?" — a recall question — ran a full `/attack` prosecution.
+
+**Interrogative guard.** `intent.js`: `isInterrogative(text)` (turn's main clause leads with a question word after optional filler — `QUESTION_LEAD`), `isExplicitRunRequest(text)` (carve-out: "can/could/would/will/please [you] <run-verb>"), `shouldRouteToCommand(text) = isExplicitRunRequest || !isInterrogative`. `chat-turn.js` computes `routeOk` once and applies it to **both** the regex fast path and the high-confidence model path, for all nine actions uniformly — a question never auto-executes. A blocked question still converses and can still surface a one-tap offer (a blocked `high` is downgraded to a `medium` offer); it just never runs. Telemetry: `interrogative` + `routing_suppressed` on every `chat`/`project_turn` event; `EVAL.md` gets an "interrogative over-routing" metric. Confirmed against `/find` `/cross` `/blindspot` `/test` `/audit` — same code path, all gated. Unit-tested 13/13 phrasings.
+
+**Momentum bias (confirmed and fixed).** The classifier *does* see prior turns including command output — `buildContextMessages` includes all uncompacted turns, and `/attack`/`postCommandResult`/`/find` store their invocation + output as turns. Fix: those turns now carry `kind: "command"` (`addTurn` gained the param); `buildContextMessages` keeps them as reply context but prefixes the assistant ones "[output of a slash-command run earlier — reference only, not a request]", and `PROMPT_TRAILER_INSTRUCTION` now says judge intent from the latest message only, prior command output is not a signal, and a question is not a request unless it explicitly asks to run something.
+
+**C-23 regression fixed.** `chat-turn.js`'s `execute()` returned before the conversational path's own telemetry emit, so on a `model_high` route the classifier/reply call's cost was spent but never logged. C-23 caught the gap on a real `f05e` turn (logged 0.0099 vs 0.0172 spent). `execute()` now takes and logs `modelCostUsd`/`modelTokens…` from the section-2 call. `PRICING_FIX_DEPLOYED_AT` in `ops/conformance.py` bumped to `2026-08-29T10:38:41+00:00` to exclude the pre-fix live window, per the existing cutoff convention.
+
+Tests: **`_interrog.js`** — the exact reported turn on a thread that just ran `/attack` → conversational answer about the prior discussion, `interrogative: true`, `executed_action: null`; controls: "now attack this" and "can you attack this?" both still route. `_rcab.js` / `_bug12.js` / `_d51gates.js` green. Conformance 26/26. Bot restarted clean.
+
+Docs: D-52 amendment in `DECISIONS.md`; "a question is not a request" in `COMMANDS.md` / `PROJECTS.md`; `EVAL.md` metric + telemetry field list.

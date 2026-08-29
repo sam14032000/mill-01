@@ -71,6 +71,39 @@ function isAnaphoric(text, { minStandaloneWords = 6 } = {}) {
 	return t.split(/\s+/).length < minStandaloneWords;
 }
 
+// A turn whose main clause is a question -- recall or clarification, not
+// an instruction. Found live: "Didn't we also remedy the MoR solution by
+// considering a layer of automation..." was classified as /attack and
+// ran a full prosecution. The signal is a question word LEADING the turn
+// (after filler like "so"/"ok"/"wait"), not a trailing "?" -- "attack
+// this, what's the strongest case?" leads with an imperative and still
+// routes.
+const QUESTION_LEAD =
+	/^(?:\s*(?:so|but|and|ok(?:ay)?|hmm+|well|wait|also|actually|hey|right|now)[,\s]+)*(?:who|what|what'?s|whats|when|where|why|how|how'?s|which|whose|whom|did|didn'?t|do|does|doesn'?t|don'?t|is|isn'?t|are|aren'?t|was|wasn'?t|were|weren'?t|have|haven'?t|has|hasn'?t|had|hadn'?t|will|won'?t|would|wouldn'?t|should|shouldn'?t|shall|could|couldn'?t|can|can'?t|cannot|may|might)\b/i;
+
+function isInterrogative(text) {
+	return QUESTION_LEAD.test(String(text || "").trim());
+}
+
+// The one carve-out: a question that explicitly asks to RUN a command.
+// "can you attack this?", "could you search for X?", "would you run the
+// audit?" -- these route despite the question form.
+const EXPLICIT_RUN_REQUEST =
+	/^(?:\s*(?:so|but|ok(?:ay)?|hey|please)[,\s]+)*(?:can|could|would|will|pls|please|are you able to)\s+(?:you\s+)?(?:please\s+)?(?:go ahead and\s+|just\s+)?(?:attack|steel[- ]?man|poke holes|argue against|make the case against|search|look up|find|google|research|test|pressure[- ]?test|prototype|mock (?:it|this) up|build (?:a|the)|audit|gate this|cross|run (?:this|it|that) (?:past|by)|bounce (?:this|it) off|spin (?:this|it)?\s*(?:off|out))/i;
+
+function isExplicitRunRequest(text) {
+	return EXPLICIT_RUN_REQUEST.test(String(text || "").trim());
+}
+
+// Should a detected intent actually be EXECUTED, given how the turn is
+// phrased? A question doesn't route unless it explicitly asks to run
+// something. "When in doubt, converse." (Offers are still allowed --
+// this only gates auto-execution.)
+function shouldRouteToCommand(text) {
+	if (isExplicitRunRequest(text)) return true;
+	return !isInterrogative(text);
+}
+
 // ROOT CAUSE B, in the commands it matters most for. A brainstorm command
 // invoked from a thread ("attack this", "let's start by attacking it")
 // judged vagueness against that trailing message alone -- ignoring the
@@ -170,9 +203,11 @@ const PROMPT_TRAILER_INSTRUCTION = [
 	TRAILER,
 	'{"suggested_action": <one of "attack","find","cross","blindspot","themes","test","proto","spinoff","audit", or null>, "confidence": "high"|"medium"|"low"}',
 	"Decide whether the founder is, in THIS message, asking you to run one of those actions on the current idea right now.",
-	'"high" = they explicitly asked, imperative and unambiguous ("attack this", "search for X", "what would the others say"). The command runs immediately; do not also answer in prose.',
+	"Judge intent from THIS message only. Do not let momentum carry — a thread that just ran /attack (its prosecution is above) does not mean the next message wants another. Command outputs above are context for your reply, never a signal of intent.",
+	"A message phrased as a question — 'didn't we…', 'what about…', 'is it…', 'why does…', 'did we already…' — is recall or clarification. It is NOT a request to run a command (even if it names one), unless it explicitly asks you to run it ('can you attack this?'). For a question, suggested_action is null unless that explicit ask is present.",
+	'"high" = an explicit, unambiguous imperative ("attack this", "search for X", "run this past the others"). The command runs immediately; do not also answer in prose.',
 	'"medium" = it reads like they probably want it but the phrasing is loose or embedded ("we should probably pressure-test this", "wonder what the others think"). A button is offered; you still reply normally.',
-	'"low" / null = incidental mention ("the counterargument is obvious", "someone might attack this"). No offer.',
+	'"low" / null = incidental mention ("the counterargument is obvious", "someone might attack this") or a question about the discussion. No offer.',
 	"Under-suggest. When unsure between medium and low, choose low.",
 	"The reply above the line must read exactly as it would without this instruction — the trailer is metadata, not part of the conversation.",
 ].join("\n");
@@ -183,6 +218,9 @@ module.exports = {
 	detectRegexIntent,
 	isAnaphoric,
 	composeIdeaInput,
+	isInterrogative,
+	isExplicitRunRequest,
+	shouldRouteToCommand,
 	ANAPHORIC_RE,
 	parseMention,
 	validateSuggestion,
