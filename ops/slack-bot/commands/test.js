@@ -12,6 +12,7 @@ const { buildEvalEvent } = require("../eval-event");
 const { waitForThreadReply } = require("../thread-wait");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
+const { upsertStateCard } = require("../state-card");
 
 const MODEL = "flash"; // research keeps thinking_level: medium (D-08 amendment), mill-research key
 const STAGE = "test";
@@ -323,11 +324,13 @@ async function handleTestCommand({ command, ack, client }) {
 			}),
 		);
 
-		await client.chat.postMessage({
+		const reportPost = await client.chat.postMessage({
 			channel: researchChannel,
 			thread_ts: threadTs,
 			text: `Research pass complete for \`${id}\` — evidence basis: *${evidenceBasis}*.\n\n${reportMd}\n\nThis report is a stub (no web research ran) — \`/audit ${id}\` will refuse to rule on it until Part 11's research pipeline is built.`,
 		});
+		// D-52: state is now `researched` -- refresh the pinned card.
+		if (pdest.project) await upsertStateCard(client, id, { latestTs: reportPost?.ts, latestChannel: researchChannel });
 	} catch (err) {
 		console.error("test command failed:", err);
 		emit(

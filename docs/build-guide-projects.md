@@ -235,7 +235,11 @@ Stage threads are threads, so commands run by `@Mill <command>` or a tapped offe
 
 **Stage sessions load the origin (D-52).** `buildContextMessages` pulls `readOriginContext(ideaId)` — `idea.md`'s summary + a length-capped `origin-chat.md` — into the cached prefix of every project stage session (`kind: "project"`). Without it a promoted idea's threads start blank and "where did we leave off" gets answered "blank slate" despite the transcript sitting on disk. Verify by promoting a chat and asking that question in Brainstorm.
 
-## 16.4 Retire `#research`
+## 16.4 Pinned state card (D-52)
+
+`state-card.js` `upsertStateCard(client, id, {latestTs})`: reads `state.json` + `idea.md` + latest `audit-*.json`, renders a card (assumption / state / last verdict / next step / permalink), and either `chat.update`s the message at `state.json.state_card_ts` or posts + `pins.add` + persists the ts. Also refreshes the channel topic (`state · assumption`, `channels:manage` only). Best-effort — never breaks the calling command. Wired into every state transition: `promotion.js` (after the brainstorm seed, + a second `commitAndPush` of `state.json` since the first ran before the channel existed), `commands/attack.js` (project branch), `commands/test.js`, `commands/audit.js` (before archive-on-kill), `commands/proto.js`, `staleness.js` `killStale`, `commands/spinoff.js` (child). No card for `#chats`. Needs `pins:write` for the pin; degrades to an unpinned-but-current card + topic without it.
+
+## 16.5 Retire `#research`
 
 Reports move to each project's Research thread. Update `runbook.md`, `COMMANDS.md`, and the conformance script.
 

@@ -11,6 +11,7 @@ const { runInSandbox } = require("../sandbox");
 const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
+const { upsertStateCard } = require("../state-card");
 const { DEFAULT_MIN: MOUNT_DEFAULT_MIN } = require("../mount");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
@@ -298,7 +299,9 @@ async function handleProtoCommand({ command, ack, client }) {
 					{ type: "actions", elements: [{ type: "button", action_id: "proto_mount", text: { type: "plain_text", text: `Mount touch ${touchN}` }, value: `${id}::${touchN}::${MOUNT_DEFAULT_MIN}` }] },
 				];
 			}
-			await client.chat.postMessage(msg);
+			const protoPost = await client.chat.postMessage(msg);
+			// D-52: state is now `prototyping` at touch N -- refresh the card.
+			if (pdest.project) await upsertStateCard(client, id, { latestTs: protoPost?.ts, latestChannel: millChannel });
 		}
 	} catch (err) {
 		console.error("proto command failed:", err);

@@ -15,6 +15,7 @@ const { buildEvalEvent } = require("./eval-event");
 const { fullTranscript, markPromoted } = require("./chat-session");
 const { PROMOTE_ACTION_ID, withPromoteButton } = require("./promote-button");
 const { createProjectChannel } = require("./project-channel");
+const { upsertStateCard } = require("./state-card");
 
 // Pull the assumption out of a chat: the last /attack the founder ran in
 // this session posted "*Assumption:* ..." as an assistant turn (see
@@ -163,7 +164,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 
 	// 15.3 step 4: seed the Brainstorm thread with the origin-chat summary
 	// and a link back to the chat.
-	await client.chat
+	const seedPost = await client.chat
 		.postMessage({
 			channel: project.channelId,
 			thread_ts: project.threads.brainstorm,
@@ -171,7 +172,22 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 				`*Seeded from a chat by ${founder}.*\n\n${summary}\n\n${assumptionLine}\n\n` +
 				`Full origin chat: <https://slack.com/app_redirect?channel=${session.channel}&message_ts=${session.threadTs}|jump to the thread> · transcript at \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,
 		})
-		.catch((err) => console.error(`promotion: brainstorm seed failed: ${err?.data?.error || err.message}`));
+		.catch((err) => {
+			console.error(`promotion: brainstorm seed failed: ${err?.data?.error || err.message}`);
+			return null;
+		});
+
+	// D-52 follow-up: create the pinned current-state card for the new
+	// project channel. This writes state_card_ts into state.json, so
+	// commit again (the first commit above ran before the channel/card
+	// existed) — otherwise a restart before the next command loses the ts
+	// and a duplicate card gets posted.
+	await upsertStateCard(client, id, { latestTs: seedPost?.ts, latestChannel: project.channelId });
+	await commitAndPush(
+		[`ideas/${id}/state.json`],
+		`idea ${id}: state card pinned`,
+		(reason) => console.error(`git commit/push failed for ${id} state card: ${reason}`),
+	);
 
 	// 15.3 step 5: announce in #mill-ideas and link the new channel.
 	if (millChannel) {

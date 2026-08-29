@@ -345,3 +345,24 @@ Five bugs from first real use; four were two design errors (D-52).
 **Thread scroll position — investigated, reported, not built.** Slack's thread-open scroll is client-side with no API surface; `conversations.mark` only moves the bot's own cursor. What's controllable: `chat.getPermalink` (jumps to a message), `pins.add` + in-place `chat.update`, channel topic. Recommended a pinned per-project "current state" card; **held for an explicit go-ahead** per the founder's instruction to confirm the constraint first.
 
 Docs: **D-52** in `DECISIONS.md`; `PROJECTS.md` / `COMMANDS.md` "Running commands / Invocation paths" rewritten; `build-guide-projects.md` 14.4/14.5/15.3/16.3; `EVAL.md` Layer 2 metrics + schema note. Tests: `_rcab.js` (A/B/Bug1/mrkdwn, all green on live `flash-fast`), `_d51gates.js` gate parity still 6/6, `_d51test.js` units pass. Bot restarted clean. **Conformance 26/26.**
+
+---
+
+## D-52 follow-up — pinned per-project state card
+
+`state-card.js` (new). `upsertStateCard(client, id, {latestTs, latestChannel})`:
+- reads `state.json` + `readAssumption` + `readLatestAudit` (new in `ideas.js`), renders a card: `📍 Idea <id> · <state> · <founder>` / assumption (or `blocked on: …`) / last verdict (`verdict — evidence_basis · stamp`) / `Next:` (state → thread-safe `@Mill <cmd>` hint) / `Latest activity:` permalink;
+- if `state.state_card_ts` set → `chat.update` in place; on `message_not_found` → repost. Else `postMessage` → `pins.add` → persist `state_card_ts` via `updateState`;
+- always refreshes the channel **topic** to `state · assumption` (≤250, `channels:manage` only — already held);
+- `pins.add` `missing_scope` → one log line, card still posted (not sticky until `pins:write` is granted);
+- no `channel_id` (pre-projects idea) → no-op. Every failure caught internally — a card problem never breaks the command that triggered it. Card text run through `toSlackMrkdwn`.
+
+Wired into every state transition: `promotion.js` (after brainstorm seed; + a second `commitAndPush` of `state.json` because the first commit ran before the channel existed, so a restart in between would otherwise lose `state_card_ts` and double-post), `commands/attack.js` project branch, `commands/test.js`, `commands/audit.js` (**before** archive-on-kill, or the update would hit an archived channel), `commands/proto.js`, `staleness.js` `killStale` (before archive), `commands/spinoff.js` (child).
+
+`state.json` gains `state_card_ts`. **No card for `#chats`** — disposable, single-thread, every reply already carries the promote button (matches the founder's "project case is the one that matters").
+
+**Scope gap flagged:** the bot's token has no `pins:write`. Current scopes: `app_mentions:read chat:write im:write reactions:write commands channels:history channels:read files:read im:history im:read users:read channels:manage`. Until `pins:write` is added the card posts and stays current but isn't pinned; the channel topic (which works now) carries the one-line version.
+
+Tests: `_statecard.js` — 26/26 (nextStep per state; first upsert posts+pins+topic+persists; second updates in place with no re-post/re-pin; vanished target → repost; missing scope → posts + warns once + no throw; channel-less → no-op). Conformance 26/26. `_rcab.js` / `_d51gates.js` still green. Bot restarted clean.
+
+Docs: D-52 thread-scroll paragraph rewritten (built, not deferred); `PROJECTS.md` "The pinned state card" + `state.json` example; `build-guide-projects.md` 16.4.

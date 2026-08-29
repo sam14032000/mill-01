@@ -9,6 +9,7 @@ const { generateIdeaId, promoteIdea, readState, updateState } = require("../idea
 const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { createProjectChannel } = require("../project-channel");
+const { upsertStateCard } = require("../state-card");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -74,9 +75,11 @@ async function handleSpinoffCommand({ command, ack, client }) {
 	await client.chat
 		.postMessage({ channel: parent.channel_id, thread_ts: pdest.threadTs, text: `🌱 Spun off <#${child.channelId}> (\`${id}\`) — ${ideaText}` })
 		.catch(() => {});
-	await client.chat
+	const childSeed = await client.chat
 		.postMessage({ channel: child.channelId, thread_ts: child.threads.brainstorm, text: `Child of <#${parent.channel_id}> (\`${parent.id}\`). Run \`/attack\` here to set an assumption, then \`/test\`.` })
-		.catch(() => {});
+		.catch(() => null);
+	// D-52: pinned state card for the new child project.
+	await upsertStateCard(client, id, { latestTs: childSeed?.ts, latestChannel: child.channelId });
 	if (millChannel) {
 		await client.chat
 			.postMessage({ channel: millChannel, text: `*Spin-off* <#${child.channelId}> \`${id}\` from \`${parent.id}\` by ${founder}.` })

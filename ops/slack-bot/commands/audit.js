@@ -20,6 +20,7 @@ const {
 const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
+const { upsertStateCard } = require("../state-card");
 const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 
@@ -397,11 +398,15 @@ async function handleAuditCommand({ command, ack, client }) {
 		if (verdict.resembles_killed_idea) {
 			lines.push(`*⚠️ Resembles killed idea:* \`${verdict.resembles_killed_idea}\` — the auditor weighed that kill reason (I3).`);
 		}
-		await client.chat.postMessage({
+		const verdictPost = await client.chat.postMessage({
 			channel: researchChannel,
 			thread_ts: auditThreadTs || research.json.slack_thread_ts,
 			text: lines.join("\n"),
 		});
+
+		// D-52: refresh the pinned state card before any archive-on-kill --
+		// a card update on an archived channel would fail.
+		if (pdest.project) await upsertStateCard(client, id, { latestTs: verdictPost?.ts, latestChannel: researchChannel });
 
 		if (verdict.verdict === "kill" && graveyardChannel) {
 			await client.chat.postMessage({

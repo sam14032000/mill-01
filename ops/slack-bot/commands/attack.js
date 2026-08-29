@@ -9,6 +9,7 @@ const { buildEvalEvent } = require("../eval-event");
 const { readProfile } = require("../context");
 const { findLatestSessionForUser, addTurn, commandDestination, ensureStageThread } = require("../chat-session");
 const { withPromoteButton } = require("../promote-button");
+const { upsertStateCard } = require("../state-card");
 
 const MODEL = "flash-fast";
 const STAGE = "attack";
@@ -224,7 +225,9 @@ async function handleAttackCommand({ command, ack, client }) {
 					);
 				}
 			}
-			await client.chat.postMessage({ channel: pdest.channel, thread_ts: pdest.threadTs, text: out });
+			const posted = await client.chat.postMessage({ channel: pdest.channel, thread_ts: pdest.threadTs, text: out });
+			// D-52: refresh the pinned state card (assumption may now be set).
+			await upsertStateCard(client, pdest.project.id, { latestTs: posted?.ts, latestChannel: pdest.channel });
 			emit(
 				buildEvalEvent({
 					stage: STAGE,

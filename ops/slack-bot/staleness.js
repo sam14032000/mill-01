@@ -86,6 +86,12 @@ async function killStale({ id, client }) {
 	updateState(id, { state: "killed" });
 	if (st.founder) appendToGraveyard({ founder: st.founder, id, assumption, reason: "stale — no state change in 14+ days; answered by inattention (I4)" });
 
+	// D-52: refresh the pinned card before the channel is archived.
+	if (st.channel_id) {
+		const { upsertStateCard } = require("./state-card");
+		await upsertStateCard(client, id);
+	}
+
 	const { channelId } = require("./config");
 	const graveyard = channelId("graveyard");
 	if (graveyard) {

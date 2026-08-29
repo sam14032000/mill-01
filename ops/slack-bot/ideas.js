@@ -317,6 +317,25 @@ function readLatestResearch(id) {
 	return { stamp: latestStamp, json, md };
 }
 
+// Most recent audit-<stamp>.json verdict object for an idea, or null.
+function readLatestAudit(id) {
+	const dir = path.join(IDEAS_DIR, id);
+	let files;
+	try {
+		files = fs.readdirSync(dir).filter((f) => /^audit-\d{8}-\d{4}\.json$/.test(f));
+	} catch {
+		return null;
+	}
+	if (files.length === 0) return null;
+	files.sort();
+	const stamp = files[files.length - 1].replace("audit-", "").replace(".json", "");
+	try {
+		return { stamp, ...JSON.parse(fs.readFileSync(path.join(dir, `audit-${stamp}.json`), "utf8")) };
+	} catch {
+		return null;
+	}
+}
+
 function updateState(id, patch) {
 	const current = readState(id);
 	if (!current) throw new Error(`updateState: no state.json for idea ${id}`);
@@ -346,6 +365,7 @@ module.exports = {
 	readOriginChat,
 	readAssumption,
 	readLatestResearch,
+	readLatestAudit,
 	updateState,
 	nowIso,
 };

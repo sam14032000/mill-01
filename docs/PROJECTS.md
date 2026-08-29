@@ -148,6 +148,10 @@ Five anchor messages at creation; their `thread_ts` stored in `state.json`. Ever
 
 **Context is keyed on `thread_ts`, never on channel.** One channel hosts four parallel conversations, and binding sessions at channel level causes silent context bleed — research findings leaking into brainstorm, prototype talk contaminating an audit.
 
+### The pinned state card (D-52)
+
+Slack opens a long thread at the top, so returning to a busy project means scrolling to find where things stand. Each project channel carries **one pinned "current state" card** — assumption (or what it's blocked on), current state, last verdict, what's next, and a permalink to the latest activity. It's posted once and edited in place (`chat.update`) on **every state transition** — promotion, `/attack`, `/test`, `/audit`, `/proto`, kill, `/spinoff` — never on a timer. A returning founder reads that one message. The channel **topic** carries a one-line version that's visible in the header without opening anything. (`#chats` sessions get no card — they're disposable and every reply already has the promote button.) The pin itself needs the `pins:write` scope; without it the card and topic still work, the card just isn't sticky.
+
 ### Naming and membership
 
 `#idea-<id>-<slug>`, lowercase, ≤80 chars. All three founders auto-invited. Topic is the assumption once one exists.
@@ -262,9 +266,13 @@ PDF and images go to Gemini natively. `.docx`/`.xlsx` need conversion. Text and 
   },
   "parent": null,
   "children": [],
-  "touch_count": 0
+  "touch_count": 0,
+  "state_card_ts": "1756...",
+  "assumption_blocked_on": null
 }
 ```
+
+`state_card_ts` is the pinned state card's message ts (D-52); `assumption_blocked_on` carries `/attack`'s `TOO_VAGUE` specifics when promotion couldn't set an assumption.
 
 ---
 
