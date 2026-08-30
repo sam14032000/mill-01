@@ -22,7 +22,7 @@ const { callFlash } = require("./llm");
 const { readProfile, readCaptures, hasProfile } = require("./context");
 const { channelId } = require("./config");
 const { withPromoteButton } = require("./promote-button");
-const { findIdeaByChannel, updateState, readOriginChat, readIdeaMd } = require("./ideas");
+const { findIdeaByChannel, updateState, readOriginChat, readIdeaMd, readFindIndex } = require("./ideas");
 
 // A promoted idea's stage threads must see where the chat that spawned
 // them got to (ROOT CAUSE B). origin-chat.md is the full transcript;
@@ -44,6 +44,16 @@ function readOriginContext(ideaId) {
 				? `${chat.slice(0, ORIGIN_CHAT_CHAR_CAP)}\n\n_[origin chat truncated for context; full transcript in ideas/${ideaId}/origin-chat.md]_`
 				: chat;
 		parts.push(`Origin chat transcript (the conversation this project was promoted from):\n\n${trimmed}`);
+	}
+	// D-53: surface-search reports run in any thread of this project are
+	// referenceable from all of them. The index is small; the full text
+	// of a report lives at the path it names.
+	const findIdx = readFindIndex(ideaId);
+	if (findIdx && findIdx.trim()) {
+		parts.push(
+			`Surface-search reports in this project (NOT evidence — never cite as such; only /test produces evidence). ` +
+				`Cite one by its path if relevant:\n\n${findIdx.trim().slice(0, 6000)}`,
+		);
 	}
 	return parts.join("\n\n---\n\n");
 }

@@ -469,3 +469,19 @@ Also, surfaced by conformance during the fix (both pre-existing, not from this c
 - **C-23** — improved the co-timed-event matcher to sum *all* post-fix same-model telemetry events in a window (not just sampled ones) vs the spend-row sum. A remaining tiny gap: a `find` that fails after making calls logs `status:"failed"` with no `cost_usd` (~$0.006 unlogged). `PRICING_FIX_DEPLOYED_AT` bumped to exclude the pre-fix window.
 
 Tests: `_findlen.js` 6/6, `_agent.js` 24/24, `_protoloop.js` 15/15, `_bug12.js` 12/12, `_d51gates.js` 6/6. Conformance 26/26. Bot restarted.
+
+---
+
+## Revision — broad `/find` writes a stored report instead of truncating (2026-08-30)
+
+Reverting the 2026-08-30 dial-back (that shrank broad breadth to avoid `msg_too_long`). Breadth restored to **5×8**; the length problem is solved by not putting the full result in a Slack message.
+
+- **`commands/find.js`:** broad `runFind` returns raw pieces (`summary`, `queries`, `sources`, `shortTopic`). `writeFindReport(id, …)` writes the full report to `ideas/<id>/find/<YYYYMMDD-HHMMSS>.md` — a `> NOT evidence` header, run-by/when/queries, the full summary, every scanned source as a link — and appends a one-line entry to `ideas/<id>/find/index.md`. `handleFindCommand`: in a project (`findIdeaByChannel(channel_id)`) → write report + `commitAndPush([ideas/<id>/find])` + post a `findRundown` (capped ~2700, keeps the not-evidence footer, names the saved path) + `uploadThreadFile` the `.md` to the thread. In `#chats` (no project) → unchanged capped inline message.
+- **`slack-files.js`** (new): `uploadThreadFile` via `files.uploadV2`. Best-effort — **needs the `files:write` scope, which the bot token does not have** (current scopes end at `pins:write`). Without it: `missing_scope`, logged once, and the report is still committed + named in the rundown. **Add `files:write` to enable attachments.**
+- **`ideas.js`:** `readFindIndex(id)`, `readFindReport(id, stamp?)`.
+- **`chat-session.js` `readOriginContext`:** appends the `find/index.md` block, labelled "NOT evidence — never cite as such", so every project stage thread can reference a report run in any other thread (mechanism reused from D-52 Root Cause B's origin-context loading).
+- `find/` is a distinct directory from `docs/` on purpose — `/test` passes `docs/` as GPT Researcher's `DOC_PATH` and the audit reads the `docs/` index; a surface search must never leak in as evidence (PROJECTS.md 14.5, D-33).
+
+Tests: `_findreport.js` (13/13) — report file with NOT-evidence header + Summary/Sources, `find/index.md` entry, capped rundown naming the path, `files.uploadV2` to the thread, `readOriginContext` lists it, a second `/find` appends (2 files / 2 index lines), `#chats` stays inline with no file. `_findlen.js` 6/6, `_agent.js` 24/24, `_protoloop.js` 15/15, `_bug12.js` 12/12, `_d51gates.js` 6/6, `_statecard.js` 24/24. Conformance 26/26. Bot restarted.
+
+Docs: D-53 research-modes section, `COMMANDS.md`/`PROJECTS.md` `/find`.

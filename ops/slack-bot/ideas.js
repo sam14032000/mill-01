@@ -188,6 +188,35 @@ function readOriginChat(id) {
 	}
 }
 
+// The index of surface-search reports (`/find` broad) written into this
+// project. Loaded into every project thread's context so a report run
+// in one thread is referenceable from all of them (D-53). It is NOT
+// evidence -- the index itself says so.
+function readFindIndex(id) {
+	try {
+		return fs.readFileSync(path.join(IDEAS_DIR, id, "find", "index.md"), "utf8");
+	} catch {
+		return "";
+	}
+}
+
+// Full text of one surface-search report by stamp (or the newest).
+function readFindReport(id, stamp) {
+	const dir = path.join(IDEAS_DIR, id, "find");
+	try {
+		let name;
+		if (stamp) {
+			name = `${stamp}.md`;
+		} else {
+			const files = fs.readdirSync(dir).filter((f) => /^\d{8}-\d{6}\.md$/.test(f)).sort();
+			name = files[files.length - 1];
+		}
+		return name ? fs.readFileSync(path.join(dir, name), "utf8") : "";
+	} catch {
+		return "";
+	}
+}
+
 // Extracts the ASSUMPTION text back out of idea.md's "## Assumption"
 // section, since state.json doesn't duplicate it -- idea.md is the
 // single source of truth for the assumption text (docs/COMMANDS.md's
@@ -363,6 +392,8 @@ module.exports = {
 	readState,
 	readIdeaMd,
 	readOriginChat,
+	readFindIndex,
+	readFindReport,
 	readAssumption,
 	readLatestResearch,
 	readLatestAudit,
