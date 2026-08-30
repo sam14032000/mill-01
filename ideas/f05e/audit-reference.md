@@ -156,3 +156,31 @@ Mode: brainstorm (Co-founder)
 - Customs detentions lead Amazon to cancel delivery appointment windows (resetting the FBA inbound queue), and customs holds exceeding 30 days result in goods being sent to a general order warehouse or destroyed at the brand's expense. [FOUNDER BELIEF]
 
 (No research passes have run for this idea yet; no CONTRADICTS or NOT DISCUSSED flags apply.)
+
+---
+### 2026-08-30T23:50:21.548Z
+
+**Mode:** brainstorm — _correction entry, not a compression of new turns._
+
+Every entry above this line was generated in a single retroactive batch during the migration to the
+single-thread mode model, under an earlier three-tag taxonomy (`[SOURCE: research-<stamp>]`,
+`[FOUNDER BELIEF]`, `[REPORTED SPEECH]`). Two tagging problems in those entries are corrected here rather
+than edited above, because this document is append-only.
+
+1. **The two `[REPORTED SPEECH]` items are not field evidence.** Both derive from a founder saying "based on
+   a few conversations" / "based on conversations" with no named person, no stated current spend, and no
+   price. Under the current taxonomy they would carry `[RELAYED — not field evidence]`. They record only that
+   a conversation was mentioned. They must not be read as field evidence and cannot on their own support any
+   `field-intent`, `field-behaviour` or `field-committed` grade — graded field evidence comes only from raw
+   field notes (`ideas/f05e/field/`) and prototype outcomes, and this idea currently has neither.
+
+2. **Three items are surface web search, not research.** The entries listing Indian export-compliance tools
+   and providers (Shipzy, Covoro, BharathExim, Rasp International, Xindus), the CSB-V transaction-cap change,
+   and the DGFT e-BRC self-certification framework came from a `/find` surface search whose result appeared in
+   the thread. They were tagged `[FOUNDER BELIEF]` with an improvised note; under the current taxonomy they
+   would carry `[SURFACE SEARCH — not evidence]`. No sources were verified and no citation re-check was run.
+
+**Evidence status of this idea, stated plainly:** no research pass has run for `f05e`, so there are no
+`[SOURCE: research-<stamp>]` claims anywhere in this document and nothing in it counts toward `evidence_basis`.
+This correction concerns how claims were labelled. It does not revise, retract or re-characterise any
+founder's reasoning above.
