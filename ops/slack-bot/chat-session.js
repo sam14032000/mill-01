@@ -19,6 +19,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { callFlash } = require("./llm");
+const { emit } = require("./telemetry");
+const { buildEvalEvent } = require("./eval-event");
 const { readProfile, readCaptures, hasProfile } = require("./context");
 const { channelId } = require("./config");
 const { withPromoteButton } = require("./promote-button");
@@ -302,8 +304,27 @@ async function maybeCompact(session) {
 
 	let summaryText;
 	try {
-		const { content } = await callFlash(messages, { model: "flash-fast", maxTokens: 2048 });
+		const t0 = Date.now();
+		const { content, usage, costUsd, cacheHit } = await callFlash(messages, { model: "flash-fast", maxTokens: 2048 });
 		summaryText = (content || "").trim();
+		// This LLM call was previously uninstrumented -- it's spent but
+		// never logged, which shows up in C-23 (telemetry under-reports a
+		// window that includes a compaction).
+		emit(
+			buildEvalEvent({
+				stage: "compaction",
+				model: "flash-fast",
+				founder: session.ownerFounder,
+				ideaId: session.ideaId || null,
+				tokensIn: usage?.prompt_tokens ?? 0,
+				tokensOut: usage?.completion_tokens ?? 0,
+				costUsd,
+				cacheHitRatio: cacheHit ? 1 : 0,
+				wallClockS: (Date.now() - t0) / 1000,
+				status: "ok",
+				reasonCode: `folded_to_${foldEnd}`,
+			}),
+		);
 	} catch (err) {
 		console.error(`chat-session: compaction call failed for ${session.threadTs}: ${err.message}`);
 		return null; // leave the session uncompacted; try again next turn

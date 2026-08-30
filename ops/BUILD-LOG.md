@@ -514,3 +514,17 @@ Diagnosed from `ideas/f05e/find/20260830-055922.md` (765 words total):
 - Cost: broad `/find` is now 2 gen calls (one large-input), ~$0.02–0.03. Founder-pushed, infrequent; `mill-flash` is $1/day.
 
 `_findreport.js` (15/15): report-body 1553 w vs rundown 115 w / 1082 c — the file is a full report, not a truncated copy of the rundown. `_agent.js` 20/20, `_findlen.js` 6/6, `_bug12.js` 12/12. Conformance 26/26 (C-23 cutoff bumped — the 2-gen broad-find changes the call shape in the match window). Bot restarted.
+
+---
+
+## Fix — agent kept replying in prose to an explicit "you need to research that" (2026-08-30)
+
+In a long research-heavy project thread, the agent read the founder's repeated push-back ("Not enough — … You need to research that. [3 paragraphs of ICP hypothesis]") as "keep synthesising" and answered in prose instead of running `find` broad — even after a `find` had already run earlier in the thread. The "prior tool output is context, not a signal" line + the density of research-flavoured discussion outweighed the embedded imperative.
+
+Two changes in `agent.js`:
+- **Prompt:** "Do not run a tool ON YOUR OWN INITIATIVE just because its output is in the thread. BUT if the founder explicitly asks — including a second time, or after pushing back on an earlier result ('not enough', 'go deeper') — run it again. A thread already full of research talk is not a reason to withhold a `find` the founder just asked for."
+- **Deterministic backstop:** `shouldForceBroadFind(text)` — a small pattern set for unambiguous surface-search imperatives ("you/we need to research/look up/dig into", clause-start "research/look into/dig into this|that|it|the market|…", "look this up", "research it deeper", "run research on/about X"). Guards out hypotheticals ("we could research this later"), third-person ("someone should research…"), and bare questions ("should we research that?"). Explicitly does **not** match "run the research pass" / "can you run the research pass" — that's `/test` intent, left to the model to route. When it matches, `runTurn` runs `find` broad directly (no model decision), telemetry `reason_code: "forced_broad_find"`.
+
+Regex logic 11/11 standalone (incl. the exact reported message → forced; "run the research pass" → not; "we could research this later" → not). `_agent.js` case 4d (embedded imperative → `forced_broad_find`, `tools_called=[find]`) passed. Also added: `chat-session.js` `maybeCompact` now emits a `compaction` telemetry event (the compaction LLM call was spent but never logged — C-23 under-reported any window containing a compaction; cutoff bumped).
+
+**Note:** the day's `mill-flash` $1.00 budget was exhausted by this session's repeated live test runs (agent loop = one model call per turn; broad `/find` = 2 large-input gens; forced-find spike). Reset the `spend` counter to 0 via `/key/update` (cap, duration, models, key value unchanged) so the founder isn't blocked until UTC midnight. The agent-loop workload genuinely runs hotter than $0.50/day — watch whether real usage approaches $1.00.

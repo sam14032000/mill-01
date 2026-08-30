@@ -40,7 +40,7 @@ const SYSTEM_PROMPT = [
 	"- any kind of question (\"didn't we…\", \"what about…\", \"is that defensible?\") — a question is recall or clarification, NOT a request, unless it explicitly asks you to run something (\"can you attack this?\")",
 	"When there's no instruction, reply in prose even if the idea looks attackable or researchable.",
 	"",
-	"Prior tool output in the thread is context for your reply, never a signal to run that tool again.",
+	"Do not run a tool ON YOUR OWN INITIATIVE just because its output is already in the thread. BUT if the founder explicitly asks you to run it — including a second time, or after pushing back on an earlier result (\"not enough\", \"go deeper\", \"research that properly\") — run it again. Re-running on an explicit request is correct; the founder decides, not you. A thread already full of research-flavoured discussion is not a reason to withhold a `find` the founder just asked for.",
 	"Call at most one tool. The founder drives the next step; do not chain commands.",
 	"When you call a tool, produce no prose — the tool posts the real output.",
 	"Prose replies: short and concrete. Engage with what they said, push on the weak point, ask for the number or the named alternative when a claim is vague. No headings, no essays.",
@@ -53,6 +53,36 @@ const SYSTEM_PROMPT = [
 
 const INLINE_MARKER = "_(quick web check — not verified, not evidence)_";
 const NOT_EVIDENCE_RE = /not evidence|not verified|quick web check|surface (web )?check/i;
+
+// Deterministic backstop for an unambiguous imperative to research /
+// look up / dig into "this/that/it". The agent under-fires on these in
+// long, research-heavy threads (D-53 amendment 2: it reads a thread
+// already full of research talk as "keep synthesising"). When one is
+// present we run `find` broad without asking the model.
+const NOUN = "(?:above|background|market|space|category|landscape|competitors?|players?|options?|topic|question|area|idea|hypothesis)";
+const FORCE_BROAD_FIND_PATTERNS = [
+	// "you/we need to / should / have to / must ... research/look up/dig into/search"
+	new RegExp(`\\b(?:you|we)\\s+(?:need\\s+to|should|have\\s+to|must)\\s+(?:go\\s+)?(?:and\\s+)?(?:research|look\\s+(?:up|into)|dig\\s+into|search)\\b`, "i"),
+	// clause-start "research/look into/dig into/search for/up this|that|it|the <noun>"
+	new RegExp(`(?:^|[.!?]\\s+|\\n\\s*|\\bplease\\s+|\\bnow\\s+|\\bgo\\s+(?:and\\s+)?)(?:research|look\\s+(?:up|into)|dig\\s+into|search\\s+(?:for|up|into))\\s+(?:more\\s+(?:on|about)\\s+|deeper\\s+(?:on|into)\\s+|into\\s+)?(?:this|that|it|these|those|the\\s+${NOUN})\\b`, "i"),
+	// phrasal split: "look this/that/it up"
+	/\blook\s+(?:this|that|it|these|those)\s+up\b/i,
+	// "research it properly/again/deeper" -- surface-search intent
+	/\bresearch\s+(?:this|that|it)\s+(?:properly|again|deeper|more|further|harder)\b/i,
+	// "run research on/to/about X" -- but NOT "run the research pass"
+	// (that's /test intent; let the model route test vs find)
+	/\brun\s+research\s+(?:on|to|about|into|for|around)\b/i,
+];
+
+function shouldForceBroadFind(text) {
+	const t = String(text || "").trim();
+	if (!FORCE_BROAD_FIND_PATTERNS.some((re) => re.test(t))) return false;
+	// hypothetical / third-person ("we could research…", "someone should look into…") -- let the model decide
+	if (/\b(?:someone|somebody|anyone|no one|nobody|one|they|he|she|we|you)\s+(?:could|might|would|ought to|may)\s+(?:research|look|dig|search)\b/i.test(t)) return false;
+	// a bare question ("should we research that?")
+	if (/^(?:so\s+|but\s+|ok(?:ay)?[,\s]+)*(?:should|could|would|can|do|does|did|is|are|was|were|why|how|what|when|which)\b/i.test(t) && /\?\s*$/.test(t)) return false;
+	return true;
+}
 
 function parseArgs(tc) {
 	try {
@@ -80,6 +110,8 @@ async function runTurn({ session, message, client }) {
 		research: isProject && ideaId ? readLatestResearch(ideaId) : null,
 	};
 
+	const text = message.text.trim();
+
 	const placeholderTs = await client.chat
 		.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: "_Thinking…_" })
 		.then((r) => r.ts)
@@ -96,6 +128,29 @@ async function runTurn({ session, message, client }) {
 	let toolsIgnored = 0;
 	let searchInitiatedBy = null; // "agent" (inline quick) | "founder" (broad) | null
 	const t0 = Date.now();
+
+	// Deterministic backstop: an explicit "research this / look this up /
+	// dig into that" imperative runs `find` broad directly -- the model
+	// has been unreliable on these in long threads.
+	if (shouldForceBroadFind(text)) {
+		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: "_On it — researching that…_" }).catch(() => {});
+		const before = session.turns.length;
+		const out = await runTool("find", { query: text, mode: "broad" }, { ...ctx, progressTs: placeholderTs, progressChannel: message.channel });
+		if (out.search) searchInitiatedBy = out.search;
+		if (session.turns.length === before) addTurn(session, { role: "assistant", text: "[ran `find` (broad) — report is in the thread]", kind: "command" });
+		if (!out.posted && placeholderTs) {
+			await client.chat.update({ channel: message.channel, ts: placeholderTs, text: `_${out.result}_` }).catch(() => {});
+		}
+		emit(
+			buildEvalEvent({
+				stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId,
+				wallClockS: (Date.now() - t0) / 1000, status: "ok", reasonCode: "forced_broad_find",
+				toolsCalled: ["find"], toolsIgnored: 0, iterations: 0, repliedWithoutTool: false,
+				searchInitiatedBy: searchInitiatedBy || "founder",
+			}),
+		);
+		return true;
+	}
 
 	for (let step = 0; step < MAX_STEPS; step++) {
 		let res;

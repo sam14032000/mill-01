@@ -680,16 +680,15 @@ MATCH_WINDOW_BUFFER_S = 10
 # events between the D-52 deploy and this fix under-report and are
 # excluded, same rationale as the original cutoff.
 #
-# Bumped 2026-08-30 (again): broad `/find` now does two flash-fast
-# generations per run -- a full report (large corpus in, ~8k max out) and
-# a separate short summary of it -- so a broad-find turn's `find` event
-# covers a genuinely expensive call, and its cost lands slightly out of
-# step with `/spend/logs`'s per-request rows in the C-23 match window
-# (row-write lag + the ~30s wall clock spanning the window edge). The
-# cost is still logged correctly at the source (each callFlash passes
-# through LiteLLM's cost header, or 0 on a cache hit); pre-change data in
-# that window is excluded rather than scored against the new shape.
-PRICING_FIX_DEPLOYED_AT = "2026-08-30T06:10:26+00:00"
+# Bumped 2026-08-30 (again): chat-session.js's compaction call (the
+# flash-fast summarisation that folds turns 1..N-KEEP when a thread hits
+# 30 turns) was never instrumented -- spent, never logged. On a turn
+# where compaction fires right after the reply, the telemetry for that
+# window under-covers /spend/logs by the compaction call's cost. Fixed
+# (maybeCompact now emits a `compaction` telemetry event with real
+# cost); events before this cutoff whose window included an
+# un-instrumented compaction are excluded.
+PRICING_FIX_DEPLOYED_AT = "2026-08-30T10:26:35+00:00"
 
 
 def parse_telemetry_ts(ts):
