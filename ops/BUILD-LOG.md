@@ -485,3 +485,13 @@ Reverting the 2026-08-30 dial-back (that shrank broad breadth to avoid `msg_too_
 Tests: `_findreport.js` (13/13) — report file with NOT-evidence header + Summary/Sources, `find/index.md` entry, capped rundown naming the path, `files.uploadV2` to the thread, `readOriginContext` lists it, a second `/find` appends (2 files / 2 index lines), `#chats` stays inline with no file. `_findlen.js` 6/6, `_agent.js` 24/24, `_protoloop.js` 15/15, `_bug12.js` 12/12, `_d51gates.js` 6/6, `_statecard.js` 24/24. Conformance 26/26. Bot restarted.
 
 Docs: D-53 research-modes section, `COMMANDS.md`/`PROJECTS.md` `/find`.
+
+---
+
+## Fix — agent didn't run broad `/find` on an embedded "you need to research that" (2026-08-30)
+
+Live: the founder sent a multi-paragraph message — a critique of the finance-side space, an ICP definition, a hypothesis — with **"You need to research that."** as its third sentence. The agent replied in prose instead of running `find` broad. The `agent.js` `SYSTEM_PROMPT` said to fire a tool only on an explicit instruction *as the message*, and (D-52 conservatism) not on statements/musings — so an instruction buried mid-paragraph read as musing.
+
+Prompt-only change (routing is a prompt lever, D-53): an explicit run-instruction **counts when embedded in a longer message** ("…you need to research that", "look this up") — run the tool and treat the rest of the message as the subject. Still does **not** fire on a statement with no instruction, a hypothetical/third-person framing ("someone should research whether X"), or a question. `find(mode:"broad")`'s bullet updated to say build the `query` from the whole message + thread.
+
+`_spike2.js` (throwaway) — the exact reported message → `find` `mode:broad`, 3/3 runs; "pure musing" and "someone should research…" → no tool, 3/3. `_agent.js` 20/20, conformance 26/26. Bot restarted.
