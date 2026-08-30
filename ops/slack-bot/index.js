@@ -395,6 +395,39 @@ app.action("regenerate_stale", async ({ ack, body, client }) => {
 		buttonResolve.releaseTap(body);
 	}
 });
+// Change 4: the pre-proto audit suggestion. Recorded (audit_suggested)
+// at post time in mode-switch.js, not on tap -- these two buttons are
+// purely for the founder's convenience and don't affect whether the
+// suggestion repeats.
+app.action("audit_suggestion_switch", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const id = body.actions?.[0]?.value;
+		const byFounder = founderForUserId(body.user?.id);
+		const result = await switchMode({ id, mode: "audit", client, channel: body.channel?.id, threadTs: body.message?.thread_ts, byFounder });
+		await buttonResolve.resolveMessage({
+			client,
+			body,
+			outcomeText: result.ok ? "✅ Switched to audit — see banner below" : `⚠️ ${result.reason}`,
+		});
+	} catch (e) {
+		console.error("audit_suggestion_switch failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Switch failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+app.action("audit_suggestion_dismiss", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "👍 Continuing without an audit" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
 app.action("stale_ack", async ({ ack, body, client }) => {
 	await ack();
 	if (!buttonResolve.claimTap(body)) return;

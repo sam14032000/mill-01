@@ -10,7 +10,7 @@
 // generate-or-switch offer, never a hard stop here.
 
 const { MODE_ORDER, personaFor } = require("./personas");
-const { readState, updateState } = require("./ideas");
+const { readState, updateState, readLatestAudit } = require("./ideas");
 const { modeBannerText, modeSwitchBlocks } = require("./project-channel");
 const { checkMissingInput, missingDocBlocks, checkStale, staleDocBlocks } = require("./mode-docflow");
 
@@ -75,6 +75,46 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
 			const { text, blocks } = staleDocBlocks(id, mode, stale);
 			await client.chat.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text, blocks }).catch(() => {});
 			docOffer = { kind: "stale", mode, report: stale };
+		}
+	}
+
+	// Change 4: "One suggestion, before proto — offered once, ignorable,
+	// in the same shape as the surface-search offer. This is the only
+	// prompt to audit anywhere in the system." Audit is entered, not
+	// triggered (Change 4), so nothing else in the mill ever nudges
+	// toward it -- without this, an idea can go brainstorm -> proto with
+	// nothing ever asking whether it should die first.
+	//
+	// Offered exactly once per idea: the first time proto mode is
+	// entered with no audit verdict on file yet. Recorded in state.json
+	// (`audit_suggested`) the moment it's shown, not on a tap -- so it
+	// never repeats whether or not the founder acts on it. Ignorable by
+	// construction: switching to proto already happened above: this
+	// suggestion cannot block or undo it.
+	if (mode === "proto" && !state.audit_suggested && !readLatestAudit(id)) {
+		updateState(id, { audit_suggested: true });
+		if (client && bannerChannel) {
+			const text =
+				"💡 No audit has run on this idea yet. Worth running one before building — a kill here is cheaper " +
+				"than a kill after a prototype. Entirely optional; proto mode is already switched either way.";
+			await client.chat
+				.postMessage({
+					channel: bannerChannel,
+					thread_ts: bannerThread,
+					text,
+					blocks: [
+						{ type: "section", text: { type: "mrkdwn", text } },
+						{
+							type: "actions",
+							block_id: "audit_suggestion",
+							elements: [
+								{ type: "button", action_id: "audit_suggestion_switch", style: "primary", text: { type: "plain_text", text: "Switch to audit" }, value: id },
+								{ type: "button", action_id: "audit_suggestion_dismiss", text: { type: "plain_text", text: "Continue to proto" }, value: id },
+							],
+						},
+					],
+				})
+				.catch((e) => console.error(`mode-switch: audit suggestion post failed for ${id}: ${e?.data?.error || e.message}`));
 		}
 	}
 
