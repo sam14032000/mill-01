@@ -87,42 +87,51 @@ async function planQueries(topic, { max = 3 } = {}) {
 // results per query -- breadth, not recursion depth (still search_depth
 // "basic", still NOT a research pass).
 async function runFind(topic, { rawTopic, broad = false } = {}) {
-	const maxQueries = broad ? 5 : 3;
-	const maxResults = broad ? 8 : 5;
-	const queries = await planQueries(topic, { max: maxQueries });
+	// breadth, not depth. broad = a few more queries and results; still
+	// far short of a research pass. (Was 5x8 -- that produced a summary
+	// that tripped Slack's msg_too_long, 2026-08-30.)
+	const maxQueries = broad ? 4 : 3;
+	const maxResults = broad ? 6 : 5;
+	const shortTopic = String(topic || "").replace(/\s+/g, " ").trim().slice(0, 300);
+	const queries = await planQueries(shortTopic, { max: maxQueries });
 	const t0 = Date.now();
 	const hits = await search(queries, { maxQueries, maxResults });
 
 	const corpus = hits
 		.map((h) => {
 			const items = h.results
-				.map((r) => `- ${r.title} (${r.url})\n  ${r.content}`)
+				.map((r) => `- ${r.title} (${r.url})\n  ${String(r.content || "").slice(0, 600)}`)
 				.join("\n");
 			return `Query: ${h.query}\n${h.answer ? `Tavily answer: ${h.answer}\n` : ""}${items}`;
 		})
-		.join("\n\n");
+		.join("\n\n")
+		.slice(0, 24000);
 
 	const { content, usage, costUsd, cacheHit } = await callFlash(
 		[
 			{ role: "system", content: SUMMARY_PROMPT },
 			{ role: "user", content: corpus || "(no results returned)" },
 		],
-		{ model: MODEL, maxTokens: 2048 },
+		{ model: MODEL, maxTokens: 1200 },
 	);
 	const wallClockS = (Date.now() - t0) / 1000;
 
 	const sourceList = hits
 		.flatMap((h) => h.results.map((r) => r.url))
 		.filter((u, i, a) => a.indexOf(u) === i)
-		.slice(0, 8);
+		.slice(0, 4);
 
-	const body =
-		`*🔎 Surface search${broad ? " (broad)" : ""}:* ${topic}\n` +
-		(rawTopic && rawTopic !== topic ? `_(you asked: “${rawTopic}” — resolved from the thread)_\n` : "") +
-		`_Queries: ${queries.map((q) => `\`${q}\``).join(", ")}_\n\n` +
-		`${content || "_no usable results_"}` +
-		(sourceList.length ? `\n\n_Scanned:_ ${sourceList.map((u) => `<${u}>`).join(" · ")}` : "") +
-		NOT_EVIDENCE_FOOTER;
+	// The rendered Block Kit section caps at ~3000 chars and the
+	// not-evidence footer must survive -- assemble the variable middle
+	// within a budget, then always append the footer.
+	const head =
+		`*🔎 Surface search${broad ? " (broad)" : ""}:* ${shortTopic}\n` +
+		(rawTopic && rawTopic.replace(/\s+/g, " ").trim() !== shortTopic ? `_(you asked something longer — searched: “${shortTopic}”)_\n` : "") +
+		`_Queries: ${queries.map((q) => `\`${String(q).slice(0, 80)}\``).join(", ").slice(0, 300)}_\n\n`;
+	const sources = sourceList.length ? `\n\n_Scanned:_ ${sourceList.map((u) => `<${u}>`).join(" · ")}` : "";
+	const room = 2650 - head.length - sources.length - NOT_EVIDENCE_FOOTER.length;
+	const summary = String(content || "_no usable results_").slice(0, Math.max(200, room));
+	const body = head + summary + sources + NOT_EVIDENCE_FOOTER;
 
 	return {
 		body,
@@ -212,9 +221,13 @@ async function handleFindCommand({ command, ack, client }) {
 				reasonCode: "find_failed",
 			}),
 		);
-		await client.chat
-			.postMessage({ channel: dest, text: `\`/find\` failed: ${err?.message || err}` })
-			.catch(() => {});
+		// Land it in the "Thinking…" placeholder (postResult redirect) /
+		// the thread, not at channel root.
+		await postResult(client, {
+			channel: dest,
+			...(threadTs ? { thread_ts: threadTs } : {}),
+			text: `\`/find\` failed: ${err?.message || err}`,
+		}).catch(() => {});
 	}
 }
 

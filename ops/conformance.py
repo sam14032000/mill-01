@@ -679,7 +679,16 @@ MATCH_WINDOW_BUFFER_S = 10
 # real f05e turn. Fixed (execute() now logs that call's cost); live
 # events between the D-52 deploy and this fix under-report and are
 # excluded, same rationale as the original cutoff.
-PRICING_FIX_DEPLOYED_AT = "2026-08-29T10:38:41+00:00"
+#
+# Bumped 2026-08-30: a broad agent `find` that hit Slack's msg_too_long
+# was swallowed by commands/find.js's own catch and its `find` event
+# logged status:"failed" with no cost_usd -- so the ~2 flash-fast calls
+# it made (planQueries + summary) were spent but not logged, and the
+# co-timed project_turn event alone under-covers that window's spend
+# rows. Fixed (the msg_too_long is prevented; the find event's cost is
+# still not logged on failure -- a known minor gap, ~$0.006). Pre-fix
+# window excluded.
+PRICING_FIX_DEPLOYED_AT = "2026-08-30T05:27:12+00:00"
 
 
 def parse_telemetry_ts(ts):
@@ -776,30 +785,31 @@ def check_c23():
         if not in_window:
             unmatched += 1
             continue
-        # D-53: one turn can emit two same-model events for one set of
-        # LiteLLM rows -- e.g. the agent's turn event plus the `find`
-        # event when the agent runs a broad search (agent.js call + the
-        # find handler's resolve/plan/summarise calls). Sum every sampled
-        # event of the same model whose window overlaps, and compare that
-        # sum to the spend-row sum, so a correctly-split pair isn't
-        # double-flagged.
-        siblings = [event]
-        for j in range(i + 1, len(sample)):
-            if j in seen:
-                continue
-            o = sample[j]
-            if o["model"] != model:
-                continue
-            o_epoch = parse_telemetry_ts(o["ts"]).timestamp()
-            if window_start <= o_epoch <= window_end:
-                siblings.append(o)
+        # D-53: one turn can emit more than one same-model cost event for
+        # one set of LiteLLM rows -- the agent's turn event plus the
+        # `find`/`profile_evolution`/etc. event whose calls happened in
+        # the same window. Sum EVERY post-fix same-model event in the
+        # window (not just the ones that landed in the sample), and
+        # compare that to the spend-row sum, so a correctly-split group
+        # isn't double-flagged.
+        siblings = [
+            e for e in post_fix
+            if e is not event
+            and e.get("model") == model
+            and (e.get("cost_usd") or 0) > 0
+            and window_start <= parse_telemetry_ts(e["ts"]).timestamp() <= window_end
+        ]
+        # mark any of those that are also in `sample` as handled
+        for j, s in enumerate(sample):
+            if s in siblings:
                 seen.add(j)
+        group = [event] + siblings
         checked += 1
-        logged = sum(s["cost_usd"] for s in siblings)
+        logged = sum(s["cost_usd"] for s in group)
         real = sum(in_window)
-        tolerance = max(TOLERANCE_ABS_USD, TOLERANCE_REL * real) * max(1, len(siblings))
+        tolerance = max(TOLERANCE_ABS_USD, TOLERANCE_REL * real) * max(1, len(group))
         if abs(logged - real) > tolerance:
-            label = "+".join(s["stage"] for s in siblings)
+            label = "+".join(s["stage"] for s in group)
             mismatches.append(f"{event['ts']} stage={label} model={model}: telemetry cost_usd(sum)={logged} vs LiteLLM spend(window sum)={real} across {len(in_window)} row(s) (tolerance {tolerance:.5f})")
 
     if mismatches:

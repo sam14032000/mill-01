@@ -22,25 +22,37 @@ function postResult(client, msg) {
 function withProgress(client, { progressTs = null, progressChannel = null } = {}) {
 	if (!progressTs) return client;
 	const chat = Object.create(client.chat);
-	let used = false;
+	// state.consumed flips true once the placeholder has actually been
+	// written to. agent.js reads it after a tool call: a "posted" tool
+	// whose handler silently failed to land its output (e.g. Slack
+	// msg_too_long, swallowed by the handler's own catch) would otherwise
+	// leave the "Thinking…" placeholder hung forever (seen live
+	// 2026-08-30).
+	const state = { consumed: false };
+	const origUpdate = client.chat.update.bind(client.chat);
+
 	chat.postResult = async (msg = {}) => {
 		// Only redirect a post that targets the same channel as the
 		// placeholder (a kill's #graveyard post, an audit fallback to
 		// #research, etc. stay separate messages).
-		if (!used && msg.channel === progressChannel) {
-			used = true;
-			return client.chat.update({
-				channel: progressChannel,
-				ts: progressTs,
-				text: msg.text,
-				blocks: msg.blocks,
-			});
+		if (!state.consumed && msg.channel === progressChannel) {
+			const r = await origUpdate({ channel: progressChannel, ts: progressTs, text: msg.text, blocks: msg.blocks });
+			state.consumed = true; // only on success -- a throw leaves it false
+			return r;
 		}
 		return client.chat.postMessage(msg);
 	};
-	// Also expose the placeholder so multi-message commands (/test, /proto)
-	// can update it for interim stage lines.
+
+	// Multi-message commands (/test, /proto) update the placeholder
+	// directly for interim stage lines -- count those too.
+	chat.update = async (msg = {}) => {
+		const r = await origUpdate(msg);
+		if (msg && msg.ts === progressTs && (msg.channel === progressChannel || !msg.channel)) state.consumed = true;
+		return r;
+	};
+
 	chat.progress = { ts: progressTs, channel: progressChannel };
+	chat.progressState = state;
 	const wrapped = Object.create(client);
 	wrapped.chat = chat;
 	return wrapped;

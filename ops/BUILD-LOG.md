@@ -450,3 +450,22 @@ Docs: **D-53** in `DECISIONS.md` (amends D-43's premise, keeps its conclusion); 
 Tests: `_agent.js` now 24/24 incl. founder-broad (posted block, `search_initiated_by:founder`), agent-inline ("is India's GST threshold ₹20 or ₹40 lakh" → folded "₹20 lakh for service exporters…" + marker, no block, `search_initiated_by:agent`), and the guard (uncertainty/abstraction "i'm not sure this holds together" → no search). `_protoloop.js` 15/15, `_bug12.js` 12/12, `_d51gates.js` 6/6. Conformance 26/26. Bot restarted clean.
 
 Docs: D-53 gains the research-modes section; `COMMANDS.md`/`PROJECTS.md` `/find` spec; `EVAL.md` metric + field; `build-guide.md`/D-23 for the budget.
+
+---
+
+## Fix — broad `/find` `msg_too_long` hung the "Thinking…" placeholder (2026-08-30)
+
+Live: a founder's broad agent-`find` produced a summary that tripped Slack's `msg_too_long`; `commands/find.js`'s own catch swallowed it and posted "`/find` failed" to *channel root*, leaving the threaded `_Thinking…_` placeholder hung forever. (An earlier turn in the same thread had also failed with HTTP 429 = the `mill-flash` $0.50/day cap, since raised to $1.00.)
+
+- **`commands/find.js` `runFind`:** broad dialled back 5×8 → **4×6** (still breadth, not a research pass); Tavily `content` per result capped at 600 chars, corpus capped at 24k; summary `maxTokens` 2048 → 1200; `topic` normalised + capped at 300 chars (`shortTopic`) before planning; **body assembled within a ~2650-char budget with the not-evidence footer always appended last** so it renders whole in one Block Kit section and can't exceed Slack limits. `_findlen.js` verifies (body ≤ 2900, footer kept).
+- **`reply.js` `withProgress`:** tracks `progressState.consumed` — set true only when the placeholder is actually written (via `postResult`'s redirect *or* a direct `chat.update` to the placeholder ts, so `/test`/`/proto` stage lines count). A thrown `chat.update` leaves it false.
+- **`command-shim.js` `dispatchCommand`:** returns `{ ok, progressConsumed }`.
+- **`tools.js` `runTool`:** if a tool's handler ran but `progressConsumed === false` (its own catch swallowed a Slack error), returns `posted: false` with a "couldn't post its output, likely too long — suggest a narrower query" result, so the agent loop composes a real reply into the placeholder instead of hanging.
+- **`commands/find.js` catch:** posts the failure via `postResult` with `thread_ts` (lands in the placeholder / thread), not `client.chat.postMessage` to channel root.
+- Cleared the live hung placeholder by hand (`chat.update`).
+
+Also, surfaced by conformance during the fix (both pre-existing, not from this change):
+- **C-17 was failing** — `mill-build` Docker network gone (pruned; the weekly Docker cleanup removes unused networks and `mill-build` has no persistent container). `systemctl restart mill-sandbox-net` recreated it + the DOCKER-USER rules. **The weekly cleanup pruning the sandbox networks is a real bug — needs an exclude or a re-create-after-prune step.**
+- **C-23** — improved the co-timed-event matcher to sum *all* post-fix same-model telemetry events in a window (not just sampled ones) vs the spend-row sum. A remaining tiny gap: a `find` that fails after making calls logs `status:"failed"` with no `cost_usd` (~$0.006 unlogged). `PRICING_FIX_DEPLOYED_AT` bumped to exclude the pre-fix window.
+
+Tests: `_findlen.js` 6/6, `_agent.js` 24/24, `_protoloop.js` 15/15, `_bug12.js` 12/12, `_d51gates.js` 6/6. Conformance 26/26. Bot restarted.

@@ -179,7 +179,10 @@ async function dispatchCommand({ action, text, channelId, userId, threadTs, clie
 			text: ackText,
 		}).catch(() => {});
 	}
-	return { ok: true };
+	// progressConsumed: did the handler actually write to the "Thinking…"
+	// placeholder? The agent loop uses this so a tool that ran but landed
+	// nothing (Slack error swallowed by the handler's catch) doesn't hang.
+	return { ok: true, progressConsumed: Boolean(cmdClient.chat?.progressState?.consumed) };
 }
 
 module.exports = { dispatchCommand, HANDLERS };

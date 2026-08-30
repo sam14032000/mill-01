@@ -152,8 +152,9 @@ async function runTool(name, args, ctx) {
 		};
 	}
 
+	let disp;
 	try {
-		await dispatchCommand({
+		disp = await dispatchCommand({
 			action: name,
 			text: argText(name, args),
 			channelId: ctx.channelId,
@@ -168,6 +169,17 @@ async function runTool(name, args, ctx) {
 	} catch (err) {
 		return { posted: false, result: `\`${name}\` errored: ${err?.message || err}. Tell the founder it failed.` };
 	}
+
+	// The handler ran but never wrote to the placeholder -- its own catch
+	// swallowed a Slack error (msg_too_long, etc). Don't report success;
+	// let the agent tell the founder and stop the "Thinking…" hang.
+	if (ctx.progressTs && disp && disp.progressConsumed === false) {
+		return {
+			posted: false,
+			result: `\`${name}\` ran but couldn't post its output (it was likely too long). Tell the founder briefly and suggest a narrower query.`,
+		};
+	}
+
 	return { posted: true, search: name === "find" ? "founder" : undefined, result: `\`${name}\` ran; its output is in the thread.` };
 }
 
