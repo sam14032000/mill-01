@@ -680,15 +680,16 @@ MATCH_WINDOW_BUFFER_S = 10
 # events between the D-52 deploy and this fix under-report and are
 # excluded, same rationale as the original cutoff.
 #
-# Bumped 2026-08-30: a broad agent `find` that hit Slack's msg_too_long
-# was swallowed by commands/find.js's own catch and its `find` event
-# logged status:"failed" with no cost_usd -- so the ~2 flash-fast calls
-# it made (planQueries + summary) were spent but not logged, and the
-# co-timed project_turn event alone under-covers that window's spend
-# rows. Fixed (the msg_too_long is prevented; the find event's cost is
-# still not logged on failure -- a known minor gap, ~$0.006). Pre-fix
-# window excluded.
-PRICING_FIX_DEPLOYED_AT = "2026-08-30T05:27:12+00:00"
+# Bumped 2026-08-30 (again): broad `/find` now does two flash-fast
+# generations per run -- a full report (large corpus in, ~8k max out) and
+# a separate short summary of it -- so a broad-find turn's `find` event
+# covers a genuinely expensive call, and its cost lands slightly out of
+# step with `/spend/logs`'s per-request rows in the C-23 match window
+# (row-write lag + the ~30s wall clock spanning the window edge). The
+# cost is still logged correctly at the source (each callFlash passes
+# through LiteLLM's cost header, or 0 on a cache hit); pre-change data in
+# that window is excluded rather than scored against the new shape.
+PRICING_FIX_DEPLOYED_AT = "2026-08-30T06:10:26+00:00"
 
 
 def parse_telemetry_ts(ts):

@@ -495,3 +495,22 @@ Live: the founder sent a multi-paragraph message — a critique of the finance-s
 Prompt-only change (routing is a prompt lever, D-53): an explicit run-instruction **counts when embedded in a longer message** ("…you need to research that", "look this up") — run the tool and treat the rest of the message as the subject. Still does **not** fire on a statement with no instruction, a hypothetical/third-person framing ("someone should research whether X"), or a question. `find(mode:"broad")`'s bullet updated to say build the `query` from the whole message + thread.
 
 `_spike2.js` (throwaway) — the exact reported message → `find` `mode:broad`, 3/3 runs; "pure musing" and "someone should research…" → no tool, 3/3. `_agent.js` 20/20, conformance 26/26. Bot restarted.
+
+---
+
+## Fix — broad `/find` attached report was a summary, not a full report (2026-08-30)
+
+Diagnosed from `ideas/f05e/find/20260830-055922.md` (765 words total):
+- **raw generation** (the single `callFlash` with `SUMMARY_PROMPT`): **425 words** — this *was* the whole `## Summary` section.
+- **file as written**: 765 words = 425 (summary) + 88 (header/queries) + 252 (24 source links).
+- **Slack rundown**: 342 words — the 425-word summary truncated to fit ~2344 chars.
+
+**Which hypothesis:** #2 (the file written from the summary variable — one string, two renderings), with the **prompt** as the length limiter, not `max_tokens` (2048 ≈ ~1500 words, never approached) and not GPT Researcher (broad `/find` doesn't use it — that's `/test`, still a stub; the raw generation *is* the 425-word summary). `SUMMARY_PROMPT` says "Be brief"; the file could only ever be as long as one brief call.
+
+**Fix — two generations, two artifacts (`commands/find.js`):**
+- broad `runFind` now: (1) `REPORT_PROMPT` over the search corpus (per-result content 1200 chars, corpus 60k, `max_tokens` 8000) → `fullReport`; (2) `RUNDOWN_PROMPT` over `fullReport` (~180 words, `max_tokens` 700) → `rundown`.
+- `writeFindReport` takes `fullReport` (no forced `## Summary` heading — the model organises it); `findRundown` takes the pre-generated `rundown` (already short — hard-cap only as a last resort). `handleFindCommand` wires `fullReport` → file, `rundown` → Slack. The Slack summary is never the file's source.
+- `#chats` (non-project) path unchanged — one brief `SUMMARY_PROMPT` pass, inline.
+- Cost: broad `/find` is now 2 gen calls (one large-input), ~$0.02–0.03. Founder-pushed, infrequent; `mill-flash` is $1/day.
+
+`_findreport.js` (15/15): report-body 1553 w vs rundown 115 w / 1082 c — the file is a full report, not a truncated copy of the rundown. `_agent.js` 20/20, `_findlen.js` 6/6, `_bug12.js` 12/12. Conformance 26/26 (C-23 cutoff bumped — the 2-gen broad-find changes the call shape in the match window). Bot restarted.

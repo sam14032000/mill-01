@@ -35,6 +35,23 @@ const queryPlannerPrompt = (max) =>
 		"Output only the queries, one per line, no numbering, no commentary.",
 	].join("\n");
 
+// Two generations for a broad /find, D-53: a full report (written to the
+// file, at whatever length the evidence supports) and then a separate
+// short summary of that report (the Slack message). The Slack summary is
+// NEVER the source of the file.
+const REPORT_PROMPT = [
+	"You are writing a thorough surface-search briefing for a founder, from the web search results below. This goes into a project file, so write it in full — as long as the evidence supports. Do not artificially shorten.",
+	"Organise with Markdown headings. Cover: the direct answer to what was searched; what each cluster of sources actually says; every named company / product / service and any price, fee, or figure mentioned; where sources agree; where they disagree or contradict; and what the results do NOT tell you (gaps that would need a real conversation or a proper research pass).",
+	"Do not invent anything not in the results. Do not present any of it as verified fact — it is an unverified surface scan.",
+	"Do not add a top-level title or a sources list — those are added around your text. Start straight into the briefing.",
+].join("\n");
+
+const RUNDOWN_PROMPT = [
+	"Summarise this surface-search report for a short Slack message: about 180 words, plain prose, 2-4 short paragraphs, no headings.",
+	"Lead with the direct answer. Keep the strongest named findings (companies, prices, the key contradiction or gap). End by noting the full report is attached.",
+	"Do not present it as verified fact.",
+].join("\n");
+
 const SUMMARY_PROMPT = [
 	"Summarise these web search results for a founder thinking through an idea.",
 	"Lead with the direct answer if there is one. Note where sources disagree or where the evidence is thin.",
@@ -95,11 +112,12 @@ function findStamp() {
 	return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-// broad (D-53 Mode 2, founder-pushed): more distinct sub-queries and more
-// results per query -- breadth, not recursion depth (still search_depth
-// "basic", still NOT a research pass). Returns the raw pieces; the
-// caller either writes a report file (project) or posts a capped inline
-// message (#chats).
+// broad (D-53 Mode 2, founder-pushed): 5 sub-queries x 8 results --
+// breadth, not depth (still search_depth "basic", still NOT a research
+// pass). Two generations: `fullReport` (thorough, written to the file at
+// whatever length the evidence supports) and `rundown` (a separate
+// short summary OF that report -- the Slack message). The Slack rundown
+// is never the source of the file.
 async function runFind(topic, { rawTopic, broad = false } = {}) {
 	const maxQueries = broad ? 5 : 3;
 	const maxResults = broad ? 8 : 5;
@@ -112,60 +130,86 @@ async function runFind(topic, { rawTopic, broad = false } = {}) {
 	const corpus = hits
 		.map((h) => {
 			const items = h.results
-				.map((r) => `- ${r.title} (${r.url})\n  ${String(r.content || "").slice(0, 800)}`)
+				.map((r) => `- ${r.title} (${r.url})\n  ${String(r.content || "").slice(0, 1200)}`)
 				.join("\n");
 			return `Query: ${h.query}\n${h.answer ? `Tavily answer: ${h.answer}\n` : ""}${items}`;
 		})
 		.join("\n\n")
-		.slice(0, 40000);
-
-	const { content, usage, costUsd, cacheHit } = await callFlash(
-		[
-			{ role: "system", content: SUMMARY_PROMPT },
-			{ role: "user", content: corpus || "(no results returned)" },
-		],
-		{ model: MODEL, maxTokens: 2048 },
-	);
-	const wallClockS = (Date.now() - t0) / 1000;
+		.slice(0, 60000);
 
 	const sources = hits
 		.flatMap((h) => h.results.map((r) => ({ title: r.title, url: r.url })))
 		.filter((s, i, a) => a.findIndex((x) => x.url === s.url) === i);
 
-	const summary = String(content || "_no usable results_").trim();
+	let tokensIn = 0;
+	let tokensOut = 0;
+	let costUsd = 0;
+	let calls = 0;
+	let cacheHits = 0;
+	const gen = async (system, user, maxTokens) => {
+		const { content, usage, costUsd: c, cacheHit } = await callFlash(
+			[
+				{ role: "system", content: system },
+				{ role: "user", content: user },
+			],
+			{ model: MODEL, maxTokens },
+		);
+		tokensIn += usage?.prompt_tokens ?? 0;
+		tokensOut += usage?.completion_tokens ?? 0;
+		costUsd += c ?? 0;
+		calls += 1;
+		if (cacheHit) cacheHits += 1;
+		return String(content || "").trim();
+	};
 
-	// Capped inline message -- used only when there's no project to store
-	// a report file in (#chats). Section renders to ~3000 chars; keep the
-	// footer.
+	const corpusOrEmpty = corpus || "(no results returned)";
+
+	let fullReport = null;
+	let rundown;
+	if (broad) {
+		// Generation 1: the full report -> the file.
+		fullReport = (await gen(REPORT_PROMPT, `Search of: ${shortTopic}\n\nResults:\n${corpusOrEmpty}`, 8000)) || "_no usable results_";
+		// Generation 2: a short summary OF that report -> Slack.
+		rundown = (await gen(RUNDOWN_PROMPT, fullReport, 700)) || fullReport.slice(0, 1500);
+	} else {
+		// Non-broad (#chats shallow path, or an explicit narrow call):
+		// one brief pass, used for the inline message.
+		rundown = (await gen(SUMMARY_PROMPT, corpusOrEmpty, 2048)) || "_no usable results_";
+	}
+	const wallClockS = (Date.now() - t0) / 1000;
+
+	// The capped inline message -- used only when there's no project to
+	// store a report file in.
 	const head =
 		`*🔎 Surface search${broad ? " (broad)" : ""}:* ${shortTopic}\n` +
 		(rawTrim && rawTrim !== shortTopic ? `_(searched: “${shortTopic}”)_\n` : "") +
 		`_Queries: ${queries.map((q) => `\`${String(q).slice(0, 80)}\``).join(", ").slice(0, 300)}_\n\n`;
 	const srcLine = sources.length ? `\n\n_Scanned:_ ${sources.slice(0, 4).map((s) => `<${s.url}>`).join(" · ")}` : "";
 	const room = 2650 - head.length - srcLine.length - NOT_EVIDENCE_FOOTER.length;
-	const body = head + summary.slice(0, Math.max(200, room)) + srcLine + NOT_EVIDENCE_FOOTER;
+	const body = head + rundown.slice(0, Math.max(200, room)) + srcLine + NOT_EVIDENCE_FOOTER;
 
 	return {
-		body,
+		body, // inline message (#chats)
+		rundown, // the Slack summary for the project path
+		fullReport, // null unless broad -- the file's content
 		shortTopic,
 		rawTrim,
 		queries,
-		summary,
 		sources,
 		queryCount: queries.length,
-		tokensIn: usage?.prompt_tokens ?? 0,
-		tokensOut: usage?.completion_tokens ?? 0,
+		tokensIn,
+		tokensOut,
 		costUsd,
-		cacheHitRatio: cacheHit ? 1 : 0,
+		cacheHitRatio: calls ? cacheHits / calls : 0,
 		wallClockS,
 	};
 }
 
-// Write the full report to ideas/<id>/find/<stamp>.md and append a
-// one-line entry to ideas/<id>/find/index.md (the index is what every
-// project thread sees -- readOriginContext loads it). Returns
-// { relPath, absPath, stamp }.
-function writeFindReport(id, { shortTopic, rawTrim, queries, summary, sources, founder }) {
+// Write the full report (generation 1, NOT the Slack summary) to
+// ideas/<id>/find/<stamp>.md and append a one-line entry to
+// ideas/<id>/find/index.md (the index is what every project thread sees
+// -- readOriginContext loads it). Returns { relPath, absPath, stamp }.
+function writeFindReport(id, { shortTopic, rawTrim, queries, fullReport, blurbSource, sources, founder }) {
 	const dir = path.join(IDEAS_DIR, id, "find");
 	fs.mkdirSync(dir, { recursive: true });
 	const stamp = findStamp();
@@ -180,9 +224,7 @@ function writeFindReport(id, { shortTopic, rawTrim, queries, summary, sources, f
 		rawTrim && rawTrim !== shortTopic ? `- **Asked:** ${rawTrim}` : null,
 		`- **Queries:** ${queries.map((q) => `\`${q}\``).join(" · ")}`,
 		"",
-		"## Summary",
-		"",
-		summary,
+		fullReport,
 		"",
 		"## Sources scanned",
 		"",
@@ -194,7 +236,7 @@ function writeFindReport(id, { shortTopic, rawTrim, queries, summary, sources, f
 	fs.writeFileSync(path.join(dir, `${stamp}.md`), md, "utf8");
 
 	// Index: one line per report, newest last.
-	const blurb = summary.replace(/\s+/g, " ").slice(0, 180);
+	const blurb = String(blurbSource || fullReport).replace(/\s+/g, " ").slice(0, 180);
 	const indexLine = `- **${stamp}** — ${shortTopic}\n  ${blurb}${blurb.length >= 180 ? "…" : ""}  \n  → \`ideas/${id}/${rel}\`\n`;
 	const indexPath = path.join(dir, "index.md");
 	if (!fs.existsSync(indexPath)) {
@@ -205,17 +247,18 @@ function writeFindReport(id, { shortTopic, rawTrim, queries, summary, sources, f
 	return { relPath: `ideas/${id}/${rel}`, absPath: path.join(dir, `${stamp}.md`), stamp };
 }
 
-// The Slack message that accompanies the attached report -- a rundown
-// that fits Slack's block limit.
-function findRundown({ shortTopic, summary, sources, relPath, broad }) {
-	const head = `*🔎 Surface search${broad ? " (broad)" : ""}:* ${shortTopic}\n📄 Full report saved to \`${relPath}\`\n\n`;
+// The Slack message that accompanies the attached report. `rundown` is
+// generation 2 -- already short (a summary OF the full report). We only
+// hard-cap as a last resort; it should already fit.
+function findRundown({ shortTopic, rundown, sources, relPath, broad }) {
+	const head = `*🔎 Surface search${broad ? " (broad)" : ""}:* ${shortTopic}\n📄 Full report saved to \`${relPath}\` (attached)\n\n`;
 	const src = sources.length
 		? `\n\n_Top sources:_ ${sources.slice(0, 5).map((s) => `<${s.url}|${(s.title || s.url).slice(0, 40)}>`).join(" · ")}`
 		: "";
 	const room = 2700 - head.length - src.length - NOT_EVIDENCE_FOOTER.length;
-	let rundown = summary;
-	if (rundown.length > room) rundown = `${rundown.slice(0, Math.max(200, room - 20))}\n\n_…full report attached._`;
-	return head + rundown + src + NOT_EVIDENCE_FOOTER;
+	let text = String(rundown || "").trim();
+	if (text.length > room) text = `${text.slice(0, Math.max(200, room - 20))}\n\n_…see the attached report._`;
+	return head + text + src + NOT_EVIDENCE_FOOTER;
 }
 
 async function handleFindCommand({ command, ack, client }) {
@@ -263,11 +306,16 @@ async function handleFindCommand({ command, ack, client }) {
 		let posted;
 		let reportRel = null;
 		if (project) {
+			// The FILE gets the full report (generation 1). If runFind
+			// somehow produced no fullReport (non-broad path), fall back to
+			// the rundown so the file is never empty -- but broad always
+			// makes one.
 			const rep = writeFindReport(project.id, {
 				shortTopic: r.shortTopic,
 				rawTrim: r.rawTrim,
 				queries: r.queries,
-				summary: r.summary,
+				fullReport: r.fullReport || r.rundown || r.body,
+				blurbSource: r.rundown,
 				sources: r.sources,
 				founder,
 			});
@@ -278,7 +326,9 @@ async function handleFindCommand({ command, ack, client }) {
 				(why) => console.error(`git commit/push failed for ${project.id} find report: ${why}`),
 			);
 
-			const rundown = findRundown({ shortTopic: r.shortTopic, summary: r.summary, sources: r.sources, relPath: rep.relPath, broad });
+			// The SLACK MESSAGE gets the rundown (generation 2) -- never
+			// the file's source.
+			const rundown = findRundown({ shortTopic: r.shortTopic, rundown: r.rundown, sources: r.sources, relPath: rep.relPath, broad });
 			posted = await postResult(client, {
 				channel: dest,
 				...(threadTs ? { thread_ts: threadTs } : {}),
@@ -300,7 +350,7 @@ async function handleFindCommand({ command, ack, client }) {
 
 			if (session) {
 				addTurn(session, { role: "user", text: `/find ${topic}`, userId: command.user_id, kind: "command" });
-				addTurn(session, { role: "assistant", text: `Surface-search report written to \`${rep.relPath}\` (referenceable from any thread). ${r.summary.replace(/\s+/g, " ").slice(0, 400)}`, kind: "command" });
+				addTurn(session, { role: "assistant", text: `Surface-search report written to \`${rep.relPath}\` (referenceable from any thread). ${String(r.rundown || "").replace(/\s+/g, " ").slice(0, 400)}`, kind: "command" });
 			}
 		} else {
 			// #chats: no project to store a report in -> capped inline.
