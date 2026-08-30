@@ -380,11 +380,7 @@ async function handleDiffDecision({ action, body, client }) {
 	const pending = readPendingDiff(kind, id, diffId);
 
 	if (!pending) {
-		await client.chat.postMessage({
-			channel: body.channel?.id || body.user.id,
-			text: "That diff is no longer pending (already decided, or expired).",
-		});
-		return;
+		return { outcomeText: "_No longer pending (already decided, or expired)._" };
 	}
 
 	const targetPath =
@@ -414,10 +410,9 @@ async function handleDiffDecision({ action, body, client }) {
 		}),
 	);
 
-	await client.chat.postMessage({
-		channel: body.channel?.id || body.user.id,
-		text: approved ? `Applied to \`${relPath}\`.` : `Rejected. \`${relPath}\` unchanged.`,
-	});
+	return {
+		outcomeText: approved ? `✅ Applied to \`${relPath}\`` : `✗ Rejected, \`${relPath}\` unchanged`,
+	};
 }
 
 module.exports = {

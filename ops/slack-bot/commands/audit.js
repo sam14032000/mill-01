@@ -32,6 +32,15 @@ const STAGE = "audit";
 const SYSTEM_PROMPT = [
 	"Audit this assumption against the research provided. You are a gate, not an advisor.",
 	"",
+	"You are entered on request, not triggered as a blocking gate (Change 4) -- you rule on wherever this idea",
+	"actually is, with whatever evidence exists, including none. Thin or absent evidence is itself part of the",
+	"verdict (evidence_basis: \"none\" is a valid, expected answer, not a refusal) -- say so plainly rather than",
+	"declining to rule.",
+	"",
+	"An audit-reference document may be included below: a compressed, attributed record of reasoning across every",
+	"mode (brainstorm, product, engineering, proto). Treat claims tagged [FOUNDER BELIEF] as belief, not evidence --",
+	"only [SOURCE: research-<stamp>] claims and graded field notes count as evidence for evidence_basis.",
+	"",
 	"CLASSIFY the field evidence yourself from the raw founder notes in the report. Do NOT accept the founder's own characterisation of it. Grade it into `evidence_basis`:",
 	"  • `none` — no research has run / no usable evidence",
 	"  • `web-only` — published sources only, no field evidence",
@@ -159,8 +168,16 @@ const SCHEMA_INSTRUCTION = `Return exactly one JSON object with these fields and
   "resembles_killed_idea": the id (string) of a previously-killed idea this assumption is materially the same as, otherwise null
 }`;
 
-async function runAudit({ assumption, researchMd, fieldNotesMd, outcomesMd, graveyardDigest }) {
+async function runAudit({ assumption, researchMd, fieldNotesMd, outcomesMd, graveyardDigest, auditReferenceMd }) {
 	const parts = [`Assumption:\n${assumption}`, `Research report:\n${researchMd}`];
+	// Change 4: the compressed audit-reference doc -- attributed
+	// transcription of reasoning across every mode, never the raw thread
+	// (D-28 unchanged). This is what lets the auditor see engineering
+	// discussion, product tradeoffs, and brainstorm claims it would
+	// otherwise never see under artifact-only scoping.
+	if (auditReferenceMd && auditReferenceMd.trim()) {
+		parts.push(`Audit reference (compressed record of reasoning across every mode, attributed by source -- NOT the raw thread):\n${auditReferenceMd}`);
+	}
 	// I1: the raw field notes, verbatim, for the model to grade itself.
 	if (fieldNotesMd && fieldNotesMd.trim()) {
 		parts.push(`Raw field notes (grade these — behaviour vs intent vs commitment):\n${fieldNotesMd}`);
@@ -259,60 +276,36 @@ async function handleAuditCommand({ command, ack, client }) {
 		return;
 	}
 
-	const research = readLatestResearch(id);
+	let research = readLatestResearch(id);
 	const ideaState = readState(id);
 	const ideaFounder = ideaState?.founder;
 
-	// No research at all yet.
-	if (!research) {
-		await postResult(client, {
-			channel: researchChannel,
-			...(auditThreadTs ? { thread_ts: auditThreadTs } : {}),
-			text: `\`/audit\` refuses to rule on \`${id}\`: no research has run. Use \`/test ${id}\` first.`,
-		});
-		emit(
-			buildEvalEvent({
-				stage: STAGE,
-				model: MODEL,
-				founder: invoker,
-				ideaId: id,
-				status: "refused",
-				reasonCode: "no_research",
-			}),
-		);
-		return;
-	}
-
+	// Change 4: "Audit is entered, not triggered." It is no longer a gate
+	// that refuses to run without research -- it rules on wherever the
+	// idea is, with whatever evidence exists. Thin or absent research
+	// evidence is itself part of the verdict (evidence_basis: "none"),
+	// not a reason to withhold one. C-07/enforceEvidenceGate below still
+	// caps "none" at narrow, same as web-only and field-intent -- this
+	// change removes the refusal, not the evidence bar.
+	//
 	// research_stub missing is treated the same as research_stub: true --
 	// every report in this deployment predates Part 11 (GPT Researcher),
 	// so absence of the flag never means real research happened.
-	if (research.json.research_stub !== false) {
-		await postResult(client, {
-			channel: researchChannel,
-			thread_ts: auditThreadTs || research.json.slack_thread_ts,
-			text: `\`/audit\` refuses to rule on \`${id}\`: no research has run — the report on file is a stub (Part 11's research pipeline isn't built). No verdict.`,
-		});
-		emit(
-			buildEvalEvent({
-				stage: STAGE,
-				model: MODEL,
-				founder: invoker,
-				ideaId: id,
-				status: "refused",
-				reasonCode: "research_stub",
-			}),
-		);
-		return;
+	const noUsableResearch = !research || research.json.research_stub !== false;
+	if (noUsableResearch) {
+		research = { md: "(no research has run for this idea, or the report on file is a stub)", json: {} };
 	}
 
 	try {
 		const assumption = readAssumption(id);
+		const { readReference } = require("../audit-reference");
 		const { parsed, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runAudit({
 			assumption,
 			researchMd: research.md,
 			fieldNotesMd: readFieldNotes(id),
 			outcomesMd: readOutcomes(id),
 			graveyardDigest: readGraveyardDigest(),
+			auditReferenceMd: readReference(id),
 		});
 
 		if (!parsed) {

@@ -167,7 +167,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 	const seedPost = await client.chat
 		.postMessage({
 			channel: project.channelId,
-			thread_ts: project.threads.brainstorm,
+			thread_ts: project.threads.project,
 			text:
 				`*Seeded from a chat by ${founder}.*\n\n${summary}\n\n${assumptionLine}\n\n` +
 				`Full origin chat: <https://slack.com/app_redirect?channel=${session.channel}&message_ts=${session.threadTs}|jump to the thread> · transcript at \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,

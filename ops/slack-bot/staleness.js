@@ -50,7 +50,7 @@ async function sweepStaleIdeas(client, { includeTestIdeas = false } = {}) {
 		if (threshold == null) continue;
 
 		const channel = st.channel_id;
-		const threadTs = st.threads?.brainstorm || st.threads?.research;
+		const threadTs = st.threads?.project;
 		const ageDays = Math.floor(daysSince(st.updated_at || st.created_at));
 		const text =
 			`\`${id}\` has been at \`${st.state}\` for ${ageDays} days.\n` +

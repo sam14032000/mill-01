@@ -1,0 +1,84 @@
+"use strict";
+
+// Change 1 (docs/build-prompt-modes.md): mode is persisted in
+// state.json, displayed in-thread on every switch, and changed by
+// command (`@Mill mode <name>`) or button (`mode_switch` action).
+//
+// Modes are sequential in dependency (each persona's input document is
+// the previous mode's output) but not in gating -- switching to any mode
+// is always allowed. A missing input document is Change 3's
+// generate-or-switch offer, never a hard stop here.
+
+const { MODE_ORDER, personaFor } = require("./personas");
+const { readState, updateState } = require("./ideas");
+const { modeBannerText, modeSwitchBlocks } = require("./project-channel");
+const { checkMissingInput, missingDocBlocks, checkStale, staleDocBlocks } = require("./mode-docflow");
+
+const SWITCHABLE_MODES = MODE_ORDER; // brainstorm, product, engineering, proto, audit
+
+function isValidMode(mode) {
+	return SWITCHABLE_MODES.includes(mode);
+}
+
+// Returns { ok, mode?, reason? }. Never throws -- callers post the
+// outcome themselves (buttons resolve through button-resolve.js; the
+// `@Mill mode` command posts plainly).
+async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
+	if (!isValidMode(mode)) {
+		return { ok: false, reason: `unknown mode "${mode}" — one of: ${SWITCHABLE_MODES.join(", ")}` };
+	}
+	const state = readState(id);
+	if (!state) return { ok: false, reason: `no such idea \`${id}\`` };
+	if (state.state === "killed") return { ok: false, reason: `\`${id}\` is killed — nothing to switch` };
+
+	updateState(id, { mode });
+
+	const bannerChannel = channel || state.channel_id;
+	const bannerThread = threadTs || state.threads?.project;
+	if (client && bannerChannel) {
+		const text = modeBannerText(mode, { byFounder });
+		await client.chat
+			.postMessage({
+				channel: bannerChannel,
+				thread_ts: bannerThread,
+				text,
+				blocks: [{ type: "section", text: { type: "mrkdwn", text } }, ...modeSwitchBlocks(id, mode)],
+			})
+			.catch((e) => console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`));
+	}
+
+	// Refresh the pinned state card so its "mode: x" line and Next-step
+	// text (state-card.js) reflect the switch immediately, not on the
+	// next unrelated transition.
+	try {
+		const { upsertStateCard } = require("./state-card");
+		await upsertStateCard(client, id);
+	} catch (e) {
+		console.error(`mode-switch: state card refresh failed for ${id}: ${e.message}`);
+	}
+
+	// Change 3: entering a mode whose input document doesn't exist offers
+	// generate-or-switch instead of proceeding silently. Checked ahead of
+	// staleness -- a document that doesn't exist can't be stale.
+	let docOffer = null;
+	const missing = checkMissingInput(id, mode);
+	if (missing && client && bannerChannel) {
+		const { text, blocks } = missingDocBlocks(id, missing);
+		await client.chat.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text, blocks }).catch(() => {});
+		docOffer = { kind: "missing", ...missing };
+	} else if (client && bannerChannel) {
+		const stale = await checkStale(id, mode).catch((e) => {
+			console.error(`mode-switch: staleness check failed for ${id}/${mode}: ${e.message}`);
+			return null;
+		});
+		if (stale && stale.stale) {
+			const { text, blocks } = staleDocBlocks(id, mode, stale);
+			await client.chat.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text, blocks }).catch(() => {});
+			docOffer = { kind: "stale", mode, report: stale };
+		}
+	}
+
+	return { ok: true, mode, persona: personaFor(mode), docOffer };
+}
+
+module.exports = { switchMode, isValidMode, SWITCHABLE_MODES };

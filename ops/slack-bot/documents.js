@@ -157,7 +157,10 @@ async function handleProjectUpload({ message, client }) {
 	if (!project) return false; // 17: project channels only
 
 	const uploader = founderForUserId(message.user) || "unknown";
-	const dest = { project, channel: message.channel, stage: "documents", threadTs: project.threads?.documents };
+	// Change 1: uploads land in the single project thread, attached as
+	// source material for whatever mode is currently active (Change 2's
+	// feeding rule) -- there is no separate Documents thread anymore.
+	const dest = { project, channel: message.channel, stage: "project", threadTs: project.threads?.project };
 	await ensureStageThread(client, dest);
 	const reply = (text) =>
 		client.chat

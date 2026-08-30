@@ -29,7 +29,8 @@ const { commitAndPush } = require("./git");
 let pinScopeWarned = false;
 
 // What the founder should do next, from the idea's state. Phrased for
-// threads (@Mill <cmd>), since that's how commands run inside a project.
+// the single project thread (Change 1) -- `@Mill mode <name>` switches
+// mode, `@Mill <cmd>` runs a command, both land in the same thread now.
 function nextStep(state) {
 	const s = state.state;
 	const touches = state.touch_count || 0;
@@ -39,16 +40,16 @@ function nextStep(state) {
 		case "prototyping":
 			return touches >= 5
 				? "touch cap reached — decide whether you're building this (a different budget), or kill it"
-				: `iterate in Prototype (\`@Mill proto\`, touch ${touches}/5), or re-audit with new evidence`;
+				: `iterate (\`@Mill proto\`, touch ${touches}/5, switch to Proto mode), or re-audit with new evidence`;
 		case "audited":
-			return "prototype it — `@Mill proto <assumption>` in Prototype, or sharpen the assumption and re-test";
+			return "prototype it — switch to Proto mode and `@Mill proto <assumption>`, or sharpen the assumption and re-test";
 		case "researched":
-			return "run `@Mill audit` in the Audit thread";
+			return "switch to Audit mode and ask for the verdict when ready";
 		case "open":
 		default:
-			if (state.assumption || state.has_assumption) return "run `@Mill test` in the Research thread";
-			if (state.assumption_blocked_on) return `pin down in Brainstorm: ${state.assumption_blocked_on} — then \`@Mill attack\``;
-			return "run `@Mill attack` in the Brainstorm thread to set a falsifiable assumption";
+			if (state.assumption || state.has_assumption) return "run `@Mill test`";
+			if (state.assumption_blocked_on) return `pin down: ${state.assumption_blocked_on} — then \`@Mill attack\``;
+			return "run `@Mill attack` (Brainstorm mode) to set a falsifiable assumption";
 	}
 }
 
@@ -60,7 +61,7 @@ function assumptionLine(state, assumption) {
 
 function cardText(state, { assumption, audit, permalink }) {
 	const lines = [
-		`📍 *Idea \`${state.id}\`* · *${state.state}*${state.founder ? ` · ${state.founder}` : ""}`,
+		`📍 *Idea \`${state.id}\`* · *${state.state}*${state.founder ? ` · ${state.founder}` : ""}${state.mode ? ` · mode: ${state.mode}` : ""}`,
 		assumptionLine(state, assumption),
 	];
 	if (audit) {

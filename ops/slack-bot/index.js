@@ -29,13 +29,15 @@ const { dispatchCommand } = require("./command-shim");
 const { promoteChat } = require("./promotion");
 const { handleProjectUpload } = require("./documents");
 const mountMod = require("./mount");
-const { readState } = require("./ideas");
+const { readState, findIdeaByChannel } = require("./ideas");
+const { switchMode } = require("./mode-switch");
 const { startStalenessSweep, killStale } = require("./staleness");
 const { runWeeklyProfileEvolution, handleDiffDecision } = require("./profile-evolution");
 const { startWeeklyScheduler } = require("./weekly-scheduler");
 const { startNightlyScheduler } = require("./nightly-capture");
 const { startSocketHealth } = require("./socket-health");
 const { wrapClientFormatting } = require("./mrkdwn");
+const buttonResolve = require("./button-resolve");
 
 const REQUIRED_ENV = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"];
 for (const key of REQUIRED_ENV) {
@@ -136,46 +138,61 @@ function downloadFile(url, destPath) {
 // D-30: never auto-applied -- these are the only two entry points that
 // write a model-proposed profile.md/dynamics.md change, and both
 // require an explicit human button click to reach them at all.
+async function resolveDiffTap({ action, body, client }) {
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const { outcomeText } = await handleDiffDecision({ action, body, client });
+		await buttonResolve.resolveMessage({ client, body, outcomeText });
+	} catch (err) {
+		console.error(`${action.action_id} failed:`, err);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+}
 app.action("profile_diff_approve", async ({ ack, action, body, client }) => {
 	await ack();
-	await handleDiffDecision({ action, body, client }).catch((err) =>
-		console.error("profile_diff_approve failed:", err),
-	);
+	await resolveDiffTap({ action, body, client });
 });
 app.action("profile_diff_reject", async ({ ack, action, body, client }) => {
 	await ack();
-	await handleDiffDecision({ action, body, client }).catch((err) =>
-		console.error("profile_diff_reject failed:", err),
-	);
+	await resolveDiffTap({ action, body, client });
 });
 
 // "Start a project from this idea" (build-guide-projects Part 15). The
 // button's value is the chat session's thread_ts.
 app.action(PROMOTE_ACTION_ID, async ({ ack, body, client }) => {
 	await ack();
-	// value is the chat session's thread_ts. On the /chat root message the
-	// value can't be known at post time, so fall back to the message's own
-	// ts / thread_ts from the interaction payload.
-	const raw = body.actions?.[0]?.value;
-	const fromMsg = body.message?.thread_ts || body.message?.ts || body.container?.message_ts;
-	const threadTs = raw && raw !== "PENDING" ? raw : fromMsg;
-	const session = chatSession.getSession(threadTs);
-	const channel = body.channel?.id;
-	if (!session) {
-		if (channel) {
-			await client.chat
-				.postMessage({
-					channel,
-					thread_ts: threadTs,
-					text: "_Can't promote — I've lost the state for this chat (a restart, or it was already promoted). Start a fresh `/chat` if you need to._",
-				})
-				.catch(() => {});
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		// value is the chat session's thread_ts. On the /chat root message the
+		// value can't be known at post time, so fall back to the message's own
+		// ts / thread_ts from the interaction payload.
+		const raw = body.actions?.[0]?.value;
+		const fromMsg = body.message?.thread_ts || body.message?.ts || body.container?.message_ts;
+		const threadTs = raw && raw !== "PENDING" ? raw : fromMsg;
+		const session = chatSession.getSession(threadTs);
+		const channel = body.channel?.id;
+		if (!session) {
+			await buttonResolve.resolveMessage({
+				client,
+				body,
+				outcomeText: "⚠️ Can't promote — lost the state for this chat (a restart, or already promoted)",
+			});
+			return;
 		}
-		return;
+		const result = await promoteChat({ session, client, triggeredByUserId: body.user?.id });
+		await buttonResolve.resolveMessage({
+			client,
+			body,
+			outcomeText: result?.ok ? `✅ Promoted to \`${result.id}\`` : `⚠️ Promotion failed (${result?.reason || "unknown"})`,
+		});
+	} catch (err) {
+		console.error("promote_chat action failed:", err);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Promotion failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
 	}
-	await promoteChat({ session, client, triggeredByUserId: body.user?.id }).catch((err) =>
-		console.error("promote_chat action failed:", err),
-	);
 });
 
 // --- Prototype mount slot (Part 18.5) -------------------------------
@@ -184,28 +201,53 @@ function mountCtx(body, id) {
 	return {
 		client: app.client,
 		channel: body.channel?.id || st?.channel_id,
-		threadTs: st?.threads?.prototype,
+		threadTs: st?.threads?.project,
 	};
 }
-app.action("proto_mount", async ({ ack, body }) => {
+app.action("proto_mount", async ({ ack, body, client }) => {
 	await ack();
-	const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
-	const byUserId = body.user?.id;
-	const byFounder = founderForUserId(byUserId);
-	if (!byFounder || !id) return;
-	await mountMod
-		.mount({ id, touchN: Number(touchN), byFounder, minutes: Number(min), ...mountCtx(body, id) })
-		.catch((e) => console.error("proto_mount failed:", e));
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
+		const byUserId = body.user?.id;
+		const byFounder = founderForUserId(byUserId);
+		if (!byFounder || !id) return;
+		await mountMod.mount({ id, touchN: Number(touchN), byFounder, minutes: Number(min), ...mountCtx(body, id) });
+		await buttonResolve.resolveMessage({ client, body, outcomeText: `▶️ Mount requested by ${byFounder} — see below` });
+	} catch (e) {
+		console.error("proto_mount failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Mount failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
 });
-app.action("proto_dismount", async ({ ack, body }) => {
+app.action("proto_dismount", async ({ ack, body, client }) => {
 	await ack();
-	const id = body.actions?.[0]?.value;
-	if (id) await mountMod.dismount({ id, reason: "manual", byUserId: body.user?.id, ...mountCtx(body, id) }).catch((e) => console.error("proto_dismount failed:", e));
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const id = body.actions?.[0]?.value;
+		if (id) await mountMod.dismount({ id, reason: "manual", byUserId: body.user?.id, ...mountCtx(body, id) });
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "✅ Dismounted" });
+	} catch (e) {
+		console.error("proto_dismount failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Dismount failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
 });
-app.action("proto_extend", async ({ ack, body }) => {
+app.action("proto_extend", async ({ ack, body, client }) => {
 	await ack();
-	const id = body.actions?.[0]?.value;
-	if (id) await mountMod.extend({ id, ...mountCtx(body, id) }).catch((e) => console.error("proto_extend failed:", e));
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const id = body.actions?.[0]?.value;
+		if (id) await mountMod.extend({ id, ...mountCtx(body, id) });
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "✅ Extended — see below" });
+	} catch (e) {
+		console.error("proto_extend failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Extend failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
 });
 // D-51: `@Mill <cmd> <args>` in a thread runs the command immediately
 // (slash commands don't work in threads; app_mention events do). Goes
@@ -220,7 +262,28 @@ app.event("app_mention", async ({ event, client }) => {
 	const post = (text) =>
 		client.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text }).catch(() => {});
 	if (!parsed) {
-		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`. Or run the slash command from the channel body.");
+		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`, `mode <brainstorm|product|engineering|proto|audit>`. Or run the slash command from the channel body.");
+		return;
+	}
+	// Change 1: mode switching is a control action on the project, not an
+	// idea-lifecycle command -- handled directly rather than through
+	// command-shim's HANDLERS map (dispatchCommand would 404 on "mode").
+	if (parsed.action === "mode") {
+		const project = findIdeaByChannel(event.channel);
+		if (!project) {
+			await post("`mode` only works inside a project channel.");
+			return;
+		}
+		const requested = String(parsed.rest || "").trim().toLowerCase();
+		const result = await switchMode({
+			id: project.id,
+			mode: requested,
+			client,
+			channel: event.channel,
+			threadTs: event.thread_ts || event.ts,
+			byFounder: founder,
+		}).catch((e) => ({ ok: false, reason: e.message }));
+		if (!result.ok) await post(`Can't switch mode: ${result.reason}`);
 		return;
 	}
 	// Bug 1: immediate placeholder the command's result lands in.
@@ -240,26 +303,129 @@ app.event("app_mention", async ({ event, client }) => {
 });
 
 // I4: [Kill it] on a staleness nudge -- always reason `stale`.
-app.action("stale_kill", async ({ ack, body }) => {
+app.action("stale_kill", async ({ ack, body, client }) => {
 	await ack();
-	const id = body.actions?.[0]?.value;
-	if (id) await killStale({ id, client: app.client }).catch((e) => console.error("stale_kill failed:", e));
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const id = body.actions?.[0]?.value;
+		if (id) await killStale({ id, client: app.client });
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "✅ Killed (stale)" });
+	} catch (e) {
+		console.error("stale_kill failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Kill failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
 });
 
-app.action("proto_takeover", async ({ ack, body }) => {
+// Change 1: one-tap mode switch. value is `<id>::<mode>`. Built on
+// button-resolve from the start (Change 5's lesson: a tapped button must
+// visibly resolve), not retrofitted after.
+app.action(/^mode_switch/, async ({ ack, body, client }) => {
 	await ack();
-	const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
-	const byFounder = founderForUserId(body.user?.id);
-	if (!byFounder || !id) return;
-	const held = mountMod.findMountedIdea();
-	if (held) {
-		await mountMod
-			.dismount({ id: held.id, client: app.client, channel: held.channel_id, threadTs: held.threads?.prototype, reason: `taken over by ${byFounder} for \`${id}\`` })
-			.catch((e) => console.error("takeover dismount failed:", e));
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, mode] = String(body.actions?.[0]?.value || "").split("::");
+		const byFounder = founderForUserId(body.user?.id);
+		const result = await switchMode({ id, mode, client, channel: body.channel?.id, threadTs: body.message?.thread_ts, byFounder });
+		await buttonResolve.resolveMessage({
+			client,
+			body,
+			outcomeText: result.ok ? `✅ Switched to *${mode}* — see banner below` : `⚠️ ${result.reason}`,
+		});
+	} catch (e) {
+		console.error("mode_switch failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Mode switch failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
 	}
-	await mountMod
-		.mount({ id, touchN: Number(touchN), byFounder, minutes: Number(min), ...mountCtx(body, id) })
-		.catch((e) => console.error("takeover mount failed:", e));
+});
+
+// Change 3: missing/stale document buttons. All built on button-resolve
+// from the start, same as mode_switch.
+app.action("generate_doc", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, mode] = String(body.actions?.[0]?.value || "").split("::");
+		const st = readState(id);
+		const { generateMissingDoc } = require("./mode-docflow");
+		const result = await generateMissingDoc({
+			id,
+			mode,
+			client,
+			channel: body.channel?.id || st?.channel_id,
+			threadTs: body.message?.thread_ts || st?.threads?.project,
+		});
+		await buttonResolve.resolveMessage({
+			client,
+			body,
+			outcomeText: result.ok ? `✅ Generated — see below` : `⚠️ Couldn't generate (${result.reason})`,
+		});
+	} catch (e) {
+		console.error("generate_doc failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Generate failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+app.action("regenerate_stale", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, mode] = String(body.actions?.[0]?.value || "").split("::");
+		const st = readState(id);
+		const { regenerateStaleSections } = require("./mode-docflow");
+		const result = await regenerateStaleSections({
+			id,
+			mode,
+			client,
+			channel: body.channel?.id || st?.channel_id,
+			threadTs: body.message?.thread_ts || st?.threads?.project,
+		});
+		await buttonResolve.resolveMessage({
+			client,
+			body,
+			outcomeText: result.ok ? `✅ Regenerated stale sections — see below` : `⚠️ ${result.reason}`,
+		});
+	} catch (e) {
+		console.error("regenerate_stale failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Regenerate failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+app.action("stale_ack", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "👍 Left as-is — update it yourself when ready" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+app.action("proto_takeover", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, touchN, min] = String(body.actions?.[0]?.value || "").split("::");
+		const byFounder = founderForUserId(body.user?.id);
+		if (!byFounder || !id) return;
+		const held = mountMod.findMountedIdea();
+		if (held) {
+			await mountMod
+				.dismount({ id: held.id, client: app.client, channel: held.channel_id, threadTs: held.threads?.project, reason: `taken over by ${byFounder} for \`${id}\`` })
+				.catch((e) => console.error("takeover dismount failed:", e));
+		}
+		await mountMod.mount({ id, touchN: Number(touchN), byFounder, minutes: Number(min), ...mountCtx(body, id) });
+		await buttonResolve.resolveMessage({ client, body, outcomeText: `▶️ Taken over by ${byFounder} — see below` });
+	} catch (e) {
+		console.error("proto_takeover failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Takeover failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
 });
 
 app.message(async ({ message, client }) => {

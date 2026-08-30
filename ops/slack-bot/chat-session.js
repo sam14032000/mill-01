@@ -59,7 +59,7 @@ function readOriginContext(ideaId) {
 	}
 	return parts.join("\n\n---\n\n");
 }
-const { COMMAND_STAGE, repostAnchors } = require("./project-channel");
+const { repostAnchor } = require("./project-channel");
 const { postResult } = require("./reply");
 
 const STORE_DIR =
@@ -200,6 +200,22 @@ function findLatestSessionForUser(userId, channel) {
 function addTurn(session, { role, text, userId, ts, kind = null }) {
 	session.turns.push({ role, text, userId: userId || null, ts: ts || null, ...(kind ? { kind } : {}) });
 	persist(session);
+
+	// Change 4: compress every N turns, across every mode, into
+	// audit-reference.md -- the only place besides research reports the
+	// audit tool is allowed to read. Fire-and-forget: a compression
+	// failure must never block the turn that triggered it (a founder
+	// mid-conversation shouldn't stall on it), and it's caught/logged
+	// inside maybeCompress itself.
+	if (session.kind === "project" && session.ideaId) {
+		const { readState } = require("./ideas");
+		const { maybeCompress } = require("./audit-reference");
+		const st = readState(session.ideaId);
+		maybeCompress(session.ideaId, st?.mode || "brainstorm", session.turns).catch((e) =>
+			console.error(`addTurn: compression trigger failed for ${session.ideaId}: ${e.message}`),
+		);
+	}
+
 	return session;
 }
 
@@ -395,20 +411,20 @@ function commandDestination(command) {
 		};
 	}
 
-	// Project channel (Part 16.3): every command posts into its stage
-	// thread, keyed on thread_ts. If the stage thread_ts is missing/stale
-	// the caller (postCommandResult / ensureStageThread) reposts anchors
-	// rather than ever posting to channel root.
+	// Project channel (Change 1, docs/build-prompt-modes.md): every
+	// command posts into the single project thread, keyed on thread_ts --
+	// D-47's five stage threads are gone. If that thread_ts is missing/
+	// stale the caller (postCommandResult / ensureStageThread) reposts the
+	// anchor rather than ever posting to channel root.
 	const project = command.channel_id ? findIdeaByChannel(command.channel_id) : null;
 	if (project) {
-		const stage = COMMAND_STAGE[command.command] || "brainstorm";
 		return {
 			channel: command.channel_id,
-			threadTs: project.threads ? project.threads[stage] : undefined,
+			threadTs: project.threads ? project.threads.project : undefined,
 			session: null,
 			inChat: false,
 			project,
-			stage,
+			stage: "project",
 		};
 	}
 
@@ -425,10 +441,11 @@ function commandDestination(command) {
 // post to channel root). Mutates `dest.threadTs` and returns it.
 async function ensureStageThread(client, dest) {
 	if (!dest.project || dest.threadTs) return dest.threadTs;
-	const fresh = await repostAnchors({
+	const fresh = await repostAnchor({
 		client,
 		channel: dest.channel,
 		assumption: dest.project.assumption,
+		id: dest.project.id,
 	});
 	try {
 		updateState(dest.project.id, { threads: fresh });
@@ -436,7 +453,7 @@ async function ensureStageThread(client, dest) {
 		console.error(`ensureStageThread: state update failed for ${dest.project.id}: ${err.message}`);
 	}
 	dest.project.threads = fresh;
-	dest.threadTs = fresh[dest.stage] || fresh.brainstorm;
+	dest.threadTs = fresh.project;
 	return dest.threadTs;
 }
 

@@ -45,7 +45,7 @@ async function handleSpinoffCommand({ command, ack, client }) {
 		child = await createProjectChannel({ id, sourceText: ideaText, assumption: null, client });
 	} catch (err) {
 		await client.chat
-			.postMessage({ channel: parent.channel_id, thread_ts: parent.threads?.brainstorm, text: `\`/spinoff\` failed: couldn't create the child channel (${err?.data?.error || err.message}). Nothing created.` })
+			.postMessage({ channel: parent.channel_id, thread_ts: parent.threads?.project, text: `\`/spinoff\` failed: couldn't create the child channel (${err?.data?.error || err.message}). Nothing created.` })
 			.catch(() => {});
 		return;
 	}
@@ -75,7 +75,7 @@ async function handleSpinoffCommand({ command, ack, client }) {
 	await ensureStageThread(client, pdest);
 	await postResult(client, { channel: parent.channel_id, thread_ts: pdest.threadTs, text: `🌱 Spun off <#${child.channelId}> (\`${id}\`) — ${ideaText}` }).catch(() => {});
 	const childSeed = await client.chat
-		.postMessage({ channel: child.channelId, thread_ts: child.threads.brainstorm, text: `Child of <#${parent.channel_id}> (\`${parent.id}\`). Run \`/attack\` here to set an assumption, then \`/test\`.` })
+		.postMessage({ channel: child.channelId, thread_ts: child.threads.project, text: `Child of <#${parent.channel_id}> (\`${parent.id}\`). Run \`/attack\` here to set an assumption, then \`/test\`.` })
 		.catch(() => null);
 	// D-52: pinned state card for the new child project.
 	await upsertStateCard(client, id, { latestTs: childSeed?.ts, latestChannel: child.channelId });

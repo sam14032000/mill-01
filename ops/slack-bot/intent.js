@@ -28,6 +28,10 @@ const MENTION_ALIASES = {
 	cross: "cross", blindspot: "blindspot", themes: "themes", theme: "themes",
 	test: "test", research: "test", audit: "audit", gate: "audit",
 	proto: "proto", prototype: "proto", spinoff: "spinoff", "spin-off": "spinoff",
+	// Change 1: mode is a control action, not an idea-lifecycle command --
+	// handled directly in index.js rather than through command-shim's
+	// HANDLERS map.
+	mode: "mode", switch: "mode",
 };
 function parseMention(textAfterMention) {
 	const m = String(textAfterMention || "").trim().match(/^(\S+)\s*([\s\S]*)$/);

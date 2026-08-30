@@ -134,7 +134,11 @@ function promoteIdea({ id, founder, topic, assumption, tooVagueDetail = null, or
 		// what's still missing instead of a generic "run /attack".
 		assumption_blocked_on: assumption ? null : tooVagueDetail || null,
 		channel_id: channelId,
-		threads, // { brainstorm, research, audit, prototype, documents }
+		threads, // { project: ts } -- one thread per project (Change 1, docs/build-prompt-modes.md)
+		// Change 1: every project starts in brainstorm mode. Not skippable
+		// as an entry point -- there is no persona for a mode that hasn't
+		// run yet, so nothing downstream has anything to feed from.
+		mode: "brainstorm",
 		parent: null,
 		children: [],
 		touch_count: 0,

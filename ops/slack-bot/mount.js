@@ -306,10 +306,10 @@ async function reconcileOnStartup(client) {
 		const expired = new Date(st.mount.expires_at).getTime() <= Date.now();
 		if (expired) {
 			console.log(`mount: reconcile -- ${st.id} was mounted but its window elapsed; dismounting`);
-			await dismount({ id: st.id, client, channel: st.channel_id, threadTs: st.threads?.prototype, reason: "auto (window elapsed while bot was down)" });
+			await dismount({ id: st.id, client, channel: st.channel_id, threadTs: st.threads?.project, reason: "auto (window elapsed while bot was down)" });
 		} else {
 			console.log(`mount: reconcile -- ${st.id} still mounted, re-arming timers`);
-			armTimers({ id: st.id, expiresAt: st.mount.expires_at, client, channel: st.channel_id, threadTs: st.threads?.prototype });
+			armTimers({ id: st.id, expiresAt: st.mount.expires_at, client, channel: st.channel_id, threadTs: st.threads?.project });
 		}
 		return { state: "mounted", id: st.id, running: true, expired };
 	}

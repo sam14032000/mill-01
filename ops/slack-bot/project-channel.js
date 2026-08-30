@@ -1,10 +1,14 @@
 "use strict";
 
-// Project channels (docs/PROJECTS.md "Projects", build-guide-projects
-// Part 16). One channel per promoted idea, `#idea-<id>-<slug>`, with five
-// stage anchor threads. Needs the channels:manage scope.
+// Project channels (docs/PROJECTS.md "Projects"). One channel per
+// promoted idea, `#idea-<id>-<slug>`.
+//
+// Change 1 (docs/build-prompt-modes.md) supersedes D-47's five stage
+// anchor threads with a single project thread and an explicit mode,
+// persisted in state.json. Needs the channels:manage scope.
 
 const { activeFounders, userIdForFounder } = require("./config");
+const { PERSONAS, MODE_ORDER } = require("./personas");
 
 // Slack channel names: lowercase, [a-z0-9-_], <= 80 chars, no leading/
 // trailing separators.
@@ -24,46 +28,50 @@ function channelName(id, sourceText) {
 	return prefix + slugify(sourceText, 80 - prefix.length);
 }
 
-// The five stage anchors (16.2 / PROJECTS.md). Order matters -- stored by
-// key in state.json.
-const STAGE_ANCHORS = [
-	["brainstorm", "🧠 *Brainstorm* — `/think` `/cross` `/blindspot` `/attack`, and just thinking out loud. Reply in this thread."],
-	["research", "🔍 *Research* — `/test`, field evidence, and the reports it produces. Reply in this thread."],
-	["audit", "⚖️ *Audit* — `/audit` verdicts. Reply in this thread."],
-	["prototype", "🔨 *Prototype* — `/proto`, touches, mount/dismount. Reply in this thread."],
-	["documents", "📎 *Documents* — upload files here and I'll keep them with the idea."],
-];
-
-const STAGE_KEYS = STAGE_ANCHORS.map(([k]) => k);
-
-// Which stage thread a command belongs in (16.3).
-const COMMAND_STAGE = {
-	"/think": "brainstorm",
-	"/cross": "brainstorm",
-	"/blindspot": "brainstorm",
-	"/attack": "brainstorm",
-	"/themes": "brainstorm",
-	"/test": "research",
-	"/audit": "audit",
-	"/proto": "prototype",
+const MODE_EMOJI = {
+	brainstorm: "🧠",
+	product: "📋",
+	engineering: "🔧",
+	proto: "🔨",
+	audit: "⚖️",
 };
 
-async function postAnchors(client, channel, assumption) {
-	const threads = {};
+// Modes are sequential in dependency (each persona's input is the
+// previous mode's document) but NOT in gating (Change 1's "modes do not
+// gate each other", amended by the DECISIONS section to make clear the
+// reversal is deliberate: switching is never blocked; a missing input
+// document is Change 3's generate-or-switch offer, not a hard stop).
+function modeBannerText(mode, { byFounder = null } = {}) {
+	const persona = PERSONAS[mode];
+	const emoji = MODE_EMOJI[mode] || "▶️";
+	const who = byFounder ? ` — switched by ${byFounder}` : "";
+	return `${emoji} *Mode: ${persona.label === "Co-founder" ? "Brainstorm" : mode[0].toUpperCase() + mode.slice(1)}* (${persona.label})${who}. Produces: ${persona.outputTitle || "artifacts"}.`;
+}
+
+// Single anchor: one root message the project thread hangs off, plus the
+// initial mode banner. Returns { project: ts } -- the one thread_ts every
+// command and every conversational turn in this project now uses.
+async function postProjectAnchor(client, channel, assumption, id) {
 	const header = assumption
 		? `*Assumption under test:* ${assumption}`
-		: "_No assumption yet — run `/attack` in Brainstorm, then `/test`._";
-	await client.chat.postMessage({ channel, text: header });
-	for (const [key, text] of STAGE_ANCHORS) {
-		const posted = await client.chat.postMessage({ channel, text });
-		threads[key] = posted.ts;
-	}
-	return threads;
+		: "_No assumption yet — brainstorm mode is where one gets set (`@Mill attack`)._";
+	const root = await client.chat.postMessage({ channel, text: header });
+	await client.chat.postMessage({
+		channel,
+		thread_ts: root.ts,
+		text: modeBannerText("brainstorm"),
+		blocks: [
+			{ type: "section", text: { type: "mrkdwn", text: modeBannerText("brainstorm") } },
+			...(id ? modeSwitchBlocks(id, "brainstorm") : []),
+		],
+	});
+	return { project: root.ts };
 }
 
 // Creates the channel, invites every active founder, sets the topic to
-// the assumption, posts the anchors. Throws on any failure -- the caller
-// (promotion) must then create no idea (PROJECTS.md failure table).
+// the assumption, posts the single anchor + starting mode banner. Throws
+// on any failure -- the caller (promotion) must then create no idea
+// (PROJECTS.md failure table).
 async function createProjectChannel({ id, sourceText, assumption, client }) {
 	const name = channelName(id, sourceText);
 
@@ -89,21 +97,49 @@ async function createProjectChannel({ id, sourceText, assumption, client }) {
 			.catch((err) => console.error(`project-channel: setTopic failed: ${err?.data?.error || err}`));
 	}
 
-	const threads = await postAnchors(client, channel, assumption);
+	const threads = await postProjectAnchor(client, channel, assumption, id);
 	return { channelId: channel, name, threads };
 }
 
-// 16.3: if a stage thread_ts is missing or stale, repost all anchors and
-// return the fresh map rather than ever posting to channel root.
-async function repostAnchors({ client, channel, assumption }) {
-	return postAnchors(client, channel, assumption);
+// If the project thread_ts is missing or stale, repost the single anchor
+// and return the fresh map rather than ever posting to channel root.
+async function repostAnchor({ client, channel, assumption, id }) {
+	return postProjectAnchor(client, channel, assumption, id);
+}
+
+// One-tap mode switch row, attached to every mode banner (Change 1:
+// "changed by command or button"). The current mode's button is marked
+// so the row still communicates state even before a tap.
+// Slack requires action_id to be unique WITHIN a block -- found live
+// (invalid_blocks) migrating f05e, where all five buttons shared the
+// plain "mode_switch" action_id in one row. Each button gets its own
+// action_id (mode_switch_<mode>); index.js registers one handler against
+// all of them via a regex match, and every handler reads the mode back
+// out of `value` (`<id>::<mode>`), not the action_id, so routing is
+// unaffected.
+function modeSwitchBlocks(id, currentMode) {
+	return [
+		{
+			type: "actions",
+			block_id: "mode_switch",
+			elements: MODE_ORDER.map((mode) => ({
+				type: "button",
+				action_id: `mode_switch_${mode}`,
+				value: `${id}::${mode}`,
+				text: { type: "plain_text", text: `${MODE_EMOJI[mode] || ""} ${mode === currentMode ? `[${mode}]` : mode}`.trim() },
+				...(mode === currentMode ? { style: "primary" } : {}),
+			})),
+		},
+	];
 }
 
 module.exports = {
 	slugify,
 	channelName,
 	createProjectChannel,
-	repostAnchors,
-	STAGE_KEYS,
-	COMMAND_STAGE,
+	repostAnchor,
+	modeBannerText,
+	modeSwitchBlocks,
+	MODE_EMOJI,
+	MODE_ORDER,
 };
