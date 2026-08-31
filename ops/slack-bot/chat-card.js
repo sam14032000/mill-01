@@ -89,13 +89,14 @@ function modeSelect(id, chatTs, currentMode) {
 	}
 }
 
+// The mode is deliberately NOT repeated in the heading: the select
+// accessory already displays it, and showing the same value twice on one
+// card is noise. The control is the status display.
 function cardText(id, chatTs, chat) {
 	const state = readState(id);
 	const assumption = readAssumption(id) || state?.assumption || null;
-	const { MODE_EMOJI } = require("./project-channel");
-	const emoji = MODE_EMOJI[chat.mode] || "▶️";
 	const lines = [
-		`💬 *${chat.title}* · ${emoji} ${chat.mode}${chat.created_by ? ` · ${chat.created_by}` : ""}`,
+		`💬 *${chat.title}*${chat.created_by ? ` · ${chat.created_by}` : ""}`,
 		assumption ? `*Assumption:* ${assumption}` : "*Assumption:* _not set yet_",
 	];
 	const docs = docsLine(id);
