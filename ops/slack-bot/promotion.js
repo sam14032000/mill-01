@@ -74,6 +74,25 @@ async function summarizeChat(session) {
 // "failed channel creation creates no idea at all" verification -- it
 // throws at the point Part 16's channel creation will sit, before any
 // idea directory is written.
+// Splits a long turn on paragraph, then sentence, then hard boundaries --
+// the same conservative strategy the Slack bridges use (D-39) and the one
+// this bot's other message formatting follows.
+function chunkForSlack(text, max) {
+	if (text.length <= max) return [text];
+	const out = [];
+	let rest = text;
+	while (rest.length > max) {
+		let cut = rest.lastIndexOf("\n\n", max);
+		if (cut < max * 0.5) cut = rest.lastIndexOf("\n", max);
+		if (cut < max * 0.5) cut = rest.lastIndexOf(". ", max);
+		if (cut < max * 0.5) cut = max;
+		out.push(rest.slice(0, cut).trim());
+		rest = rest.slice(cut).trim();
+	}
+	if (rest) out.push(rest);
+	return out;
+}
+
 async function promoteChat({ session, client, triggeredByUserId, _simulateFailure = false }) {
 	const chatsChannel = session.channel;
 	const millChannel = channelId("mill");
@@ -175,20 +194,47 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 		console.error(`promotion: could not open the first chat for ${id}: ${err.message}`);
 	}
 
-	const seedPost = chatTs
-		? await client.chat
-				.postMessage({
-					channel: project.channelId,
-					thread_ts: chatTs,
-					text:
-						`*Seeded from a chat by ${founder}.*\n\n${summary}\n\n` +
-						`Full origin chat: <https://slack.com/app_redirect?channel=${session.channel}&message_ts=${session.threadTs}|jump to the thread> · transcript at \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,
-				})
-				.catch((err) => {
-					console.error(`promotion: chat seed failed: ${err?.data?.error || err.message}`);
-					return null;
-				})
-		: null;
+	// TRANSFER the chat, turn by turn, into the project's first chat
+	// thread. Slack cannot move messages between channels, so "attach"
+	// means replaying the conversation as it read in #chats -- each turn
+	// its own message, in order, attributed -- rather than collapsing it
+	// into a summary. The founder scrolls the project thread and sees the
+	// conversation they actually had; origin-chat.md remains the verbatim
+	// record either way.
+	let seedPost = null;
+	if (chatTs) {
+		seedPost = await client.chat
+			.postMessage({
+				channel: project.channelId,
+				thread_ts: chatTs,
+				text:
+					`_Transferred from a chat by ${founder} — ${session.turns.length} turn${session.turns.length === 1 ? "" : "s"}, replayed below. ` +
+					`Verbatim transcript at \`ideas/${id}/origin-chat.md\`._`,
+			})
+			.catch((err) => {
+				console.error(`promotion: transfer header failed: ${err?.data?.error || err.message}`);
+				return null;
+			});
+
+		let replayed = 0;
+		for (const turn of session.turns) {
+			const body = String(turn.text || "").trim();
+			if (!body) continue;
+			const who = turn.role === "user" ? founder : "Mill";
+			// Slack caps a message at 4000 chars; chunk on paragraph
+			// boundaries so a long turn stays readable instead of truncated.
+			for (const piece of chunkForSlack(body, 3600)) {
+				await client.chat
+					.postMessage({ channel: project.channelId, thread_ts: chatTs, text: `*${who}:*\n${piece}` })
+					.catch((err) => console.error(`promotion: replay failed at turn ${replayed}: ${err?.data?.error || err.message}`));
+				// chat.postMessage is ~1/sec per channel; pace so a long
+				// transcript doesn't get rate-limited midway.
+				await new Promise((r) => setTimeout(r, 350));
+			}
+			replayed += 1;
+		}
+		console.log(`promotion: transferred ${replayed} turn(s) into ${id}`);
+	}
 
 	// 15.3 step 5: announce in #mill-ideas and link the new channel.
 	if (millChannel) {
@@ -204,7 +250,11 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 		.postMessage({
 			channel: chatsChannel,
 			thread_ts: session.threadTs,
-			text: `✅ Promoted to <#${project.channelId}> (\`${id}\`). Full transcript saved. ${assumption ? "The `/attack` assumption carried over." : "Run `/attack` then `/test` in the project."}`,
+			text:
+				`✅ Transferred to <#${project.channelId}> (\`${id}\`) — every turn replayed there, transcript saved. ` +
+				// Slash commands don't work in threads (D-51), so never tell a
+				// founder to run one there.
+				`${assumption ? "The assumption from `/attack` carried over." : "Set an assumption with `@Mill attack` in the project."}`,
 		})
 		.catch(() => {});
 
