@@ -8,7 +8,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { readProfile } = require("../context");
 const { findLatestSessionForUser, addTurn, commandDestination, ensureStageThread } = require("../chat-session");
-const { withPromoteButton } = require("../promote-button");
+const { withPromoteButtonIfChat } = require("../promote-button");
 const { upsertStateCard } = require("../state-card");
 const { composeIdeaInput } = require("../intent");
 const { postResult } = require("../reply");
@@ -156,7 +156,8 @@ async function handleAttackCommand({ command, ack, client }) {
 		const msg = { channel: dest, text };
 		if (threadTs) {
 			msg.thread_ts = threadTs;
-			msg.blocks = withPromoteButton(text, threadTs); // 15.1
+			// Only in #chats -- a project chat is already promoted.
+			msg.blocks = withPromoteButtonIfChat(text, threadTs, dest);
 		}
 		return postResult(client, msg);
 	};

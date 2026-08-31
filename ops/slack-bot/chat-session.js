@@ -23,7 +23,6 @@ const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
 const { readProfile, readCaptures, hasProfile } = require("./context");
 const { channelId } = require("./config");
-const { withPromoteButton } = require("./promote-button");
 const { findIdeaByChannel, updateState, readOriginChat, readIdeaMd, readFindIndex } = require("./ideas");
 
 // A promoted idea's stage threads must see where the chat that spawned

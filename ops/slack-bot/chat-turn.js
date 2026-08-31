@@ -17,7 +17,6 @@ const {
 	getOrCreateStageSession,
 	addTurn,
 } = require("./chat-session");
-const { withPromoteButton } = require("./promote-button");
 const { findIdeaByChannel } = require("./ideas");
 const agent = require("./agent");
 

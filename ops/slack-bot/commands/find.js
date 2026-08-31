@@ -9,7 +9,7 @@ const { emit } = require("../telemetry");
 const { buildEvalEvent } = require("../eval-event");
 const { search } = require("../tavily");
 const { getSession, findLatestSessionForUser, addTurn } = require("../chat-session");
-const { withPromoteButton } = require("../promote-button");
+const { withPromoteButtonIfChat } = require("../promote-button");
 const { isAnaphoric } = require("../intent");
 const { postResult } = require("../reply");
 const { findIdeaByChannel, IDEAS_DIR, nowIso } = require("../ideas");
@@ -333,7 +333,7 @@ async function handleFindCommand({ command, ack, client }) {
 				channel: dest,
 				...(threadTs ? { thread_ts: threadTs } : {}),
 				text: rundown,
-				blocks: threadTs ? withPromoteButton(rundown, threadTs) : undefined,
+				blocks: withPromoteButtonIfChat(rundown, threadTs, dest),
 			});
 
 			// Attach the markdown report to the thread. Needs the
@@ -356,7 +356,7 @@ async function handleFindCommand({ command, ack, client }) {
 			// #chats: no project to store a report in -> capped inline.
 			posted = await postResult(client, {
 				channel: dest,
-				...(threadTs ? { thread_ts: threadTs, blocks: withPromoteButton(r.body, threadTs) } : {}),
+				...(threadTs ? { thread_ts: threadTs, blocks: withPromoteButtonIfChat(r.body, threadTs, dest) } : {}),
 				text: r.body,
 			});
 			if (session) {

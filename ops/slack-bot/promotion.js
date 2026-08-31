@@ -13,7 +13,7 @@ const { commitAndPush } = require("./git");
 const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
 const { fullTranscript, markPromoted } = require("./chat-session");
-const { PROMOTE_ACTION_ID, withPromoteButton } = require("./promote-button");
+const { PROMOTE_ACTION_ID, withPromoteButton, withPromoteButtonIfChat } = require("./promote-button");
 const { createProjectChannel } = require("./project-channel");
 const { upsertStateCard } = require("./state-card");
 
@@ -286,7 +286,9 @@ async function postNeedsProject({ client, channel, threadTs, what }) {
 	const msg = { channel, text };
 	if (threadTs) {
 		msg.thread_ts = threadTs;
-		msg.blocks = withPromoteButton(text, threadTs);
+		// Only reached from #chats today, but routed through the guard so it
+		// stays correct if that ever changes.
+		msg.blocks = withPromoteButtonIfChat(text, threadTs, channel);
 	}
 	await client.chat.postMessage(msg).catch(() => {});
 }

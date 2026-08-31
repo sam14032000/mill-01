@@ -24,7 +24,6 @@ const { buildEvalEvent } = require("./eval-event");
 const { addTurn, buildContextMessages, maybeCompact, sessionMode } = require("./chat-session");
 const { personaFor, parseRefusal } = require("./personas");
 const { callFlash } = require("./llm");
-const { withPromoteButton } = require("./promote-button");
 const { readState, readAssumption, readLatestResearch } = require("./ideas");
 const { toolSpecs, runTool } = require("./tools");
 

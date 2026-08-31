@@ -36,4 +36,24 @@ function withPromoteButton(text, threadTs) {
 	return buildReplyBlocks(text, { promote: true, threadTs });
 }
 
-module.exports = { PROMOTE_ACTION_ID, buildReplyBlocks, withPromoteButton };
+// The promote button turns a #chats session INTO a project. Inside a
+// project channel it is meaningless -- the idea is already promoted --
+// and tapping it can only confuse.
+//
+// Centralised here rather than left to each call site, because leaving it
+// to call sites is exactly how it broke: /find and /attack both attached
+// the button on "any thread that has a threadTs", which is true of every
+// project chat. Same reasoning as the mrkdwn choke point -- one place
+// that cannot be forgotten at a new call site.
+function withPromoteButtonIfChat(text, threadTs, channelId) {
+	if (!threadTs) return undefined;
+	try {
+		const { findIdeaByChannel } = require("./ideas");
+		if (channelId && findIdeaByChannel(channelId)) return undefined; // already a project
+	} catch {
+		/* ideas unavailable: fall through and render the button */
+	}
+	return withPromoteButton(text, threadTs);
+}
+
+module.exports = { PROMOTE_ACTION_ID, buildReplyBlocks, withPromoteButton, withPromoteButtonIfChat };
