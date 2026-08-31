@@ -28,26 +28,44 @@ function eachOutsideInlineCode(seg, fn) {
 		.join("");
 }
 
-function convertSegment(seg) {
-	return eachOutsideInlineCode(seg, (s) => {
-		// Line-level first: headings and bullets are anchored to line start.
-		s = s
-			.split("\n")
-			.map((line) => {
-				// ## Heading  ->  *Heading*   (drop trailing #'s too)
-				const h = line.match(/^(\s{0,3})#{1,6}\s+(.*?)\s*#*\s*$/);
-				if (h) {
-					const body = h[2].trim();
-					return body ? `${h[1]}*${body}*` : h[1];
-				}
-				// "- ", "* ", "+ " bullet  ->  "• "   (keep indent; leave
-				// "**" alone — that's bold, handled below)
-				const b = line.match(/^(\s*)([-*+])\s+(?!\*|[-*+]\s)(.*)$/);
-				if (b) return `${b[1]}• ${b[3]}`;
-				return line;
-			})
-			.join("\n");
+// Line-level transforms (headings, bullets) run on WHOLE LINES, before
+// inline code is split out.
+//
+// Found live on the pinned state card: "*Idea `f05e`* · *open*" rendered
+// as "*Idea `f05e`• · *open*". eachOutsideInlineCode() fragments a line at
+// backticks, so the closing "*" of the bold span began its own segment --
+// and the bullet rule, which anchors on ^, treated that SEGMENT start as a
+// LINE start and rewrote the "*" to a bullet. A segment boundary is not a
+// line boundary.
+//
+// Doing line-level work first is safe: an inline code span cannot contain
+// a newline (the split pattern is `[^`\n]*`), so a real line start is
+// never inside one, and the bullet/heading rules only ever rewrite the
+// leading marker -- never anything that could sit inside backticks.
+function convertLineLevel(seg) {
+	return seg
+		.split("\n")
+		.map((line) => {
+			// ## Heading  ->  *Heading*   (drop trailing #'s too)
+			const h = line.match(/^(\s{0,3})#{1,6}\s+(.*?)\s*#*\s*$/);
+			if (h) {
+				const body = h[2].trim();
+				return body ? `${h[1]}*${body}*` : h[1];
+			}
+			// "- ", "* ", "+ " bullet  ->  "• "   (keep indent; leave
+			// "**" alone — that's bold, handled below)
+			const b = line.match(/^(\s*)([-*+])\s+(?!\*|[-*+]\s)(.*)$/);
+			if (b) return `${b[1]}• ${b[3]}`;
+			return line;
+		})
+		.join("\n");
+}
 
+function convertSegment(seg) {
+	// Line-level first, on intact lines.
+	const lined = convertLineLevel(seg);
+	// Then inline emphasis, with `code` spans protected.
+	return eachOutsideInlineCode(lined, (s) => {
 		// Inline emphasis: **x** / __x__ -> *x*. Non-greedy, must have
 		// content, must not span a newline.
 		s = s.replace(/\*\*(?!\s)([^\n*]+?)(?<!\s)\*\*/g, "*$1*");

@@ -92,7 +92,7 @@ async function summarizeForThread(content) {
 // reply text. Does NOT write the document -- callers decide whether a
 // turn's output is meant to update the mode's document (Change 1) or is
 // just conversation.
-async function runPersonaTurn({ id, mode, threadContext, userText }) {
+async function runPersonaTurn({ id, mode, threadContext, userText, maxTokens = 4096 }) {
 	const persona = personaFor(mode);
 	const inputDoc = readInputDoc(id, mode);
 	const upstream = Object.values(PERSONAS).find((p) => p.outputDoc === persona.inputDoc);
@@ -109,7 +109,7 @@ async function runPersonaTurn({ id, mode, threadContext, userText }) {
 	];
 	const { content: text, usage, costUsd, cacheHit } = await callFlash(messages, {
 		model: MODEL,
-		maxTokens: 4096,
+		maxTokens,
 	});
 	const refusal = parseRefusal(text);
 	return { text, refusal, usage, costUsd, cacheHit };
@@ -121,13 +121,13 @@ async function runPersonaTurn({ id, mode, threadContext, userText }) {
 // *upstream* one (e.g. entering engineering with no product spec offers
 // to generate the product spec, using the product persona, not
 // engineering's).
-async function generateDraft({ id, mode, threadContext }) {
+async function generateDraft({ id, mode, threadContext, maxTokens = 4096 }) {
 	const persona = personaFor(mode);
 	const directive =
 		`Write the full ${persona.outputTitle} now, as a complete document -- not a question, not a plan to ` +
 		"write it later. Base it on everything above (the input document, if any, and the thread). If there is " +
 		"truly not enough to go on, use the REFUSAL:/UNBLOCK: contract instead of guessing.";
-	const result = await runPersonaTurn({ id, mode, threadContext, userText: directive });
+	const result = await runPersonaTurn({ id, mode, threadContext, userText: directive, maxTokens });
 	return result;
 }
 

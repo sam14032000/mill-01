@@ -23,7 +23,32 @@ function isValidMode(mode) {
 // Returns { ok, mode?, reason? }. Never throws -- callers post the
 // outcome themselves (buttons resolve through button-resolve.js; the
 // `@Mill mode` command posts plainly).
-async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
+// Retires the previous mode banner's button row so only ONE live row
+// exists in the thread at a time.
+//
+// The button path already resolves the tapped message via
+// button-resolve, but the command path (`@Mill mode engineering`) posted
+// a new banner and left every earlier row live and still marking the old
+// mode as current -- so a thread accumulated rows visibly disagreeing
+// about where the project was. `skipTs` is the message the caller is
+// already resolving itself, so a tap doesn't get two outcome lines.
+async function retirePreviousBanner(client, { channel, prevTs, prevMode, newMode, skipTs }) {
+	if (!client || !channel || !prevTs || prevTs === skipTs) return;
+	const text = modeBannerText(prevMode);
+	await client.chat
+		.update({
+			channel,
+			ts: prevTs,
+			text,
+			blocks: [
+				{ type: "section", text: { type: "mrkdwn", text } },
+				{ type: "context", elements: [{ type: "mrkdwn", text: `_superseded — now in *${newMode}* mode_` }] },
+			],
+		})
+		.catch((e) => console.error(`mode-switch: retiring previous banner failed: ${e?.data?.error || e.message}`));
+}
+
+async function switchMode({ id, mode, client, channel, threadTs, byFounder, skipBannerStripTs = null }) {
 	if (!isValidMode(mode)) {
 		return { ok: false, reason: `unknown mode "${mode}" — one of: ${SWITCHABLE_MODES.join(", ")}` };
 	}
@@ -31,20 +56,33 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
 	if (!state) return { ok: false, reason: `no such idea \`${id}\`` };
 	if (state.state === "killed") return { ok: false, reason: `\`${id}\` is killed — nothing to switch` };
 
+	const prevMode = state.mode || "brainstorm";
+	const prevBannerTs = state.mode_banner_ts || null;
 	updateState(id, { mode });
 
 	const bannerChannel = channel || state.channel_id;
 	const bannerThread = threadTs || state.threads?.project;
 	if (client && bannerChannel) {
+		await retirePreviousBanner(client, {
+			channel: bannerChannel,
+			prevTs: prevBannerTs,
+			prevMode,
+			newMode: mode,
+			skipTs: skipBannerStripTs,
+		});
 		const text = modeBannerText(mode, { byFounder });
-		await client.chat
+		const posted = await client.chat
 			.postMessage({
 				channel: bannerChannel,
 				thread_ts: bannerThread,
 				text,
 				blocks: [{ type: "section", text: { type: "mrkdwn", text } }, ...modeSwitchBlocks(id, mode)],
 			})
-			.catch((e) => console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`));
+			.catch((e) => {
+				console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`);
+				return null;
+			});
+		if (posted?.ts) updateState(id, { mode_banner_ts: posted.ts });
 	}
 
 	// Refresh the pinned state card so its "mode: x" line and Next-step

@@ -56,7 +56,7 @@ async function postProjectAnchor(client, channel, assumption, id) {
 		? `*Assumption under test:* ${assumption}`
 		: "_No assumption yet — brainstorm mode is where one gets set (`@Mill attack`)._";
 	const root = await client.chat.postMessage({ channel, text: header });
-	await client.chat.postMessage({
+	const banner = await client.chat.postMessage({
 		channel,
 		thread_ts: root.ts,
 		text: modeBannerText("brainstorm"),
@@ -65,7 +65,9 @@ async function postProjectAnchor(client, channel, assumption, id) {
 			...(id ? modeSwitchBlocks(id, "brainstorm") : []),
 		],
 	});
-	return { project: root.ts };
+	// bannerTs is returned so the caller can record it as mode_banner_ts --
+	// the first switch needs to know which row to retire (mode-switch.js).
+	return { project: root.ts, bannerTs: banner?.ts || null };
 }
 
 // Creates the channel, invites every active founder, sets the topic to
@@ -97,14 +99,17 @@ async function createProjectChannel({ id, sourceText, assumption, client }) {
 			.catch((err) => console.error(`project-channel: setTopic failed: ${err?.data?.error || err}`));
 	}
 
-	const threads = await postProjectAnchor(client, channel, assumption, id);
-	return { channelId: channel, name, threads };
+	// bannerTs is kept OUT of `threads` -- that map is persisted verbatim
+	// into state.json and must contain thread ids only.
+	const { project, bannerTs } = await postProjectAnchor(client, channel, assumption, id);
+	return { channelId: channel, name, threads: { project }, bannerTs };
 }
 
 // If the project thread_ts is missing or stale, repost the single anchor
 // and return the fresh map rather than ever posting to channel root.
 async function repostAnchor({ client, channel, assumption, id }) {
-	return postProjectAnchor(client, channel, assumption, id);
+	const { project } = await postProjectAnchor(client, channel, assumption, id);
+	return { project };
 }
 
 // One-tap mode switch row, attached to every mode banner (Change 1:

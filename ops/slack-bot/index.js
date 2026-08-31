@@ -327,7 +327,16 @@ app.action(/^mode_switch/, async ({ ack, body, client }) => {
 	try {
 		const [id, mode] = String(body.actions?.[0]?.value || "").split("::");
 		const byFounder = founderForUserId(body.user?.id);
-		const result = await switchMode({ id, mode, client, channel: body.channel?.id, threadTs: body.message?.thread_ts, byFounder });
+		// button-resolve already strips the tapped message's row below, so
+		// switchMode must not also retire it (that would double-append an
+		// outcome line to the same message).
+		const result = await switchMode({
+			id, mode, client,
+			channel: body.channel?.id,
+			threadTs: body.message?.thread_ts,
+			byFounder,
+			skipBannerStripTs: body.message?.ts || null,
+		});
 		await buttonResolve.resolveMessage({
 			client,
 			body,
