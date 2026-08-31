@@ -262,12 +262,48 @@ app.event("app_mention", async ({ event, client }) => {
 	const post = (text) =>
 		client.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text }).catch(() => {});
 	if (!parsed) {
-		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`, `mode <brainstorm|product|engineering|proto|audit>`. Or run the slash command from the channel body.");
+		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`, `mode <name>`, `save`. Or run the slash command from the channel body.");
 		return;
 	}
 	// Change 1: mode switching is a control action on the project, not an
 	// idea-lifecycle command -- handled directly rather than through
 	// command-shim's HANDLERS map (dispatchCommand would 404 on "mode").
+	if (parsed.action === "save") {
+		const project = findIdeaByChannel(event.channel);
+		if (!project) {
+			await post("`save` writes the current mode's document — it only works inside a project.");
+			return;
+		}
+		const chatTs = event.thread_ts || null;
+		const { chatMode } = require("./chats");
+		const mode = chatTs ? chatMode(project.id, chatTs) : "brainstorm";
+		const placeholder = await client.chat
+			.postMessage({ channel: event.channel, thread_ts: chatTs, text: `_Writing the ${mode} document…_` })
+			.catch(() => null);
+		try {
+			const { saveModeDocument } = require("./mode-docflow");
+			const { threadContextText } = require("./command-shim");
+			const result = await saveModeDocument({
+				id: project.id, mode, client,
+				channel: event.channel, threadTs: chatTs,
+				threadContext: threadContextText(chatTs, event.channel),
+			});
+			const outcome = result.ok
+				? `_Saved (${result.wordCount} words)._`
+				: result.refusal
+					? `${result.refusal.what}\nUNBLOCK: ${result.refusal.unblock}`
+					: `Couldn't save: ${result.reason}`;
+			if (placeholder) await client.chat.update({ channel: event.channel, ts: placeholder.ts, text: outcome }).catch(() => {});
+			else await post(outcome);
+			// The card's Docs line changes the moment a document exists.
+			const { touchAndRepin } = require("./chat-card");
+			if (chatTs) await touchAndRepin(client, project.id, chatTs).catch(() => {});
+		} catch (e) {
+			console.error("save failed:", e);
+			if (placeholder) await client.chat.update({ channel: event.channel, ts: placeholder.ts, text: `Save failed: ${e.message}` }).catch(() => {});
+		}
+		return;
+	}
 	if (parsed.action === "chat") {
 		const project = findIdeaByChannel(event.channel);
 		if (!project) {
@@ -390,12 +426,20 @@ app.action("generate_doc", async ({ ack, body, client }) => {
 		const [id, mode] = String(body.actions?.[0]?.value || "").split("::");
 		const st = readState(id);
 		const { generateMissingDoc } = require("./mode-docflow");
+		const { threadContextText } = require("./command-shim");
+		const channel = body.channel?.id || st?.channel_id;
+		const threadTs = body.message?.thread_ts || st?.threads?.project;
 		const result = await generateMissingDoc({
 			id,
 			mode,
 			client,
-			channel: body.channel?.id || st?.channel_id,
-			threadTs: body.message?.thread_ts || st?.threads?.project,
+			channel,
+			threadTs,
+			// Generate from what was actually DISCUSSED, not just from the
+			// upstream document. generateMissingDoc has always accepted this
+			// and was never given it, so a spec generated on leaving a mode
+			// read as though the conversation in it had never happened.
+			threadContext: threadContextText(threadTs, channel),
 		});
 		await buttonResolve.resolveMessage({
 			client,

@@ -185,4 +185,4 @@ async function dispatchCommand({ action, text, channelId, userId, threadTs, clie
 	return { ok: true, progressConsumed: Boolean(cmdClient.chat?.progressState?.consumed) };
 }
 
-module.exports = { dispatchCommand, HANDLERS };
+module.exports = { dispatchCommand, HANDLERS, threadContextText };

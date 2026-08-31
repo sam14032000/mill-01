@@ -10,7 +10,7 @@
 // same way before proceeding.
 
 const { PERSONAS, personaFor } = require("./personas");
-const { readDoc, readInputDoc, writeDoc, generateDraft, attachFullDocument, summarizeForThread } = require("./mode-docs");
+const { readDoc, readInputDoc, writeDoc, generateDraft, runPersonaTurn, attachFullDocument, summarizeForThread } = require("./mode-docs");
 const { recordGeneration, generationRecord, hashOf } = require("./doc-meta");
 const { callFlash } = require("./llm");
 
@@ -197,7 +197,48 @@ async function regenerateStaleSections({ id, mode, client, channel, threadTs }) 
 	return { ok: true, before: current, after: revised, report };
 }
 
+// Writes the CURRENT MODE'S OWN document from the conversation so far.
+//
+// This was the hole: writeDoc was only ever reached by generateMissingDoc
+// (the missing-input offer) and regenerateStaleSections (the stale
+// offer), neither of which is on the conversational path. So a founder
+// could work with the PM for an hour and `product-spec.md` would never
+// exist -- and the spec would then be generated later, on switching to
+// engineering, from the research KB alone as if that hour hadn't happened.
+//
+// Founder-triggered, never automatic, for the same reason profile diffs
+// are proposed rather than applied (D-30): the document is the thing
+// downstream modes feed on, so an unconsidered half-thought must not be
+// able to overwrite a considered spec. Returns a preview the caller shows
+// before it takes effect.
+async function saveModeDocument({ id, mode, threadContext, client, channel, threadTs }) {
+	const persona = personaFor(mode);
+	if (!persona.outputDoc) {
+		return { ok: false, reason: `${mode} mode produces no document (proto writes artifacts, audit writes a verdict)` };
+	}
+	const existing = readDoc(id, mode);
+	const directive =
+		`Write the complete ${persona.outputTitle} as it now stands, incorporating everything decided in the ` +
+		"conversation above. This replaces the current document, so carry forward anything still true rather " +
+		"than only writing what changed. If the conversation has not settled enough to write one, use the " +
+		"REFUSAL:/UNBLOCK: contract instead of padding it out.";
+	const result = await runPersonaTurn({ id, mode, threadContext, userText: directive, maxTokens: 8000 });
+	if (result.refusal) return { ok: false, reason: "refused", refusal: result.refusal };
+
+	writeDoc(id, mode, result.text);
+	const summary = await summarizeForThread(result.text).catch(() => result.text.slice(0, 400));
+	if (client && channel) {
+		const verb = existing ? "Updated" : "Created";
+		await client.chat
+			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* (\`${persona.outputDoc}\`):\n\n${summary}` })
+			.catch(() => {});
+		await attachFullDocument(client, { id, mode, channel, threadTs });
+	}
+	return { ok: true, mode, created: !existing, wordCount: result.text.split(/\s+/).filter(Boolean).length };
+}
+
 module.exports = {
+	saveModeDocument,
 	checkMissingInput,
 	missingDocBlocks,
 	generateMissingDoc,

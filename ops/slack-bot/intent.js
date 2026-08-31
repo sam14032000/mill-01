@@ -32,6 +32,8 @@ const MENTION_ALIASES = {
 	// handled directly in index.js rather than through command-shim's
 	// HANDLERS map.
 	mode: "mode", switch: "mode",
+	// `@Mill save` writes the current mode's document from the conversation.
+	save: "save", write: "save",
 	// `@Mill chat <title>` opens a new chat inside a project channel.
 	chat: "chat", newchat: "chat",
 };
