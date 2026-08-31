@@ -48,20 +48,6 @@ function modeBannerText(mode, { byFounder = null } = {}) {
 	return `${emoji} *Mode: ${persona.label === "Co-founder" ? "Brainstorm" : mode[0].toUpperCase() + mode.slice(1)}* (${persona.label})${who}. Produces: ${persona.outputTitle || "artifacts"}.`;
 }
 
-// Single anchor: one root message the project thread hangs off, plus the
-// initial mode banner. Returns { project: ts } -- the one thread_ts every
-// command and every conversational turn in this project now uses.
-async function postProjectAnchor(client, channel, assumption, id) {
-	const header = assumption
-		? `*Assumption under test:* ${assumption}`
-		: "_No assumption yet — brainstorm mode is where one gets set (`@Mill attack`)._";
-	const root = await client.chat.postMessage({ channel, text: header });
-	// Plain text: the mode control is the overflow on the pinned state
-	// card, not a button row repeated down the thread.
-	await client.chat.postMessage({ channel, thread_ts: root.ts, text: modeBannerText("brainstorm") });
-	return { project: root.ts };
-}
-
 // Creates the channel, invites every active founder, sets the topic to
 // the assumption, posts the single anchor + starting mode banner. Throws
 // on any failure -- the caller (promotion) must then create no idea
@@ -91,22 +77,15 @@ async function createProjectChannel({ id, sourceText, assumption, client }) {
 			.catch((err) => console.error(`project-channel: setTopic failed: ${err?.data?.error || err}`));
 	}
 
-	const { project } = await postProjectAnchor(client, channel, assumption, id);
-	return { channelId: channel, name, threads: { project } };
-}
-
-// If the project thread_ts is missing or stale, repost the single anchor
-// and return the fresh map rather than ever posting to channel root.
-async function repostAnchor({ client, channel, assumption, id }) {
-	const { project } = await postProjectAnchor(client, channel, assumption, id);
-	return { project };
+	// No anchor messages: a project's entry point is its first CHAT, whose
+	// card is that chat's thread root (chat-card.js). The caller creates it.
+	return { channelId: channel, name, threads: {} };
 }
 
 module.exports = {
 	slugify,
 	channelName,
 	createProjectChannel,
-	repostAnchor,
 	modeBannerText,
 	MODE_EMOJI,
 	MODE_ORDER,

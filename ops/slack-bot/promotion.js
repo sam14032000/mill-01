@@ -162,26 +162,33 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 			? `*No assumption yet.* \`/attack\` in the chat flagged this as too vague to attack — it needs: ${tooVagueDetail}\nPin those down in Brainstorm, then run \`/attack\`.`
 			: "_No assumption yet — run `/attack` in Brainstorm, then `/test`._";
 
-	// 15.3 step 4: seed the Brainstorm thread with the origin-chat summary
-	// and a link back to the chat.
-	const seedPost = await client.chat
-		.postMessage({
-			channel: project.channelId,
-			thread_ts: project.threads.project,
-			text:
-				`*Seeded from a chat by ${founder}.*\n\n${summary}\n\n${assumptionLine}\n\n` +
-				`Full origin chat: <https://slack.com/app_redirect?channel=${session.channel}&message_ts=${session.threadTs}|jump to the thread> · transcript at \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,
-		})
-		.catch((err) => {
-			console.error(`promotion: brainstorm seed failed: ${err?.data?.error || err.message}`);
-			return null;
-		});
+	// The project's first CHAT. Its card is the chat's thread root
+	// (chat-card.js), so the card and the conversation are the same thread
+	// -- and the origin summary is posted as the first reply inside it,
+	// not as a frozen header that goes stale the moment /attack runs.
+	let chatTs = null;
+	try {
+		const { createChatCard } = require("./chat-card");
+		const created = await createChatCard(client, id, { title: topic ? String(topic).slice(0, 60) : "Main", createdBy: founder });
+		chatTs = created.chatTs;
+	} catch (err) {
+		console.error(`promotion: could not open the first chat for ${id}: ${err.message}`);
+	}
 
-	// D-52 follow-up: create the pinned current-state card for the new
-	// project channel. upsertStateCard commits its own state.json write
-	// (state_card_ts), since the promotion commit above ran before the
-	// channel existed.
-	await upsertStateCard(client, id, { latestTs: seedPost?.ts, latestChannel: project.channelId });
+	const seedPost = chatTs
+		? await client.chat
+				.postMessage({
+					channel: project.channelId,
+					thread_ts: chatTs,
+					text:
+						`*Seeded from a chat by ${founder}.*\n\n${summary}\n\n` +
+						`Full origin chat: <https://slack.com/app_redirect?channel=${session.channel}&message_ts=${session.threadTs}|jump to the thread> · transcript at \`ideas/${id}/origin-chat.md\` (all ${session.turns.length} turns).`,
+				})
+				.catch((err) => {
+					console.error(`promotion: chat seed failed: ${err?.data?.error || err.message}`);
+					return null;
+				})
+		: null;
 
 	// 15.3 step 5: announce in #mill-ideas and link the new channel.
 	if (millChannel) {

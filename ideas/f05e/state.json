@@ -3,7 +3,7 @@
   "state": "open",
   "founder": "saksham",
   "created_at": "2026-08-28T13:58:59.031Z",
-  "updated_at": "2026-08-31T05:19:52.149Z",
+  "updated_at": "2026-08-31T05:41:19.961Z",
   "origin": "chat",
   "origin_chat_ts": "1787923060.248729",
   "has_assumption": true,
@@ -15,7 +15,16 @@
   "parent": null,
   "children": [],
   "touch_count": 0,
-  "state_card_ts": "1787988791.169549",
-  "mode": "brainstorm",
-  "topic_text": "open · brainstorm · At least 25% of Indian D2C brands shipping 300–2,000 cross-border orders per month currently pay >₹25,000/month to manual CA retainers or third-party customs agents specifically for export documentation and e-BRC reconciliation, r"
+  "topic_text": "open · brainstorm · At least 25% of Indian D2C brands shipping 300–2,000 cross-border orders per month currently pay >₹25,000/month to manual CA retainers or third-party customs agents specifically for export documentation and e-BRC reconciliation, r",
+  "chats": {
+    "1787925538.266179": {
+      "title": "Cross-border export compliance",
+      "mode": "brainstorm",
+      "created_by": "saksham",
+      "created_at": "2026-08-31T05:41:18.918Z",
+      "last_active_at": "2026-08-31T05:41:18.918Z"
+    }
+  },
+  "active_chat_ts": "1787925538.266179",
+  "pinned_chat_ts": "1787925538.266179"
 }

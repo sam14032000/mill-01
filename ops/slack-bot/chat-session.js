@@ -59,7 +59,7 @@ function readOriginContext(ideaId) {
 	}
 	return parts.join("\n\n---\n\n");
 }
-const { repostAnchor } = require("./project-channel");
+
 const { postResult } = require("./reply");
 
 const STORE_DIR =
@@ -418,9 +418,13 @@ function commandDestination(command) {
 	// anchor rather than ever posting to channel root.
 	const project = command.channel_id ? findIdeaByChannel(command.channel_id) : null;
 	if (project) {
+		// A project holds many chats. Prefer the chat this command was
+		// invoked from; otherwise the last active one.
+		const chats = require("./chats");
+		const invoked = command.thread_ts && chats.readChat(project.id, command.thread_ts) ? command.thread_ts : null;
 		return {
 			channel: command.channel_id,
-			threadTs: project.threads ? project.threads.project : undefined,
+			threadTs: invoked || chats.lastActiveChatTs(project.id) || project.threads?.project,
 			session: null,
 			inChat: false,
 			project,
@@ -440,20 +444,21 @@ function commandDestination(command) {
 // persists the fresh map into state.json if it's missing (16.3: never
 // post to channel root). Mutates `dest.threadTs` and returns it.
 async function ensureStageThread(client, dest) {
-	if (!dest.project || dest.threadTs) return dest.threadTs;
-	const fresh = await repostAnchor({
-		client,
-		channel: dest.channel,
-		assumption: dest.project.assumption,
-		id: dest.project.id,
-	});
+	if (!dest.project) return dest.threadTs;
+	if (dest.threadTs) return dest.threadTs;
+	// A project with no chat yet: open one, so a command never posts to
+	// channel root. Its card is the new chat's thread root (chat-card.js).
 	try {
-		updateState(dest.project.id, { threads: fresh });
+		const { createChatCard } = require("./chat-card");
+		const { chatTs } = await createChatCard(client, dest.project.id, {
+			title: dest.project.assumption ? "Main" : "Main",
+			createdBy: dest.project.founder || null,
+		});
+		dest.threadTs = chatTs;
+		dest.project.threads = { ...(dest.project.threads || {}), project: chatTs };
 	} catch (err) {
-		console.error(`ensureStageThread: state update failed for ${dest.project.id}: ${err.message}`);
+		console.error(`ensureStageThread: could not open a chat for ${dest.project.id}: ${err.message}`);
 	}
-	dest.project.threads = fresh;
-	dest.threadTs = fresh.project;
 	return dest.threadTs;
 }
 

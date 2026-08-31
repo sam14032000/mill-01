@@ -74,11 +74,17 @@ async function handleSpinoffCommand({ command, ack, client }) {
 
 	await ensureStageThread(client, pdest);
 	await postResult(client, { channel: parent.channel_id, thread_ts: pdest.threadTs, text: `🌱 Spun off <#${child.channelId}> (\`${id}\`) — ${ideaText}` }).catch(() => {});
-	const childSeed = await client.chat
-		.postMessage({ channel: child.channelId, thread_ts: child.threads.project, text: `Child of <#${parent.channel_id}> (\`${parent.id}\`). Run \`/attack\` here to set an assumption, then \`/test\`.` })
-		.catch(() => null);
-	// D-52: pinned state card for the new child project.
-	await upsertStateCard(client, id, { latestTs: childSeed?.ts, latestChannel: child.channelId });
+	// The child project's first chat (its card is the thread root).
+	let childChatTs = null;
+	try {
+		const { createChatCard } = require("../chat-card");
+		childChatTs = (await createChatCard(client, id, { title: ideaText.slice(0, 60), createdBy: founder })).chatTs;
+		await client.chat
+			.postMessage({ channel: child.channelId, thread_ts: childChatTs, text: `Child of <#${parent.channel_id}> (\`${parent.id}\`). \`@Mill attack\` here to set an assumption.` })
+			.catch(() => {});
+	} catch (e) {
+		console.error(`spinoff: could not open the child's first chat: ${e.message}`);
+	}
 	if (millChannel) {
 		await client.chat
 			.postMessage({ channel: millChannel, text: `*Spin-off* <#${child.channelId}> \`${id}\` from \`${parent.id}\` by ${founder}.` })

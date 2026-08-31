@@ -11,6 +11,7 @@
 
 const { MODE_ORDER, personaFor } = require("./personas");
 const { readState, updateState, readLatestAudit } = require("./ideas");
+const chats = require("./chats");
 const { modeBannerText } = require("./project-channel");
 const { checkMissingInput, missingDocBlocks, checkStale, staleDocBlocks } = require("./mode-docflow");
 
@@ -23,7 +24,10 @@ function isValidMode(mode) {
 // Returns { ok, mode?, reason? }. Never throws -- callers post the
 // outcome themselves (buttons resolve through button-resolve.js; the
 // `@Mill mode` command posts plainly).
-async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
+// `chatTs` identifies WHICH chat's mode is changing -- mode is per chat
+// (a project can have a product-planning chat and an engineering chat at
+// once), so this never writes a project-level mode.
+async function switchMode({ id, mode, client, channel, threadTs, byFounder, chatTs = null }) {
 	if (!isValidMode(mode)) {
 		return { ok: false, reason: `unknown mode "${mode}" — one of: ${SWITCHABLE_MODES.join(", ")}` };
 	}
@@ -31,10 +35,17 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
 	if (!state) return { ok: false, reason: `no such idea \`${id}\`` };
 	if (state.state === "killed") return { ok: false, reason: `\`${id}\` is killed — nothing to switch` };
 
-	updateState(id, { mode });
+	// An old project may have no chat registry yet -- adopt its legacy
+	// thread as the first chat so switching works without a migration.
+	if (!Object.keys(chats.listChats(id)).length) chats.adoptLegacyThread(id);
+	const targetChat = chatTs || threadTs || chats.lastActiveChatTs(id);
+	if (!targetChat || !chats.readChat(id, targetChat)) {
+		return { ok: false, reason: "no chat to switch — open a chat in this project first (`@Mill chat <title>`)" };
+	}
+	chats.updateChat(id, targetChat, { mode });
 
 	const bannerChannel = channel || state.channel_id;
-	const bannerThread = threadTs || state.threads?.project;
+	const bannerThread = targetChat;
 	if (client && bannerChannel) {
 		// Plain text, no control. The mode control lives on the pinned card
 		// (state-card.js modeOverflow) -- posting one into the thread on
@@ -45,14 +56,13 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
 			.catch((e) => console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`));
 	}
 
-	// Refresh the pinned state card so its "mode: x" line and Next-step
-	// text (state-card.js) reflect the switch immediately, not on the
-	// next unrelated transition.
+	// Re-render THIS chat's card (its root message) so the ✓ moves --
+	// that re-render is the feedback a mode selection gives.
 	try {
-		const { upsertStateCard } = require("./state-card");
-		await upsertStateCard(client, id);
+		const { touchAndRepin } = require("./chat-card");
+		await touchAndRepin(client, id, targetChat);
 	} catch (e) {
-		console.error(`mode-switch: state card refresh failed for ${id}: ${e.message}`);
+		console.error(`mode-switch: chat card refresh failed for ${id}: ${e.message}`);
 	}
 
 	// Change 3: entering a mode whose input document doesn't exist offers
@@ -89,7 +99,7 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder }) {
 	// never repeats whether or not the founder acts on it. Ignorable by
 	// construction: switching to proto already happened above: this
 	// suggestion cannot block or undo it.
-	if (mode === "proto" && !state.audit_suggested && !readLatestAudit(id)) {
+	if (mode === "proto" && !readState(id).audit_suggested && !readLatestAudit(id)) {
 		updateState(id, { audit_suggested: true });
 		if (client && bannerChannel) {
 			const text =

@@ -268,6 +268,23 @@ app.event("app_mention", async ({ event, client }) => {
 	// Change 1: mode switching is a control action on the project, not an
 	// idea-lifecycle command -- handled directly rather than through
 	// command-shim's HANDLERS map (dispatchCommand would 404 on "mode").
+	if (parsed.action === "chat") {
+		const project = findIdeaByChannel(event.channel);
+		if (!project) {
+			await post("`chat` opens a new chat inside a project channel. In `#chats`, use the `/chat` command.");
+			return;
+		}
+		const title = String(parsed.rest || "").trim() || "Untitled chat";
+		try {
+			const { createChatCard } = require("./chat-card");
+			const { chatTs } = await createChatCard(client, project.id, { title, createdBy: founder });
+			await client.chat.postMessage({ channel: event.channel, thread_ts: chatTs, text: `_New chat opened by ${founder}. Reply in this thread._` }).catch(() => {});
+		} catch (e) {
+			console.error("chat create failed:", e);
+			await post(`Couldn't open a chat: ${e.message}`);
+		}
+		return;
+	}
 	if (parsed.action === "mode") {
 		const project = findIdeaByChannel(event.channel);
 		if (!project) {
@@ -280,7 +297,7 @@ app.event("app_mention", async ({ event, client }) => {
 			mode: requested,
 			client,
 			channel: event.channel,
-			threadTs: event.thread_ts || event.ts,
+			chatTs: event.thread_ts || null, // the chat this was said in
 			byFounder: founder,
 		}).catch((e) => ({ ok: false, reason: e.message }));
 		if (!result.ok) await post(`Can't switch mode: ${result.reason}`);
@@ -329,10 +346,10 @@ app.action("stale_kill", async ({ ack, body, client }) => {
 app.action("mode_overflow", async ({ ack, body, client }) => {
 	await ack();
 	try {
-		const [id, mode] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
-		if (!id || !mode) return;
+		const [id, chatTs, mode] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
+		if (!id || !chatTs || !mode) return;
 		const byFounder = founderForUserId(body.user?.id);
-		const result = await switchMode({ id, mode, client, channel: body.channel?.id, byFounder });
+		const result = await switchMode({ id, chatTs, mode, client, channel: body.channel?.id, byFounder });
 		if (!result.ok) {
 			const st = readState(id);
 			await client.chat
