@@ -8,7 +8,7 @@
 
 const { channelId } = require("./config");
 const { callFlash } = require("./llm");
-const { generateIdeaId, promoteIdea, updateState } = require("./ideas");
+const { generateIdeaId, promoteIdea } = require("./ideas");
 const { commitAndPush } = require("./git");
 const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
@@ -147,10 +147,6 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 			.catch(() => {});
 		return { ok: false, reason: "promote_idea_failed", channelId: project.channelId };
 	}
-
-	// mode_banner_ts: which button row is currently live, so the first
-	// mode switch retires it instead of leaving a stale row (D-54).
-	if (project.bannerTs) updateState(id, { mode_banner_ts: project.bannerTs });
 
 	await commitAndPush(
 		[`ideas/${id}`],

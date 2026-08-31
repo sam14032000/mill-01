@@ -56,18 +56,10 @@ async function postProjectAnchor(client, channel, assumption, id) {
 		? `*Assumption under test:* ${assumption}`
 		: "_No assumption yet — brainstorm mode is where one gets set (`@Mill attack`)._";
 	const root = await client.chat.postMessage({ channel, text: header });
-	const banner = await client.chat.postMessage({
-		channel,
-		thread_ts: root.ts,
-		text: modeBannerText("brainstorm"),
-		blocks: [
-			{ type: "section", text: { type: "mrkdwn", text: modeBannerText("brainstorm") } },
-			...(id ? modeSwitchBlocks(id, "brainstorm") : []),
-		],
-	});
-	// bannerTs is returned so the caller can record it as mode_banner_ts --
-	// the first switch needs to know which row to retire (mode-switch.js).
-	return { project: root.ts, bannerTs: banner?.ts || null };
+	// Plain text: the mode control is the overflow on the pinned state
+	// card, not a button row repeated down the thread.
+	await client.chat.postMessage({ channel, thread_ts: root.ts, text: modeBannerText("brainstorm") });
+	return { project: root.ts };
 }
 
 // Creates the channel, invites every active founder, sets the topic to
@@ -99,10 +91,8 @@ async function createProjectChannel({ id, sourceText, assumption, client }) {
 			.catch((err) => console.error(`project-channel: setTopic failed: ${err?.data?.error || err}`));
 	}
 
-	// bannerTs is kept OUT of `threads` -- that map is persisted verbatim
-	// into state.json and must contain thread ids only.
-	const { project, bannerTs } = await postProjectAnchor(client, channel, assumption, id);
-	return { channelId: channel, name, threads: { project }, bannerTs };
+	const { project } = await postProjectAnchor(client, channel, assumption, id);
+	return { channelId: channel, name, threads: { project } };
 }
 
 // If the project thread_ts is missing or stale, repost the single anchor
@@ -112,39 +102,12 @@ async function repostAnchor({ client, channel, assumption, id }) {
 	return { project };
 }
 
-// One-tap mode switch row, attached to every mode banner (Change 1:
-// "changed by command or button"). The current mode's button is marked
-// so the row still communicates state even before a tap.
-// Slack requires action_id to be unique WITHIN a block -- found live
-// (invalid_blocks) migrating f05e, where all five buttons shared the
-// plain "mode_switch" action_id in one row. Each button gets its own
-// action_id (mode_switch_<mode>); index.js registers one handler against
-// all of them via a regex match, and every handler reads the mode back
-// out of `value` (`<id>::<mode>`), not the action_id, so routing is
-// unaffected.
-function modeSwitchBlocks(id, currentMode) {
-	return [
-		{
-			type: "actions",
-			block_id: "mode_switch",
-			elements: MODE_ORDER.map((mode) => ({
-				type: "button",
-				action_id: `mode_switch_${mode}`,
-				value: `${id}::${mode}`,
-				text: { type: "plain_text", text: `${MODE_EMOJI[mode] || ""} ${mode === currentMode ? `[${mode}]` : mode}`.trim() },
-				...(mode === currentMode ? { style: "primary" } : {}),
-			})),
-		},
-	];
-}
-
 module.exports = {
 	slugify,
 	channelName,
 	createProjectChannel,
 	repostAnchor,
 	modeBannerText,
-	modeSwitchBlocks,
 	MODE_EMOJI,
 	MODE_ORDER,
 };

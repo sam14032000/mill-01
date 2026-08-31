@@ -63,7 +63,6 @@ async function handleSpinoffCommand({ command, ack, client }) {
 	});
 	// lineage both ways (PROJECTS.md)
 	updateState(id, { parent: parent.id });
-	if (child.bannerTs) updateState(id, { mode_banner_ts: child.bannerTs });
 	const parentState = readState(parent.id) || {};
 	updateState(parent.id, { children: [...(parentState.children || []), id] });
 

@@ -132,6 +132,41 @@ function topicText(state, assumption) {
 	return `${state.state}${mode} · ${head}`.slice(0, 250);
 }
 
+// The mode control: a single overflow (⋮) accessory on the card.
+//
+// This replaced a five-button row posted into the thread on every switch.
+// Two reasons. The founders are phone-first, and a five-button row is the
+// worst shape on mobile Slack -- it wraps and eats vertical space. And the
+// trade was backwards: switching modes happens a handful of times in a
+// project's life while the mode is *read* constantly, so paying permanent
+// clutter to make the rare action one tap was the wrong way round. An
+// overflow is Slack's most compact interactive element; two taps is fine
+// for something done rarely, and it lives on the card that is already
+// always-visible, single-instance and updated on every transition -- so
+// stale controls showing the wrong current mode are now impossible by
+// construction rather than by cleanup.
+//
+// A tap re-renders this same card with the ✓ moved, which is the
+// feedback. The handler must NOT route through button-resolve: that
+// strips a message's blocks, which would destroy the persistent card.
+function modeOverflow(state) {
+	try {
+		const { MODE_ORDER } = require("./personas");
+		const { MODE_EMOJI } = require("./project-channel");
+		const current = state.mode || "brainstorm";
+		return {
+			type: "overflow",
+			action_id: "mode_overflow",
+			options: MODE_ORDER.map((m) => ({
+				text: { type: "plain_text", text: `${MODE_EMOJI[m] || "▶️"} ${m}${m === current ? "  ✓" : ""}`, emoji: true },
+				value: `${state.id}::${m}`,
+			})),
+		};
+	} catch {
+		return undefined; // never let the control break the card
+	}
+}
+
 // Post-or-update the card, refresh the topic. Best-effort throughout:
 // a card failure must never break the command that triggered it.
 // `latestTs` (+ optional `latestChannel`) is the message to permalink to
@@ -152,7 +187,7 @@ async function upsertStateCard(client, id, { latestTs = null, latestChannel = nu
 		}
 
 		const text = toSlackMrkdwn(cardText(state, { assumption, audit, permalink }));
-		const blocks = [{ type: "section", text: { type: "mrkdwn", text } }];
+		const blocks = [{ type: "section", text: { type: "mrkdwn", text }, accessory: modeOverflow(state) }];
 
 		let cardTs = state.state_card_ts || null;
 		if (cardTs) {

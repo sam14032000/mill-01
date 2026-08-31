@@ -321,22 +321,36 @@ app.action("stale_kill", async ({ ack, body, client }) => {
 // Change 1: one-tap mode switch. value is `<id>::<mode>`. Built on
 // button-resolve from the start (Change 5's lesson: a tapped button must
 // visibly resolve), not retrofitted after.
+// The mode control: an overflow (⋮) on the pinned state card. Selecting a
+// mode switches, and switchMode re-renders the card with the ✓ moved --
+// that re-render IS the feedback, which is why this deliberately does NOT
+// go through button-resolve: that strips a message's blocks, and the card
+// is persistent and must keep its control.
+app.action("mode_overflow", async ({ ack, body, client }) => {
+	await ack();
+	try {
+		const [id, mode] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
+		if (!id || !mode) return;
+		const byFounder = founderForUserId(body.user?.id);
+		const result = await switchMode({ id, mode, client, channel: body.channel?.id, byFounder });
+		if (!result.ok) {
+			const st = readState(id);
+			await client.chat
+				.postMessage({ channel: body.channel?.id, thread_ts: st?.threads?.project, text: `Can't switch mode: ${result.reason}` })
+				.catch(() => {});
+		}
+	} catch (e) {
+		console.error("mode_overflow failed:", e);
+	}
+});
+
 app.action(/^mode_switch/, async ({ ack, body, client }) => {
 	await ack();
 	if (!buttonResolve.claimTap(body)) return;
 	try {
 		const [id, mode] = String(body.actions?.[0]?.value || "").split("::");
 		const byFounder = founderForUserId(body.user?.id);
-		// button-resolve already strips the tapped message's row below, so
-		// switchMode must not also retire it (that would double-append an
-		// outcome line to the same message).
-		const result = await switchMode({
-			id, mode, client,
-			channel: body.channel?.id,
-			threadTs: body.message?.thread_ts,
-			byFounder,
-			skipBannerStripTs: body.message?.ts || null,
-		});
+		const result = await switchMode({ id, mode, client, channel: body.channel?.id, threadTs: body.message?.thread_ts, byFounder });
 		await buttonResolve.resolveMessage({
 			client,
 			body,
