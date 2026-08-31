@@ -54,17 +54,35 @@ function auditReportLine(id) {
 	return `*Audit master report:* \`ideas/${id}/audit-reference.md\` — ${entries} entr${entries === 1 ? "y" : "ies"}, shared across every chat in this project`;
 }
 
-function modeOverflow(id, chatTs, currentMode) {
+// The mode control.
+//
+// Was an overflow (⋮). Compact, but opaque: a founder reported seeing the
+// icon without any idea it was the mode switcher, which is a real failure
+// -- a control nobody recognises is not a control. A static_select shows
+// its own current value, so the card renders a tappable "🧠 brainstorm"
+// that reads as both the current state and the way to change it. Same
+// single element, same per-chat targeting; it just says what it is.
+//
+// The mode also stays in the card TEXT, because pinned previews and
+// notifications render `text` without accessories -- the select alone
+// would leave those silent about which mode a chat is in.
+function modeSelect(id, chatTs, currentMode) {
 	try {
 		const { MODE_ORDER } = require("./personas");
 		const { MODE_EMOJI } = require("./project-channel");
+		const opt = (m) => ({
+			text: { type: "plain_text", text: `${MODE_EMOJI[m] || "▶️"} ${m}`, emoji: true },
+			value: `${id}::${chatTs}::${m}`,
+		});
+		const options = MODE_ORDER.map(opt);
+		const current = MODE_ORDER.includes(currentMode) ? currentMode : "brainstorm";
 		return {
-			type: "overflow",
-			action_id: "mode_overflow",
-			options: MODE_ORDER.map((m) => ({
-				text: { type: "plain_text", text: `${MODE_EMOJI[m] || "▶️"} ${m}${m === currentMode ? "  ✓" : ""}`, emoji: true },
-				value: `${id}::${chatTs}::${m}`,
-			})),
+			type: "static_select",
+			action_id: "mode_overflow", // unchanged: same handler, same payload shape
+			placeholder: { type: "plain_text", text: "Change mode", emoji: true },
+			// initial_option must deep-match one of `options` or Slack rejects it.
+			initial_option: opt(current),
+			options,
 		};
 	} catch {
 		return undefined;
@@ -88,7 +106,7 @@ function cardText(id, chatTs, chat) {
 
 function cardBlocks(id, chatTs, chat) {
 	const text = toSlackMrkdwn(cardText(id, chatTs, chat));
-	return { text, blocks: [{ type: "section", text: { type: "mrkdwn", text }, accessory: modeOverflow(id, chatTs, chat.mode) }] };
+	return { text, blocks: [{ type: "section", text: { type: "mrkdwn", text }, accessory: modeSelect(id, chatTs, chat.mode) }] };
 }
 
 // Creates a new chat: posts its card as a channel-root message (which
