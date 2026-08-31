@@ -139,6 +139,34 @@ async function startGeneration({ slides, templateId, title, exportAs = "pptx" })
 	return taskId;
 }
 
+// Normalises a completed generation. The response carries more than the
+// file: `edit_path` is Presenton's own web app for reviewing/refining the
+// deck -- the rich editing surface Slack cannot provide, and the reason
+// this system does not host one of its own (a page served from the mount
+// container could not even POST back: D-48's mill-mount network is
+// deny-all egress except DNS). `credits_consumed` is the only ground
+// truth on what a render actually costs.
+function normaliseResult(json) {
+	return {
+		presentationId: json.presentation_id || json.presentationId || null,
+		downloadUrl: json.path || json.export_url || json.exportUrl || null,
+		editUrl: json.edit_path || json.editPath || null,
+		creditsConsumed: json.credits_consumed ?? json.creditsConsumed ?? null,
+	};
+}
+
+// A temporary, scoped iframe URL for an existing Cloud presentation --
+// shareable without a Presenton login, unlike edit_path which needs the
+// owning account. Use this when a founder should see the deck rather than
+// edit it.
+async function integrateUrl(presentationId) {
+	const json = await request("/presentation/integrate", {
+		method: "POST",
+		body: { presentation_id: presentationId },
+	});
+	return json.url || json.embed_url || json.integrate_url || null;
+}
+
 async function pollGeneration(taskId, { onTick = null, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
 	const startedAt = Date.now();
 	for (;;) {
@@ -146,7 +174,9 @@ async function pollGeneration(taskId, { onTick = null, sleep = (ms) => new Promi
 		const status = String(json.status || "").toLowerCase();
 		if (onTick) onTick(status, json);
 		if (status === "completed" || status === "success" || status === "succeeded") {
-			return { ok: true, ...json };
+			// `result` is where the generation payload usually sits; fall back
+			// to the envelope for APIs that inline it.
+			return { ok: true, ...normaliseResult(json.result || json), raw: json };
 		}
 		if (status === "failed" || status === "error") {
 			return { ok: false, reason: json.error || json.message || "generation failed", raw: json };
@@ -165,4 +195,6 @@ module.exports = {
 	validateSlides,
 	startGeneration,
 	pollGeneration,
+	normaliseResult,
+	integrateUrl,
 };
