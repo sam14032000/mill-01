@@ -184,3 +184,14 @@ than edited above, because this document is append-only.
 `[SOURCE: research-<stamp>]` claims anywhere in this document and nothing in it counts toward `evidence_basis`.
 This correction concerns how claims were labelled. It does not revise, retract or re-characterise any
 founder's reasoning above.
+
+---
+### 2026-08-31T20:38:07.889Z
+
+**Mode:** brainstorm
+
+Mode: brainstorm (Co-founder)
+
+- The founder initially planned to address both freight forwarder pain points (customs/CHA operations and sales/commercial conversion) simultaneously to provide a complete solution [FOUNDER BELIEF].
+- The founder believes that partnering with the sales/commercial side of a freight forwarder offers a better entry point / opportunity for a pilot than customs/CHA operations, despite anticipated difficulty [FOUNDER BELIEF].
+- The founder plans to restrict the initial pilot intake filter to a single product category covering only a couple of SKUs [FOUNDER BELIEF].
