@@ -3,7 +3,7 @@
   "state": "open",
   "founder": "saksham",
   "created_at": "2026-08-28T13:58:59.031Z",
-  "updated_at": "2026-08-31T06:11:47.208Z",
+  "updated_at": "2026-08-31T06:45:00.596Z",
   "origin": "chat",
   "origin_chat_ts": "1787923060.248729",
   "has_assumption": true,
@@ -22,7 +22,8 @@
       "mode": "brainstorm",
       "created_by": "saksham",
       "created_at": "2026-08-31T05:41:18.918Z",
-      "last_active_at": "2026-08-31T06:11:47.207Z"
+      "last_active_at": "2026-08-31T06:11:47.207Z",
+      "last_ts": "1788106988.012329"
     }
   },
   "active_chat_ts": "1787925538.266179",
