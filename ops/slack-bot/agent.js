@@ -21,7 +21,9 @@
 const { callFlashTools } = require("./llm");
 const { emit } = require("./telemetry");
 const { buildEvalEvent } = require("./eval-event");
-const { addTurn, buildContextMessages, maybeCompact } = require("./chat-session");
+const { addTurn, buildContextMessages, maybeCompact, sessionMode } = require("./chat-session");
+const { personaFor, parseRefusal } = require("./personas");
+const { callFlash } = require("./llm");
 const { withPromoteButton } = require("./promote-button");
 const { readState, readAssumption, readLatestResearch } = require("./ideas");
 const { toolSpecs, runTool } = require("./tools");
@@ -30,7 +32,9 @@ const MODEL = "flash-fast";
 const MAX_STEPS = Number(process.env.MILL_AGENT_MAX_STEPS) || 3;
 
 const SYSTEM_PROMPT = [
-	"You are Mill, a founder's thinking partner inside a Slack thread. You have tools that do specific jobs properly (attack, think, cross, blindspot, themes, find, test, audit, proto, spinoff).",
+	// No identity line here: the persona (personas.js) owns who you are.
+	// This block is tool mechanics only -- when it also said \"You are Mill,\n\t// a thinking partner\", it competed with the role and won.
+	"TOOLS. You have tools that do specific jobs properly (attack, think, cross, blindspot, themes, find, test, audit, proto, spinoff).",
 	"",
 	"Your default is to REPLY IN PROSE. Call a tool when the founder's LATEST message contains an explicit instruction to run that job — an imperative like \"attack this\", \"look up X\", \"what would the others say\", \"prototype it\", \"run the research pass\", \"you need to research that\", \"dig into whether X\".",
 	"The instruction counts even when it's EMBEDDED in a longer message: a paragraph of hypothesis that also says \"you need to research that\" or \"look this up\" IS a request — run the tool, and treat the rest of the message as the subject / what to work on.",
@@ -117,7 +121,93 @@ async function runTurn({ session, message, client }) {
 		.then((r) => r.ts)
 		.catch(() => null);
 
-	const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...buildContextMessages(session)];
+	// The chat's mode decides WHO replies, not just which document gets
+	// fed. Before this, mode changed the card label and the document
+	// routing while every reply still came from one generic prompt -- so
+	// the persona refusals (the PM declining to prescribe implementation,
+	// the engineer declining to reopen product decisions) only ever fired
+	// when a document was generated, never in the conversation where they
+	// actually bite. The persona is layered ON TOP of the agent loop
+	// rather than replacing it, so an engineer can still run `find` or
+	// `proto`: same one-loop architecture (D-53), different voice and
+	// different refusals.
+	const mode = sessionMode(session);
+	const persona = personaFor(mode);
+	const personaBrief =
+		`You are in *${mode}* mode, acting as the ${persona.label}. This role and its refusals take precedence ` +
+		`over the general guidance above: if the founder asks for something this role refuses, refuse it in the ` +
+		`REFUSAL:/UNBLOCK: form rather than complying, even when the request is reasonable and even when you could ` +
+		`answer it. Check the request against the documents you were given before answering.\n\n${persona.systemPrompt}`;
+	// Role FIRST, mechanics second. SYSTEM_PROMPT is ~40 lines of tool
+	// routing written when there was a single generic assistant; leading
+	// with it framed every reply as "generic Mill deciding whether to call
+	// a tool", and the persona arriving later never displaced that. The
+	// role is what the founder is talking to; the tool rules are how it
+	// operates. A short restatement still trails the context so the
+	// refusals sit next to the live turns as well.
+	// THE REFUSAL GATE.
+	//
+	// Measured, not assumed: with an identical message list, the persona
+	// refuses correctly when called WITHOUT tools and emits a bare tool
+	// call when the same messages are sent WITH tools. Offering a tool set
+	// pulls the model toward acting rather than declining, which silently
+	// disabled the refusals that are the entire point of the personas --
+	// and no amount of prompt emphasis fixed it, because the prompt was
+	// never the cause.
+	//
+	// So the role's veto is asked FIRST, with no tools, and only for the
+	// modes whose refusals are load-bearing. Brainstorm -- the common case
+	// -- is untouched and costs nothing extra; when a refusal does fire it
+	// replaces the agent call rather than adding to it.
+	if (mode !== "brainstorm") {
+		const veto = await callFlash(
+			[
+				{ role: "system", content: personaBrief },
+				...buildContextMessages(session),
+				{
+					role: "system",
+					content:
+						"Decide ONE thing: does this role refuse the founder's latest message? If yes, reply with " +
+						"exactly `REFUSAL:` then `UNBLOCK:` lines and nothing else. If this role can engage with it " +
+						"normally, reply with exactly: PROCEED",
+				},
+				{ role: "user", content: text },
+			],
+			{ model: MODEL, maxTokens: 700 },
+		).catch((err) => {
+			// A failed veto must never block the turn -- fall through to the
+			// normal loop rather than leaving the founder with nothing.
+			console.error(`agent: refusal check failed (${session.threadTs}): ${err.message}`);
+			return null;
+		});
+		const refusal = veto && parseRefusal(veto.content);
+		if (refusal) {
+			const body = veto.content.trim();
+			await client.chat
+				.update({ channel: message.channel, ts: placeholderTs, text: body })
+				.catch(() => client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: body }));
+			addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
+			addTurn(session, { role: "assistant", text: body });
+			emit(buildEvalEvent({
+				stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId,
+				tokensIn: veto.usage?.prompt_tokens ?? 0, tokensOut: veto.usage?.completion_tokens ?? 0,
+				costUsd: veto.costUsd ?? 0, status: "ok", reasonCode: `persona_refusal_${mode}`,
+				toolsCalled: [], iterations: 1, repliedWithoutTool: true,
+			}));
+			return;
+		}
+	}
+
+	const messages = [
+		{ role: "system", content: personaBrief },
+		{ role: "system", content: SYSTEM_PROMPT },
+		...buildContextMessages(session, {
+			trailingSystem:
+				`Reminder: you are the ${persona.label} (*${mode}* mode). Before replying, check the founder's latest ` +
+				`message against this role's refusals. If it asks for something this role does not do, answer with ` +
+				`REFUSAL: / UNBLOCK: and nothing else — do not quietly do adjacent work instead.`,
+		}),
+	];
 
 	let costUsd = 0;
 	let tokensIn = 0;
@@ -143,7 +233,7 @@ async function runTurn({ session, message, client }) {
 		}
 		emit(
 			buildEvalEvent({
-				stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId,
+				stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId, reasonCode: `mode_${mode}`,
 				wallClockS: (Date.now() - t0) / 1000, status: "ok", reasonCode: "forced_broad_find",
 				toolsCalled: ["find"], toolsIgnored: 0, iterations: 0, repliedWithoutTool: false,
 				searchInitiatedBy: searchInitiatedBy || "founder",

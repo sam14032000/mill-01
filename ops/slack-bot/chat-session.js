@@ -71,11 +71,18 @@ const STORE_DIR =
 const COMPACT_AT = Number(process.env.MILL_CHAT_COMPACT_AT) || 30;
 const KEEP_VERBATIM = Number(process.env.MILL_CHAT_KEEP_VERBATIM) || 10;
 
+// STYLE ONLY -- deliberately asserts no identity.
+//
+// This used to open "You are Mill, a thinking partner..." and instruct
+// "Engage with what they actually said", which is close to the inverse of
+// "refuse". Together with the agent's own "You are Mill" opener it meant
+// three system messages each claiming a different role, and the persona --
+// the one that defines what this mode will not accept -- lost. Identity is
+// now single-sourced from personas.js; this contributes tone only. (The old
+// "nothing here is stored" line was also simply false inside a project.)
 const CONTEXT_SYSTEM_PROMPT = [
-	"You are Mill, a thinking partner for a startup founder working an idea out loud in a chat.",
-	"Engage with what they actually said. Push on weak points, ask for the number or the named alternative when a claim is vague, follow the thread they're on.",
-	"This is a chat, not a report: be concise, no headings, no bullet-point essays unless they ask.",
-	"Nothing here is stored unless they promote it to a project.",
+	"Style: this is a chat, not a report. Be concise; no headings or bullet-point essays unless asked.",
+	"Engage with what the founder actually said, within the bounds of your role: push on weak points, and ask for the number or the named alternative when a claim is vague.",
 ].join("\n");
 
 /** @type {Map<string, object>} thread_ts -> session */
@@ -230,22 +237,81 @@ function markPromoted(threadTs) {
 // Builds the message array for a conversational turn: stable content
 // first (system, profile, captures, running summary) so the prefix
 // caches, volatile last (recent verbatim turns).
-function buildContextMessages(session) {
-	const messages = [{ role: "system", content: CONTEXT_SYSTEM_PROMPT }];
+// The mode a session is in. A #chats session is a project-less BRAINSTORM
+// chat -- same concept, same persona, just no documents to feed from
+// (there is no project). A project chat carries its own mode, per chat.
+function sessionMode(session) {
+	if (session?.kind === "project" && session.ideaId) {
+		try {
+			return require("./chats").chatMode(session.ideaId, session.threadTs);
+		} catch {
+			return "brainstorm";
+		}
+	}
+	return "brainstorm";
+}
 
-	if (hasProfile(session.ownerFounder)) {
-		messages.push({
-			role: "system",
-			content: `Founder profile (how they fail):\n\n${readProfile(session.ownerFounder)}`,
-		});
+// `trailingSystem` is a system message placed AFTER all stable context but
+// IMMEDIATELY BEFORE the live turns. The agent loop uses it for the mode's
+// persona: placed at the head instead, the role instruction sat behind the
+// generic tool prompt, the documents, the origin chat and the topic, and
+// the model reliably ignored its refusals -- an engineer let a founder
+// renegotiate product scope that its own product spec put out of scope.
+// Nearest the conversation is where a role instruction has to be.
+function buildContextMessages(session, { trailingSystem = null } = {}) {
+	const messages = [{ role: "system", content: CONTEXT_SYSTEM_PROMPT }];
+	const mode = sessionMode(session);
+
+	// The founder's profile and their recent captures are "how this founder
+	// thinks and fails" -- that is ammunition for the co-founder attacking
+	// from their blind spot (D-26), which is a brainstorm job. The PM,
+	// engineer and builder judge a spec on its own merits; feeding them
+	// "this founder overrates distribution" would let the profile shape
+	// durable artifacts rather than critique. The auditor never sees either
+	// (D-28) and never reaches this path at all.
+	if (mode === "brainstorm") {
+		if (hasProfile(session.ownerFounder)) {
+			messages.push({
+				role: "system",
+				content: `Founder profile (how they fail):\n\n${readProfile(session.ownerFounder)}`,
+			});
+		}
+
+		const captures = readCaptures(session.ownerFounder, { maxEntries: 20, maxTokens: 8000 });
+		if (captures.length) {
+			messages.push({
+				role: "system",
+				content: `Recent captures from this founder:\n\n${captures.join("\n")}`,
+			});
+		}
 	}
 
-	const captures = readCaptures(session.ownerFounder, { maxEntries: 20, maxTokens: 8000 });
-	if (captures.length) {
-		messages.push({
-			role: "system",
-			content: `Recent captures from this founder:\n\n${captures.join("\n")}`,
-		});
+	// The feeding rule (Change 2) in CONVERSATION, not just in document
+	// generation. A persona was previously document-blind while chatting:
+	// an engineering-mode chat had no product spec and no engineering spec
+	// in context, so the engineer answered "I can't do this without stated
+	// failure modes" about a design whose failure modes were written down
+	// three lines away in its own spec. Same rule as runPersonaTurn: the
+	// previous stage's document plus this mode's own current document,
+	// nothing further upstream. Stable within a session -> cached prefix.
+	if (session.kind === "project" && session.ideaId && mode !== "audit") {
+		try {
+			const { readInputDoc, readDoc } = require("./mode-docs");
+			const { personaFor } = require("./personas");
+			const persona = personaFor(mode);
+			const input = readInputDoc(session.ideaId, mode);
+			if (input) {
+				messages.push({ role: "system", content: `${persona.inputDoc} (your input document — the feeding rule gives you this and nothing further upstream):\n\n${input}` });
+			} else if (persona.inputDoc) {
+				messages.push({ role: "system", content: `Your input document (${persona.inputDoc}) does not exist yet.` });
+			}
+			const own = persona.outputDoc ? readDoc(session.ideaId, mode) : null;
+			if (own) {
+				messages.push({ role: "system", content: `${persona.outputDoc} (the document THIS mode owns, as it currently stands):\n\n${own}` });
+			}
+		} catch (err) {
+			console.error(`buildContextMessages: mode documents unavailable: ${err.message}`);
+		}
 	}
 
 	// Project stage thread: load the origin chat so the thread isn't
@@ -273,6 +339,8 @@ function buildContextMessages(session) {
 			content: `Summary of earlier turns in this chat (compacted):\n\n${session.summary}`,
 		});
 	}
+
+	if (trailingSystem) messages.push({ role: "system", content: trailingSystem });
 
 	// Verbatim turns not yet folded into the summary. Command lines and
 	// their output stay in context for the reply, but are marked so the
@@ -372,7 +440,12 @@ function fullTranscript(session) {
 function drainForNightlyCapture() {
 	const out = [];
 	for (const session of sessions.values()) {
-		if (session.promoted) continue;
+		// Project chats used to be skipped here (they are marked promoted),
+		// which meant a founder who did their thinking inside projects
+		// produced no captures at all -- so /themes saw nothing and the
+		// weekly profile diff (D-30) read an empty week. Captures are the
+		// raw substrate D-26/D-42 assume; project chats are where the raw
+		// thinking now happens, so they belong in it.
 		const fresh = session.turns
 			.slice(session.flushedThrough)
 			.filter((t) => t.role === "user" && t.userId === session.ownerUserId && t.text.trim());
@@ -485,6 +558,7 @@ async function postCommandResult(client, dest, { text, invocation, userId }) {
 }
 
 module.exports = {
+	sessionMode,
 	loadAll,
 	createSession,
 	getSession,
