@@ -93,7 +93,13 @@ function chunkForSlack(text, max) {
 	return out;
 }
 
-async function promoteChat({ session, client, triggeredByUserId, _simulateFailure = false }) {
+// `_idOverride` is a TEST HOOK, alongside the existing `_simulateFailure`.
+// Without it a test that exercises this path calls generateIdeaId(), which
+// mints a REAL 4-char id -- and promoteChat commits it, so verification
+// runs pushed junk ideas into the shared repo (211b/32ec/3b33 got there
+// exactly this way). git.js excludes `ideas/zz*` from every commit, so a
+// test passing a zz id is committable-by-construction impossible.
+async function promoteChat({ session, client, triggeredByUserId, _simulateFailure = false, _idOverride = null }) {
 	const chatsChannel = session.channel;
 	const millChannel = channelId("mill");
 
@@ -119,7 +125,7 @@ async function promoteChat({ session, client, triggeredByUserId, _simulateFailur
 	const tooVagueDetail = assumption ? null : extractTooVague(session);
 	const summary = await summarizeChat(session);
 
-	const id = generateIdeaId();
+	const id = _idOverride || generateIdeaId();
 
 	let project;
 	try {
