@@ -217,24 +217,58 @@ async function saveModeDocument({ id, mode, threadContext, client, channel, thre
 		return { ok: false, reason: `${mode} mode produces no document (proto writes artifacts, audit writes a verdict)` };
 	}
 	const existing = readDoc(id, mode);
-	const directive =
-		`Write the complete ${persona.outputTitle} as it now stands, incorporating everything decided in the ` +
-		"conversation above. This replaces the current document, so carry forward anything still true rather " +
-		"than only writing what changed. If the conversation has not settled enough to write one, use the " +
-		"REFUSAL:/UNBLOCK: contract instead of padding it out.";
+	const wc = (t) => String(t || "").split(/\s+/).filter(Boolean).length;
+
+	// THE EXISTING DOCUMENT MUST BE IN THE PROMPT.
+	//
+	// It wasn't: runPersonaTurn loads a mode's INPUT document, never its
+	// own, and brainstorm has no input at all -- so the save prompt told
+	// the model to "carry forward anything still true" from a document it
+	// could not see. Proven destructive: a save over a KB containing a
+	// DGFT trade notice, three competitor names and unit economics wiped
+	// all of them, because the model wrote a fresh document from the
+	// conversation alone. Recoverable from git, but silently.
+	const directive = existing
+		? [
+			`Below is the CURRENT ${persona.outputTitle}, followed by the conversation since.`,
+			"",
+			`--- CURRENT ${persona.outputTitle} ---`,
+			existing,
+			"--- end ---",
+			"",
+			`Rewrite it as one coherent ${persona.outputTitle} incorporating what the conversation settled.`,
+			"This REPLACES the file, so everything still true must appear in your output -- specifics especially:",
+			"numbers, named competitors, named regulations, prices, dates. Dropping a fact you were not asked to",
+			"remove is the failure to avoid. Do not append a changelog; produce the document as it now stands.",
+		].join("\n")
+		: `Write the ${persona.outputTitle} from the conversation above, as a complete document.`;
+
 	const result = await runPersonaTurn({ id, mode, threadContext, userText: directive, maxTokens: 8000 });
 	if (result.refusal) return { ok: false, reason: "refused", refusal: result.refusal };
+
+	// Never shrink a document silently. Change 3's rule is "always show it
+	// before it takes effect; never silently overwrite what the founder
+	// wrote" -- a large contraction is the signal that carry-forward
+	// failed, and it is the one thing a founder cannot see from a summary.
+	const before = wc(existing);
+	const after = wc(result.text);
+	const shrankBy = before ? Math.round(((before - after) / before) * 100) : 0;
+	const materialShrink = before > 200 && shrankBy >= 40;
 
 	writeDoc(id, mode, result.text);
 	const summary = await summarizeForThread(result.text).catch(() => result.text.slice(0, 400));
 	if (client && channel) {
 		const verb = existing ? "Updated" : "Created";
+		const delta = existing ? ` · ${before} → ${after} words` : ` · ${after} words`;
+		const warn = materialShrink
+			? `\n\n⚠️ *This shrank the document by ${shrankBy}%.* Check nothing was dropped — the previous version is in git history.`
+			: "";
 		await client.chat
-			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* (\`${persona.outputDoc}\`):\n\n${summary}` })
+			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* (\`${persona.outputDoc}\`)${delta}:\n\n${summary}${warn}` })
 			.catch(() => {});
 		await attachFullDocument(client, { id, mode, channel, threadTs });
 	}
-	return { ok: true, mode, created: !existing, wordCount: result.text.split(/\s+/).filter(Boolean).length };
+	return { ok: true, mode, created: !existing, wordCount: after, previousWordCount: before, shrankBy, materialShrink };
 }
 
 module.exports = {
