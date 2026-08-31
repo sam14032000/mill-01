@@ -215,12 +215,23 @@ function addTurn(session, { role, text, userId, ts, kind = null }) {
 	// mid-conversation shouldn't stall on it), and it's caught/logged
 	// inside maybeCompress itself.
 	if (session.kind === "project" && session.ideaId) {
-		const { readState } = require("./ideas");
 		const { maybeCompress } = require("./audit-reference");
-		const st = readState(session.ideaId);
-		maybeCompress(session.ideaId, st?.mode || "brainstorm", session.turns).catch((e) =>
-			console.error(`addTurn: compression trigger failed for ${session.ideaId}: ${e.message}`),
-		);
+		// Was `readState(id).mode`, which broke silently when mode moved to
+		// per-chat: state.mode became undefined, the fallback fired, and
+		// EVERY entry was labelled "brainstorm" regardless of the chat's
+		// actual mode. D-54 requires the entry to say which mode produced it
+		// ("the auditor must be able to tell them apart"), so the record was
+		// wrong for every non-brainstorm chat.
+		const mode = sessionMode(session);
+		// Deck mode is a branch, not a step: its conversation is persuasion
+		// (how the idea gets framed for an audience), and feeding that to the
+		// gate is close to the laundering the compressor exists to prevent.
+		// The exclusion is symmetric with deck not reading the audit report.
+		if (mode !== "deck") {
+			maybeCompress(session.ideaId, mode, session.turns).catch((e) =>
+				console.error(`addTurn: compression trigger failed for ${session.ideaId}: ${e.message}`),
+			);
+		}
 	}
 
 	return session;
@@ -237,6 +248,59 @@ function markPromoted(threadTs) {
 // Builds the message array for a conversational turn: stable content
 // first (system, profile, captures, running summary) so the prefix
 // caches, volatile last (recent verbatim turns).
+// Assets deck mode must NEVER see. Named explicitly rather than left to
+// "nothing happens to load them": the audit report is the auditor's
+// working record -- raw founder beliefs, contradiction flags, kill
+// reasoning -- and a deck is the artifact most likely to be shown to
+// outsiders. Keeping the two apart is the point of deck being a branch.
+const DECK_FORBIDDEN = ["audit-reference.md", /^audit-\d{8}-\d{4}\.json$/];
+
+function isForbiddenForDeck(filename) {
+	return DECK_FORBIDDEN.some((rule) => (typeof rule === "string" ? rule === filename : rule.test(filename)));
+}
+
+// Everything the project knows, minus DECK_FORBIDDEN. Each asset is its
+// own system message so the cached prefix stays stable as individual
+// documents change.
+function buildDeckAssets(ideaId) {
+	const fs = require("node:fs");
+	const path = require("node:path");
+	const { IDEAS_DIR } = require("./ideas");
+	const dir = path.join(IDEAS_DIR, ideaId);
+	const out = [];
+
+	const add = (filename, label, cap = 24000) => {
+		if (isForbiddenForDeck(filename)) return; // belt and braces
+		const p = path.join(dir, filename);
+		if (!fs.existsSync(p)) return;
+		const body = fs.readFileSync(p, "utf8");
+		out.push({ role: "system", content: `${label} (${filename}):\n\n${body.slice(0, cap)}` });
+	};
+
+	add("research-kb.md", "Research knowledge base");
+	add("product-spec.md", "Product spec");
+	add("engineering-spec.md", "Engineering spec");
+	add("outcomes.md", "Prototype outcomes — what real people did when shown the built thing");
+	add(path.join("find", "index.md"), "Surface-search reports (NOT evidence — unverified web lookups)");
+	add(path.join("docs", "index.md"), "Uploaded documents (index)");
+
+	// Latest research report + raw field notes: the strongest material a
+	// deck can legitimately draw on, and the only sourced claims available.
+	try {
+		const reports = fs.readdirSync(dir).filter((f) => /^research-\d{8}-\d{4}\.md$/.test(f)).sort();
+		if (reports.length) add(reports[reports.length - 1], "Latest research report (sourced evidence)");
+	} catch { /* no reports */ }
+	try {
+		const fieldDir = path.join(dir, "field");
+		for (const f of fs.readdirSync(fieldDir).filter((f) => f.endsWith(".md")).sort().slice(-3)) {
+			const body = fs.readFileSync(path.join(fieldDir, f), "utf8");
+			out.push({ role: "system", content: `Raw field notes (${f}) — what real people actually said:\n\n${body.slice(0, 8000)}` });
+		}
+	} catch { /* no field notes */ }
+
+	return out;
+}
+
 // The mode a session is in. A #chats session is a project-less BRAINSTORM
 // chat -- same concept, same persona, just no documents to feed from
 // (there is no project). A project chat carries its own mode, per chat.
@@ -286,15 +350,28 @@ function buildContextMessages(session, { trailingSystem = null } = {}) {
 		}
 	}
 
-	// The feeding rule (Change 2) in CONVERSATION, not just in document
-	// generation. A persona was previously document-blind while chatting:
-	// an engineering-mode chat had no product spec and no engineering spec
-	// in context, so the engineer answered "I can't do this without stated
-	// failure modes" about a design whose failure modes were written down
-	// three lines away in its own spec. Same rule as runPersonaTurn: the
-	// previous stage's document plus this mode's own current document,
-	// nothing further upstream. Stable within a session -> cached prefix.
-	if (session.kind === "project" && session.ideaId && mode !== "audit") {
+	// DECK MODE reads every asset EXCEPT the audit report. It is a branch,
+	// not a link in the chain, so the feeding rule below does not apply --
+	// a deck wants everything the project knows.
+	//
+	// The exclusion is a deny-list on purpose. Leaving the audit report out
+	// "because nothing happens to load it" would be an accident one future
+	// change could undo silently; naming it makes removing it a deliberate
+	// act someone has to argue for.
+	if (session.kind === "project" && session.ideaId && mode === "deck") {
+		try {
+			messages.push(...buildDeckAssets(session.ideaId));
+		} catch (err) {
+			console.error(`buildContextMessages: deck assets unavailable: ${err.message}`);
+		}
+	} else if (session.kind === "project" && session.ideaId && mode !== "audit") {
+		// The feeding rule (Change 2) in CONVERSATION, not just in document
+		// generation. A persona was previously document-blind while chatting:
+		// an engineering-mode chat had no product spec and no engineering spec
+		// in context, so the engineer answered "I can't do this without stated
+		// failure modes" about a design whose failure modes were in its own
+		// spec. Same rule as runPersonaTurn: the previous stage's document
+		// plus this mode's own current document, nothing further upstream.
 		try {
 			const { readInputDoc, readDoc } = require("./mode-docs");
 			const { personaFor } = require("./personas");
@@ -560,6 +637,7 @@ async function postCommandResult(client, dest, { text, invocation, userId }) {
 
 module.exports = {
 	sessionMode,
+	buildDeckAssets,
 	loadAll,
 	createSession,
 	getSession,

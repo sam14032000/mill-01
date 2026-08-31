@@ -104,9 +104,47 @@ const PERSONAS = {
 			REFUSAL_CONTRACT,
 		].join("\n\n"),
 	},
+
+	// A BRANCH off brainstorm, not a link in the chain. A deck is a
+	// communication artifact: it can be made as soon as there is something
+	// to say, it wants everything the project knows, and nothing downstream
+	// depends on it. `branch: true` is what tells chain logic that -- do not
+	// infer it from position in MODE_ORDER.
+	//
+	// Two asymmetries, both deliberate:
+	//   * It reads every asset EXCEPT the audit report (see chat-session.js).
+	//   * Its conversation is excluded from the audit report in return, so
+	//     pitch framing never reaches the gate.
+	deck: {
+		mode: "deck",
+		label: "Deck writer",
+		branch: true,
+		// Enforces "brainstorm must have run" for free, via checkMissingInput.
+		inputDoc: "research-kb.md",
+		outputDoc: "deck.md",
+		outputTitle: "Deck",
+		systemPrompt: [
+			"You write the deck for this idea, working from everything the project knows.",
+			"Refuse a slide that has no named audience and no stated intended effect -- who is this slide for, " +
+				"and what should it make them think, feel or do? On refusal, name which of the two is missing. " +
+				"A slide that exists because decks usually have one is the thing to refuse.",
+			"You are writing `deck.md`: one section per slide, each with its audience and intended effect, the " +
+				"content itself, and optional speaker notes. Slide count, tone and emphasis are the founder's call " +
+				"-- they will tell you; do not invent a house style or pad to a conventional length.",
+			"You do NOT see the audit report, and this conversation does not reach the auditor. Say what the deck " +
+				"should say; the gate is a separate question decided elsewhere.",
+			REFUSAL_CONTRACT,
+		].join("\n\n"),
+	},
 };
 
-const MODE_ORDER = ["brainstorm", "product", "engineering", "proto", "audit"];
+// The switchable set. Order here is presentation order in the mode picker;
+// it is NOT the dependency chain -- `deck` is a branch (branch: true) and
+// nothing downstream reads its document.
+const MODE_ORDER = ["brainstorm", "product", "engineering", "proto", "deck", "audit"];
+
+// The sequential chain, for anything reasoning about what feeds what.
+const CHAIN_MODES = MODE_ORDER.filter((m) => !PERSONAS[m]?.branch && m !== "audit");
 
 function personaFor(mode) {
 	const p = PERSONAS[mode];
@@ -129,4 +167,4 @@ function parseRefusal(text) {
 	return { what, unblock };
 }
 
-module.exports = { PERSONAS, MODE_ORDER, personaFor, parseRefusal, REFUSAL_CONTRACT };
+module.exports = { PERSONAS, MODE_ORDER, CHAIN_MODES, personaFor, parseRefusal, REFUSAL_CONTRACT };

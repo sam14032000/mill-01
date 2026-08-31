@@ -33,6 +33,7 @@ const MODE_EMOJI = {
 	product: "📋",
 	engineering: "🔧",
 	proto: "🔨",
+	deck: "📊",
 	audit: "⚖️",
 };
 
