@@ -30,28 +30,44 @@ const chats = require("./chats");
 
 let pinScopeWarned = false;
 
+// Where the repo is browsable, so a document name on the card can be a
+// link rather than a path a phone-first founder has no way to open.
+// Overridable for a fork or a moved remote.
+const REPO_WEB_URL = (process.env.MILL_REPO_WEB_URL || "https://github.com/sam14032000/mill-01").replace(/\/+$/, "");
+const REPO_BRANCH = process.env.MILL_REPO_BRANCH || "main";
+
+function docUrl(id, filename) {
+	return `${REPO_WEB_URL}/blob/${REPO_BRANCH}/ideas/${id}/${filename}`;
+}
+
+// ONE line: the document chain plus the shared audit master report.
+// Documents that exist are hyperlinks (a name you can tap); ones that
+// don't stay plain "— name" so the gap is still legible. The audit report
+// sits at the end of this line rather than in its own bolded line below,
+// which gave a single link the visual weight of a section heading.
 function docsLine(id) {
 	try {
 		const { readDoc } = require("./mode-docs");
 		const chain = [
-			["brainstorm", "research KB"],
-			["product", "product spec"],
-			["engineering", "engineering spec"],
+			["brainstorm", "research KB", "research-kb.md"],
+			["product", "product spec", "product-spec.md"],
+			["engineering", "engineering spec", "engineering-spec.md"],
 		];
-		return `*Docs:* ${chain.map(([m, label]) => (readDoc(id, m) ? `✓ ${label}` : `— ${label}`)).join(" · ")}`;
+		const parts = chain.map(([m, label, file]) =>
+			readDoc(id, m) ? `<${docUrl(id, file)}|${label}>` : `— ${label}`,
+		);
+
+		const auditPath = path.join(IDEAS_DIR, id, "audit-reference.md");
+		if (fs.existsSync(auditPath)) {
+			const entries = (fs.readFileSync(auditPath, "utf8").match(/^### /gm) || []).length;
+			parts.push(`<${docUrl(id, "audit-reference.md")}|audit report (${entries})>`);
+		} else {
+			parts.push("— audit report");
+		}
+		return `*Docs:* ${parts.join(" · ")}`;
 	} catch {
 		return null;
 	}
-}
-
-// The project-level audit master report, shared by every chat -- this is
-// the line that makes "chats can reference each other's report" visible
-// rather than merely true.
-function auditReportLine(id) {
-	const p = path.join(IDEAS_DIR, id, "audit-reference.md");
-	if (!fs.existsSync(p)) return "*Audit master report:* _not started_";
-	const entries = (fs.readFileSync(p, "utf8").match(/^### /gm) || []).length;
-	return `*Audit master report:* \`ideas/${id}/audit-reference.md\` — ${entries} entr${entries === 1 ? "y" : "ies"}, shared across every chat in this project`;
 }
 
 // The mode control.
@@ -92,7 +108,7 @@ function modeSelect(id, chatTs, currentMode) {
 // The mode is deliberately NOT repeated in the heading: the select
 // accessory already displays it, and showing the same value twice on one
 // card is noise. The control is the status display.
-function cardText(id, chatTs, chat) {
+function cardText(id, chatTs, chat, { permalink = null } = {}) {
 	const state = readState(id);
 	const assumption = readAssumption(id) || state?.assumption || null;
 	const lines = [
@@ -101,12 +117,14 @@ function cardText(id, chatTs, chat) {
 	];
 	const docs = docsLine(id);
 	if (docs) lines.push(docs);
-	lines.push(auditReportLine(id));
+	// Without this, opening a long thread lands you at the top and you have
+	// to scroll to find where the conversation actually got to.
+	if (permalink) lines.push(`<${permalink}|▶ Continue where you left off on this chat>`);
 	return lines.join("\n");
 }
 
-function cardBlocks(id, chatTs, chat) {
-	const text = toSlackMrkdwn(cardText(id, chatTs, chat));
+function cardBlocks(id, chatTs, chat, { permalink = null } = {}) {
+	const text = toSlackMrkdwn(cardText(id, chatTs, chat, { permalink }));
 	return { text, blocks: [{ type: "section", text: { type: "mrkdwn", text }, accessory: modeSelect(id, chatTs, chat.mode) }] };
 }
 
@@ -132,7 +150,17 @@ async function upsertChatCard(client, id, chatTs) {
 	const state = readState(id);
 	const chat = chats.readChat(id, chatTs);
 	if (!state?.channel_id || !chat) return null;
-	const { text, blocks } = cardBlocks(id, chatTs, chat);
+	// Link to the newest message in THIS chat. Falls back to no link rather
+	// than to the thread root: a "continue where you left off" that lands
+	// you back at the top is worse than none.
+	let permalink = null;
+	if (chat.last_ts) {
+		permalink = await client.chat
+			.getPermalink({ channel: state.channel_id, message_ts: chat.last_ts })
+			.then((r) => r.permalink)
+			.catch(() => null);
+	}
+	const { text, blocks } = cardBlocks(id, chatTs, chat, { permalink });
 	await client.chat
 		.update({ channel: state.channel_id, ts: chatTs, text, blocks })
 		.catch((e) => console.error(`chat-card: update failed for ${id}/${chatTs}: ${e?.data?.error || e.message}`));
@@ -173,9 +201,11 @@ async function repin(client, id, chatTs) {
 
 // Called whenever something happens in a chat: bumps last_active_at,
 // moves the pin, and re-renders the card.
-async function touchAndRepin(client, id, chatTs) {
+async function touchAndRepin(client, id, chatTs, { latestTs = null } = {}) {
 	if (!chats.readChat(id, chatTs)) return null;
 	chats.touchChat(id, chatTs);
+	// Remember the newest message so the card can link straight to it.
+	if (latestTs && latestTs !== chatTs) chats.updateChat(id, chatTs, { last_ts: latestTs });
 	await upsertChatCard(client, id, chatTs);
 	await repin(client, id, chatTs);
 	return chats.readChat(id, chatTs);
@@ -210,4 +240,4 @@ function chatsCardBlocks(topic, founder, threadTs) {
 	};
 }
 
-module.exports = { chatsCardBlocks, createChatCard, upsertChatCard, touchAndRepin, repin, cardText, cardBlocks, docsLine, auditReportLine };
+module.exports = { chatsCardBlocks, createChatCard, upsertChatCard, touchAndRepin, repin, cardText, cardBlocks, docsLine };

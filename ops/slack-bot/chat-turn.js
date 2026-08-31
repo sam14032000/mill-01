@@ -45,7 +45,7 @@ async function handleChatTurn({ message, client }) {
 	if (inChats && (message.subtype === "file_share" || (message.files && message.files.length))) {
 		const text = "I can't store files in a chat — start a project and I'll keep it with the idea.";
 		await client.chat
-			.postMessage({ channel: message.channel, thread_ts: session.threadTs, text, blocks: withPromoteButton(text, session.threadTs) })
+			.postMessage({ channel: message.channel, thread_ts: session.threadTs, text })
 			.catch(() => {});
 		return true;
 	}

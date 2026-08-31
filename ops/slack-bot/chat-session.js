@@ -546,7 +546,8 @@ async function postCommandResult(client, dest, { text, invocation, userId }) {
 	const msg = { channel: dest.channel, text };
 	if (dest.threadTs) msg.thread_ts = dest.threadTs;
 	// 15.1: every bot reply in a chat thread carries the promote button.
-	if (dest.session) msg.blocks = withPromoteButton(text, dest.session.threadTs);
+	// (No promote button here -- it lives on the chat's card, not on every
+	// command result posted into the thread.)
 	// Bug 1: land in the "On it — running /x…" placeholder when there is
 	// one (reply.js). Falls back to a plain post otherwise.
 	const posted = await postResult(client, msg);

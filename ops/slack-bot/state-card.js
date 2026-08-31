@@ -32,7 +32,7 @@ async function upsertStateCard(client, id, { chatTs = null, latestTs = null } = 
 			(latestTs && chats.readChat(id, latestTs) && latestTs) ||
 			chats.lastActiveChatTs(id);
 		if (!target) return; // project has no chats yet
-		await touchAndRepin(client, id, target);
+		await touchAndRepin(client, id, target, { latestTs });
 	} catch (err) {
 		console.error(`state-card: upsert failed for ${id}: ${err?.data?.error || err.message}`);
 	}

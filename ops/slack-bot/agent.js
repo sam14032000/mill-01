@@ -318,9 +318,25 @@ async function runTurn({ session, message, client }) {
 				: replyText;
 
 		addTurn(session, { role: "assistant", text: finalReply });
-		const blocks = withPromoteButton(finalReply, session.threadTs);
-		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: finalReply, blocks }).catch(() => {});
-		else await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: finalReply, blocks }).catch(() => {});
+		// No promote button on individual turns: it belongs on the card at
+		// the top of the thread, once, not repeated down every reply.
+		let postedTs = placeholderTs;
+		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: finalReply }).catch(() => {});
+		else postedTs = await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: finalReply }).then((r) => r.ts).catch(() => null);
+
+		// A plain conversational turn now counts as activity: it moves the
+		// pin to this chat and refreshes its card (including the
+		// "continue where you left off" link). Previously only COMMANDS did
+		// this, so "the last active chat is pinned" was false for any
+		// project where the recent work was conversation.
+		if (isProject && ideaId) {
+			try {
+				const { touchAndRepin } = require("./chat-card");
+				await touchAndRepin(client, ideaId, session.threadTs, { latestTs: postedTs });
+			} catch (err) {
+				console.error(`agent: chat touch failed (${session.threadTs}): ${err.message}`);
+			}
+		}
 
 		try {
 			const marker = await maybeCompact(session);
