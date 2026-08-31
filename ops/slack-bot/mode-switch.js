@@ -13,7 +13,7 @@ const { MODE_ORDER, personaFor } = require("./personas");
 const { readState, updateState, readLatestAudit } = require("./ideas");
 const chats = require("./chats");
 const { modeBannerText } = require("./project-channel");
-const { checkMissingInput, missingDocBlocks, checkStale, staleDocBlocks } = require("./mode-docflow");
+const { checkMissingInput, checkStale, staleDocBlocks } = require("./mode-docflow");
 
 const SWITCHABLE_MODES = MODE_ORDER; // brainstorm, product, engineering, proto, audit
 
@@ -42,18 +42,50 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder, chat
 	if (!targetChat || !chats.readChat(id, targetChat)) {
 		return { ok: false, reason: "no chat to switch — open a chat in this project first (`@Mill chat <title>`)" };
 	}
-	chats.updateChat(id, targetChat, { mode });
+	const previousMode = chats.chatMode(id, targetChat);
+	// prev_mode is what the first message in the new mode syncs from.
+	chats.updateChat(id, targetChat, { mode, ...(previousMode && previousMode !== mode ? { prev_mode: previousMode } : {}) });
 
 	const bannerChannel = channel || state.channel_id;
 	const bannerThread = targetChat;
 	if (client && bannerChannel) {
-		// Plain text, no control. The mode control lives on the pinned card
-		// (state-card.js modeOverflow) -- posting one into the thread on
-		// every switch is what made rows accumulate and go stale.
+		// Plain text, no control -- the mode control lives on the card.
+		//
+		// And if NOTHING has been said since the last banner, edit that one
+		// in place instead of posting another. Switching brainstorm ->
+		// product -> engineering while deciding where to start would
+		// otherwise leave three banners narrating a decision the founder
+		// made in one motion. The turn count at post time is the test:
+		// unchanged means nobody has spoken since.
 		const text = modeBannerText(mode, { byFounder });
-		await client.chat
-			.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text })
-			.catch((e) => console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`));
+		const chat = chats.readChat(id, targetChat);
+		const { getSession } = require("./chat-session");
+		const turnsNow = getSession(targetChat)?.turns?.length ?? 0;
+		const canEditInPlace = chat?.banner_ts && chat.banner_at_turn === turnsNow;
+
+		if (canEditInPlace) {
+			const edited = await client.chat
+				.update({ channel: bannerChannel, ts: chat.banner_ts, text })
+				.then(() => true)
+				.catch((e) => {
+					console.error(`mode-switch: banner edit failed for ${id}: ${e?.data?.error || e.message}`);
+					return false;
+				});
+			if (edited) chats.updateChat(id, targetChat, { banner_at_turn: turnsNow });
+			else await postFreshBanner();
+		} else {
+			await postFreshBanner();
+		}
+
+		async function postFreshBanner() {
+			const posted = await client.chat
+				.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text })
+				.catch((e) => {
+					console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`);
+					return null;
+				});
+			if (posted?.ts) chats.updateChat(id, targetChat, { banner_ts: posted.ts, banner_at_turn: turnsNow });
+		}
 	}
 
 	// Re-render THIS chat's card (its root message) so the ✓ moves --
@@ -65,16 +97,14 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder, chat
 		console.error(`mode-switch: chat card refresh failed for ${id}: ${e.message}`);
 	}
 
-	// Change 3: entering a mode whose input document doesn't exist offers
-	// generate-or-switch instead of proceeding silently. Checked ahead of
-	// staleness -- a document that doesn't exist can't be stale.
+	// The missing-input offer used to fire HERE, at switch time. It now
+	// fires on the first message (mode-entry.js): a founder stepping
+	// through modes to decide where to start was getting an offer per
+	// switch, about work they had not begun. Staleness is still checked
+	// here, because a stale document is a fact about the project rather
+	// than a question about the founder's intent.
 	let docOffer = null;
-	const missing = checkMissingInput(id, mode);
-	if (missing && client && bannerChannel) {
-		const { text, blocks } = missingDocBlocks(id, missing);
-		await client.chat.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text, blocks }).catch(() => {});
-		docOffer = { kind: "missing", ...missing };
-	} else if (client && bannerChannel) {
+	if (client && bannerChannel && !checkMissingInput(id, mode)) {
 		const stale = await checkStale(id, mode).catch((e) => {
 			console.error(`mode-switch: staleness check failed for ${id}/${mode}: ${e.message}`);
 			return null;

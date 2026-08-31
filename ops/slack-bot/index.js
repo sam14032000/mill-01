@@ -417,6 +417,60 @@ app.action(/^mode_switch/, async ({ ack, body, client }) => {
 	}
 });
 
+// The auto-gen decision on the first message in a mode whose input
+// document is missing (mode-entry.js). "Yes" drafts it with a visible
+// thinking message; "no" switches THIS chat to the missing stage, keeping
+// the conversation in one thread rather than starting a fresh one.
+app.action("autogen_yes", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, chatTs, missingMode] = String(body.actions?.[0]?.value || "").split("::");
+		const { clearPending } = require("./mode-entry");
+		clearPending(id, chatTs);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: `⏳ Drafting the ${missingMode} document…` });
+		const st = readState(id);
+		const channel = body.channel?.id || st?.channel_id;
+		const { generateMissingDoc } = require("./mode-docflow");
+		const { threadContextText } = require("./command-shim");
+		const result = await generateMissingDoc({
+			id, mode: missingMode, client, channel, threadTs: chatTs,
+			// The upstream document was just synced by mode-entry, so this is
+			// belt-and-braces rather than the primary source.
+			threadContext: threadContextText(chatTs, channel),
+		});
+		if (!result.ok && !result.refusal) {
+			await client.chat.postMessage({ channel, thread_ts: chatTs, text: `Couldn't draft it: ${result.reason}` }).catch(() => {});
+		}
+		const { touchAndRepin } = require("./chat-card");
+		await touchAndRepin(client, id, chatTs).catch(() => {});
+	} catch (e) {
+		console.error("autogen_yes failed:", e);
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+app.action("autogen_no", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, chatTs, missingMode] = String(body.actions?.[0]?.value || "").split("::");
+		const { clearPending } = require("./mode-entry");
+		clearPending(id, chatTs);
+		const byFounder = founderForUserId(body.user?.id);
+		const result = await switchMode({ id, chatTs, mode: missingMode, client, channel: body.channel?.id, byFounder });
+		await buttonResolve.resolveMessage({
+			client, body,
+			outcomeText: result.ok ? `✅ Switched this chat to *${missingMode}*` : `⚠️ ${result.reason}`,
+		});
+	} catch (e) {
+		console.error("autogen_no failed:", e);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Switch failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
 // Change 3: missing/stale document buttons. All built on button-resolve
 // from the start, same as mode_switch.
 app.action("generate_doc", async ({ ack, body, client }) => {

@@ -204,7 +204,13 @@ function findLatestSessionForUser(userId, channel) {
 // amendment: momentum bias -- a thread that just ran /attack was pulling
 // the next question toward another /attack).
 function addTurn(session, { role, text, userId, ts, kind = null }) {
-	session.turns.push({ role, text, userId: userId || null, ts: ts || null, ...(kind ? { kind } : {}) });
+	// Tag the turn with the mode it was spoken in. A chat's mode changes
+	// over its life, so "which turns belong to brainstorm" cannot be
+	// recovered later from the chat's CURRENT mode -- it has to be recorded
+	// at the time. doc-sync.js relies on this to keep a document syncing
+	// only from its own stage's conversation.
+	const spokenIn = session.kind === "project" && session.ideaId ? sessionMode(session) : null;
+	session.turns.push({ role, text, userId: userId || null, ts: ts || null, ...(kind ? { kind } : {}), ...(spokenIn ? { mode: spokenIn } : {}) });
 	persist(session);
 
 	// Change 4: compress every N turns, across every mode, into

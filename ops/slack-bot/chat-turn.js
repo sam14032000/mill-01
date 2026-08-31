@@ -60,6 +60,30 @@ async function handleChatTurn({ message, client }) {
 
 	addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
 
+	// FIRST MESSAGE AFTER A MODE SWITCH.
+	//
+	// Two things happen before the agent replies, both so the DOCUMENT
+	// carries context between stages rather than the raw thread doing it:
+	//
+	//  1. The mode the chat just left is brought up to date from this
+	//     chat's conversation (doc-sync). After that the new mode reads a
+	//     current upstream document and needs none of the old turns.
+	//  2. If the new mode's own input document is missing, the founder is
+	//     asked once whether to generate it -- on the FIRST MESSAGE rather
+	//     than at switch time, so switching through modes to decide where
+	//     to start doesn't spray offers into the thread.
+	if (session.kind === "project" && session.ideaId) {
+		const handled = await require("./mode-entry")
+			.handleFirstMessage({ session, message, client })
+			.catch((err) => {
+				console.error(`mode-entry: first-message handling failed: ${err.message}`);
+				return false;
+			});
+		// A pending auto-gen decision owns the turn -- the founder answers
+		// the buttons before the persona speaks.
+		if (handled) return true;
+	}
+
 	return agent.runTurn({ session, message, client });
 }
 
