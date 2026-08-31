@@ -141,11 +141,13 @@
 
 ### D-01 · Host sizing
 
-**Decision.** 2GB RAM, 1–2 vCPU, 4GB swap. DigitalOcean BLR1 as built.
+**Decision.** ~4GB RAM, 2 vCPU, swap. **Hetzner, as running.**
 
-**Why 2GB.** No production builds under D-24. Swap converts an OOM kill into a slow install, acceptable for throwaway work.
+**Corrected 31 August 2026.** This entry described the host as *"2GB RAM, 1–2 vCPU, 4GB swap. DigitalOcean BLR1 as built,"* with Hetzner listed below as a *"cheaper option, not yet taken."* Both were false: the move had already happened. Verified on the box — `sys_vendor: Hetzner`, `product_name: vServer`, 3.7GB total, 2 vCPU. The revisit condition at the foot of this entry ("the budget needs headroom") was met and acted on; nobody updated the record.
 
-**Cheaper option, not yet taken.** Hetzner CX22 gives 4GB for roughly $4.10 against $12. No India datacentre — 130ms from Germany, ~60ms Singapore — irrelevant for a Slack-driven control plane running unattended jobs. Worth roughly five extra audits a month.
+**Why this mattered, not just tidiness.** The stale $12 line was used in an August 2026 planning pass to argue that adding a deck-rendering vendor would breach D-25's $100 ceiling. It wouldn't have — roughly $8/month had already been freed and never absorbed into the budget table. A decision was nearly taken on a number that had not been true for some time, which is exactly the failure the drift convention in this file's header describes.
+
+**Why the extra headroom.** No production builds under D-24, so 2GB was defensible; 4GB removes the swap-thrash risk on prototype installs and leaves room for the LiteLLM container (~820MB resident) alongside the bot, Postgres, the Docker sandbox and ngrok.
 
 **Rejected: Oracle Always Free** (4 ARM OCPU, 24GB, forever). Disk reads at 55 MB/s against Hetzner's 2.52 GB/s, and the prototype bottleneck is disk-bound package installs. Indian debit cards frequently rejected at signup; ARM capacity often unavailable; idle instances reclaimed.
 
