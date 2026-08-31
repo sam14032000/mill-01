@@ -181,4 +181,33 @@ async function touchAndRepin(client, id, chatTs) {
 	return chats.readChat(id, chatTs);
 }
 
-module.exports = { createChatCard, upsertChatCard, touchAndRepin, repin, cardText, cardBlocks, docsLine, auditReportLine };
+// A project-less chat (#chats) rendered in the same card shape. There is
+// no assumption, no document chain and no audit report yet -- those are
+// what a project adds -- so the card carries what does exist: the topic,
+// who opened it, the mode (always brainstorm without documents to feed
+// from), and the way out. Same visual grammar as a project chat's card,
+// so the two tiers read as one concept.
+function chatsCardBlocks(topic, founder, threadTs) {
+	const { PROMOTE_ACTION_ID } = require("./promote-button");
+	const text = [
+		`💬 *${topic}* · ${founder}`,
+		"_Brainstorm mode. Think out loud — or say \"attack this\", \"look X up\"._",
+		// The old root claimed "nothing here is saved unless you start a
+		// project", which was never true: the nightly job appends your own
+		// messages to your captures so raw thinking is not lost (D-42).
+		"_Your own messages are appended to your captures nightly. A project adds documents, research and the audit gate._",
+	].join("\n");
+	return {
+		text,
+		blocks: [
+			{ type: "section", text: { type: "mrkdwn", text: toSlackMrkdwn(text) } },
+			{
+				type: "actions",
+				block_id: "promote",
+				elements: [{ type: "button", action_id: PROMOTE_ACTION_ID, text: { type: "plain_text", text: "Start a project from this idea" }, value: String(threadTs) }],
+			},
+		],
+	};
+}
+
+module.exports = { chatsCardBlocks, createChatCard, upsertChatCard, touchAndRepin, repin, cardText, cardBlocks, docsLine, auditReportLine };
