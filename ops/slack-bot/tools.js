@@ -86,6 +86,12 @@ const SCHEMAS = [
 			"Create a child project from a new idea that branched off this one. Project only. Use when the founder wants to split a tangent into its own project.",
 		parameters: { type: "object", properties: { idea: { type: "string", description: "the new idea to spin off (required)" } }, required: ["idea"] },
 	},
+	{
+		name: "save",
+		description:
+			"Write THIS chat's current-mode document from the conversation (brainstorm -> research knowledge base, product -> product spec, engineering -> engineering spec, deck -> deck). Project only. Use it when the founder asks you to CREATE, WRITE, UPDATE or SAVE the document this mode owns -- \"create a product spec\", \"write the engineering spec\", \"save this\", \"put that in the doc\". Do NOT use it for ordinary discussion; the document is reconciled with what is already there, never blank-page rewritten.",
+		parameters: { type: "object", properties: {}, required: [] },
+	},
 ];
 
 function toolSpecs() {
@@ -150,6 +156,30 @@ async function runTool(name, args, ctx) {
 				`INLINE WEB CHECK (${queryCount} quer${queryCount === 1 ? "y" : "ies"}) — surface search, NOT evidence. ` +
 				`Use this to answer, then end your reply with: _(quick web check — not verified, not evidence)_\n\n${findings}`,
 		};
+	}
+
+	// `save` is not a slash command -- it writes the current chat's own
+	// document -- so it runs directly rather than through dispatchCommand.
+	if (name === "save") {
+		const { chatMode } = require("./chats");
+		const mode = ctx.threadTs ? chatMode(ctx.project.id, ctx.threadTs) : "brainstorm";
+		const { personaFor } = require("./personas");
+		if (!personaFor(mode).outputDoc) {
+			return {
+				posted: false,
+				result: `did not save: *${mode}* mode owns no document (proto writes artifacts, audit produces a verdict). Tell the founder plainly.`,
+			};
+		}
+		try {
+			const { runSaveForThread } = require("./mode-docflow");
+			await runSaveForThread({
+				id: ctx.project.id, mode, client: ctx.client,
+				channel: ctx.channelId, threadTs: ctx.threadTs, progressTs: ctx.progressTs,
+			});
+			return { posted: true, result: "`save` ran; the document and its word count are in the thread." };
+		} catch (err) {
+			return { posted: false, result: `\`save\` errored: ${err?.message || err}. Tell the founder it failed.` };
+		}
 	}
 
 	let disp;

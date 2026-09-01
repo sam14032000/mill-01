@@ -15,10 +15,10 @@
 //   composeIdeaInput        -- merge the invoking text with thread context
 //   isAnaphoric             -- /find's anaphora resolver (commands/find.js)
 
-const ACTIONS = ["attack", "find", "cross", "blindspot", "themes", "test", "proto", "spinoff", "audit"];
+const ACTIONS = ["attack", "find", "cross", "blindspot", "themes", "test", "proto", "spinoff", "audit", "save"];
 
 // Actions that need a project (not usable in a bare #chats session).
-const PROJECT_ONLY = new Set(["test", "proto", "spinoff", "audit"]);
+const PROJECT_ONLY = new Set(["test", "proto", "spinoff", "audit", "save"]);
 
 // The `@Mill <word> ...` form. First word after the mention, mapped to an
 // action. Returns { action, rest } or null. Deliberate invocation --

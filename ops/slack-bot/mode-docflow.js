@@ -271,7 +271,38 @@ async function saveModeDocument({ id, mode, threadContext, client, channel, thre
 	return { ok: true, mode, created: !existing, wordCount: after, previousWordCount: before, shrankBy, materialShrink };
 }
 
+
+// The save both invocation paths share: `@Mill save`, and the agent's
+// `save` tool when a founder asks the persona to write its document.
+//
+// This existed only inside index.js's app_mention branch, which meant a
+// founder saying "create a product spec" -- the plainest possible request
+// for this exact operation -- could never reach it. The agent had ten
+// tools and none of them wrote a document, so the PM answered in prose
+// and the spec appeared later as a side effect of turn-count bookkeeping.
+async function runSaveForThread({ id, mode, client, channel, threadTs, progressTs = null }) {
+	const { threadContextText } = require("./command-shim");
+	const result = await saveModeDocument({
+		id, mode, client, channel, threadTs,
+		threadContext: threadContextText(threadTs, channel),
+	});
+	const text = result.ok
+		? `_Saved (${result.wordCount} words)._`
+		: result.refusal
+			? `${result.refusal.what}\nUNBLOCK: ${result.refusal.unblock}`
+			: `Couldn't save: ${result.reason}`;
+	if (progressTs) await client.chat.update({ channel, ts: progressTs, text }).catch(() => {});
+	else await client.chat.postMessage({ channel, thread_ts: threadTs, text }).catch(() => {});
+	// The card's Docs line changes the moment a document exists.
+	if (threadTs) {
+		const { touchAndRepin } = require("./chat-card");
+		await touchAndRepin(client, id, threadTs).catch(() => {});
+	}
+	return { ...result, text };
+}
+
 module.exports = {
+	runSaveForThread,
 	saveModeDocument,
 	checkMissingInput,
 	missingDocBlocks,

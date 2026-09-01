@@ -348,23 +348,14 @@ app.event("app_mention", async ({ event, client }) => {
 			.postMessage({ channel: event.channel, thread_ts: chatTs, text: `_Writing the ${mode} document…_` })
 			.catch(() => null);
 		try {
-			const { saveModeDocument } = require("./mode-docflow");
-			const { threadContextText } = require("./command-shim");
-			const result = await saveModeDocument({
+			// Same path the agent's `save` tool takes, so `@Mill save` and
+			// "write the product spec" cannot drift apart.
+			const { runSaveForThread } = require("./mode-docflow");
+			await runSaveForThread({
 				id: project.id, mode, client,
 				channel: event.channel, threadTs: chatTs,
-				threadContext: threadContextText(chatTs, event.channel),
+				progressTs: placeholder ? placeholder.ts : null,
 			});
-			const outcome = result.ok
-				? `_Saved (${result.wordCount} words)._`
-				: result.refusal
-					? `${result.refusal.what}\nUNBLOCK: ${result.refusal.unblock}`
-					: `Couldn't save: ${result.reason}`;
-			if (placeholder) await client.chat.update({ channel: event.channel, ts: placeholder.ts, text: outcome }).catch(() => {});
-			else await post(outcome);
-			// The card's Docs line changes the moment a document exists.
-			const { touchAndRepin } = require("./chat-card");
-			if (chatTs) await touchAndRepin(client, project.id, chatTs).catch(() => {});
 		} catch (e) {
 			console.error("save failed:", e);
 			if (placeholder) await client.chat.update({ channel: event.channel, ts: placeholder.ts, text: `Save failed: ${e.message}` }).catch(() => {});
