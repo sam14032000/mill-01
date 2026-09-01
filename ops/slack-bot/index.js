@@ -756,7 +756,16 @@ app.message(async ({ message, client }) => {
 	if (handleThreadMessage(message)) return;
 
 	// A file uploaded into a project channel is a document (Part 17).
-	if (message.subtype === "file_share" && (await handleProjectUpload({ message, client }))) return;
+	// A comment attached to an upload is still a message. Storing the files
+	// used to consume the turn, so "here are five slides — make me something
+	// similar" got a ✅ and no reply: the instruction vanished behind a tick
+	// that reads as "understood". Files are stored first, then anything the
+	// founder actually said falls through to the persona, with the new
+	// documents already in context.
+	if (message.subtype === "file_share") {
+		const stored = await handleProjectUpload({ message, client });
+		if (stored && !(message.text || "").trim()) return; // files only, nothing said
+	}
 
 	// A message in a #chats session thread is a conversational turn, not
 	// a capture (build-guide-projects 14.3 -- these paths never collapse).

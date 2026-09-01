@@ -289,6 +289,48 @@ function buildDeckAssets(ideaId) {
 	add(path.join("find", "index.md"), "Surface-search reports (NOT evidence — unverified web lookups)");
 	add(path.join("docs", "index.md"), "Uploaded documents (index)");
 
+	// THE IMAGES THEMSELVES, not just their index entries.
+	//
+	// Gamma cannot take our images: it has no upload endpoint, no markdown
+	// image-URL support, and imageOptions.source has no custom option. So a
+	// reference deck can only influence the output through THIS persona --
+	// it has to see the slides to replicate their structure, and a ~150-word
+	// index summary loses exactly what matters (ordering, the narrative arc,
+	// how much sits on a slide). Gemini reads images natively, which
+	// documents.js already relies on for indexing.
+	//
+	// Capped: images are expensive in context and a deck reference is a
+	// handful of slides, not a library.
+	const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+	const MIME = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
+	const MAX_REF_IMAGES = Number(process.env.MILL_DECK_REF_IMAGES) || 8;
+	try {
+		const docsDir = path.join(dir, "docs");
+		const imgs = fs
+			.readdirSync(docsDir)
+			.filter((f) => IMAGE_EXT.has(path.extname(f).toLowerCase()))
+			.sort()
+			.slice(0, MAX_REF_IMAGES);
+		if (imgs.length) {
+			const content = [
+				{
+					type: "text",
+					text:
+						`${imgs.length} uploaded image(s) below, in filename order. If these are slides from an existing ` +
+						"deck, read them as reference: structure, ordering, what each slide is for, how much sits on it. " +
+						"You can replicate that shape — you cannot reuse the images themselves, because the renderer " +
+						"takes no custom imagery. Visual style comes from the theme the founder picks at render time.",
+				},
+			];
+			for (const f of imgs) {
+				const b64 = fs.readFileSync(path.join(docsDir, f)).toString("base64");
+				content.push({ type: "text", text: `--- ${f} ---` });
+				content.push({ type: "image_url", image_url: { url: `data:${MIME[path.extname(f).toLowerCase()]};base64,${b64}` } });
+			}
+			out.push({ role: "user", content });
+		}
+	} catch { /* no docs dir */ }
+
 	// Latest research report + raw field notes: the strongest material a
 	// deck can legitimately draw on, and the only sourced claims available.
 	try {

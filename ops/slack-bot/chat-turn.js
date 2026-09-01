@@ -49,7 +49,9 @@ async function handleChatTurn({ message, client }) {
 		return true;
 	}
 
-	if (message.subtype) return false;
+	// file_share carries a subtype but may also carry a real instruction.
+	// Everything else with a subtype (edits, joins, deletes) is not a turn.
+	if (message.subtype && message.subtype !== "file_share") return false;
 	if (!message.user || !message.text) return false;
 
 	const speaker = founderForUserId(message.user);
