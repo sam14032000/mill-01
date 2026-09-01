@@ -34,6 +34,37 @@ const KEY_ENV_BY_MODEL = {
 	flash: "MILL_RESEARCH_KEY",
 };
 
+// D-08's amendment is explicit: Gemini 3.x bills internal reasoning as
+// output tokens, so `max_tokens` is a budget the ANSWER shares with the
+// thinking, and it must be at least 4096 wherever reasoning is enabled --
+// "a low cap can leave nothing for the answer at all".
+//
+// That rule was recorded and then violated in eight call sites, and it
+// cost a founder a working turn: the persona's refusal check ran with
+// maxTokens 700, spent 675 of them reasoning, and the refusal was cut off
+// mid-sentence before it could write the `UNBLOCK:` line its own contract
+// requires. What reached the thread was a bare accusation with no way
+// forward. The same call at 4096 produces the complete, specific refusal.
+//
+// A convention that has to be remembered at every call site is not a
+// guard, so the floor is enforced here instead. Raising a cap costs
+// nothing when the answer is short -- billing is per token generated, not
+// per token allowed -- while a cap set too low fails silently, which is
+// the asymmetry that decides it.
+const MIN_MAX_TOKENS = Number(process.env.MILL_MIN_MAX_TOKENS) || 4096;
+const flooredSites = new Set();
+function floorMaxTokens(maxTokens, label) {
+	if (maxTokens >= MIN_MAX_TOKENS) return maxTokens;
+	// Log once per site, so this is visible without spamming a chatty loop.
+	const site = new Error().stack.split("\n")[3] || label;
+	if (!flooredSites.has(site)) {
+		flooredSites.add(site);
+		console.warn(`llm: raised max_tokens ${maxTokens} -> ${MIN_MAX_TOKENS} (reasoning shares the budget, D-08) at${site.replace(/^\s*at/, "")}`);
+	}
+	return MIN_MAX_TOKENS;
+}
+
+
 // Gemini 3.x rejects temperature/top_p/top_k -- deliberately not
 // exposed as options here so no caller can accidentally send them.
 // The abort timer must stay armed until the BODY is fully read.
@@ -71,7 +102,7 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 			body: JSON.stringify({
 				model,
 				messages,
-				max_tokens: maxTokens,
+				max_tokens: floorMaxTokens(maxTokens, "callFlash"),
 			}),
 			signal: controller.signal,
 		});
@@ -157,7 +188,7 @@ async function callFlashTools(messages, { model = "flash-fast", maxTokens = 2048
 			body: JSON.stringify({
 				model,
 				messages,
-				max_tokens: maxTokens,
+				max_tokens: floorMaxTokens(maxTokens, "callFlash"),
 				...(tools && tools.length ? { tools, tool_choice: toolChoice } : {}),
 			}),
 			signal: controller.signal,

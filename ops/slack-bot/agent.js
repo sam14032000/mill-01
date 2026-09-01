@@ -275,7 +275,11 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 				},
 				{ role: "user", content: text },
 			],
-			{ model: MODEL, maxTokens: 700 },
+			// 4096, not 700. The refusal shares this budget with reasoning
+			// (D-08): at 700 a real call spent 675 tokens thinking and the
+			// refusal was truncated before its UNBLOCK line, so the founder got
+			// an accusation with no way forward. llm.js now floors this too.
+			{ model: MODEL, maxTokens: 4096 },
 		).catch((err) => {
 			// A failed veto must never block the turn -- fall through to the
 			// normal loop rather than leaving the founder with nothing.
@@ -284,7 +288,16 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 		});
 		trace.step(veto ? "veto returned" : "veto failed — falling through");
 		const refusal = veto && parseRefusal(veto.content);
-		if (refusal) {
+		// A refusal with no UNBLOCK is a dead end, which the persona
+		// contract forbids in as many words ("Never refuse with a dead
+		// end"). Posting one anyway is worse than not refusing: it blocks
+		// the founder's request and tells them nothing about how to
+		// proceed. Treat it as a malformed gate result and fall through to
+		// the normal loop rather than passing the defect on.
+		if (refusal && !refusal.unblock) {
+			console.error(`agent: incomplete refusal (no UNBLOCK) in ${mode} for ${session.threadTs} — falling through: ${String(veto.content).slice(0, 120)}`);
+		}
+		if (refusal && refusal.unblock) {
 			const body = veto.content.trim();
 			await settle(body);
 			addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
