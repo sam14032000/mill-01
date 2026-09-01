@@ -31,7 +31,7 @@
 // audit-reference.md; it just doesn't reach the KB.
 
 const { readDoc, writeDoc, runPersonaTurn } = require("./mode-docs");
-const { personaFor } = require("./personas");
+const { personaFor, PARTIAL_ACCEPTANCE } = require("./personas");
 const { attachFullDocument, summarizeForThread } = require("./mode-docs");
 const chats = require("./chats");
 
@@ -66,6 +66,47 @@ function formatTurns(turns) {
 	return turns.map((t) => `${t.role === "user" ? "Founder" : "Mill"}: ${t.text.trim()}`).join("\n");
 }
 
+
+// PARTIAL ACCEPTANCE (founders' call).
+//
+// A persona refusal used to be all-or-nothing: the PM objected to one
+// under-specified feature in a founder's message and the entire document
+// write was abandoned, losing the parts that were properly specified. The
+// founders chose the middle option -- write what passes, refuse the rest
+// by name, in one message.
+//
+// A trailer rather than a JSON envelope, for the same reason D-51 chose
+// one: escaping a markdown document into a JSON string field is a
+// reliability problem, and the document is the payload here.
+const NOT_INCORPORATED = "---NOT-INCORPORATED---";
+
+const partialClause = (persona) =>
+	!PARTIAL_ACCEPTANCE.has(persona.mode)
+		? ""
+		: [
+		"",
+		"THIS ROLE'S BAR APPLIES PER ITEM, NOT TO THE WHOLE REQUEST.",
+		"Incorporate everything the founder described that meets your bar. For anything that does NOT,",
+		"leave it out of the document entirely -- do not write a placeholder section for it, and do not",
+		"weaken your bar to include it. Then, AFTER the document, emit this line on its own:",
+		NOT_INCORPORATED,
+		"and below it one entry per excluded item, each as a `REFUSAL:` line naming the item and what it",
+		"lacks, followed by an `UNBLOCK:` line naming the specific thing that would let it in. Omit the",
+		`line entirely if you incorporated everything. Never refuse the whole ${persona.outputTitle} when part`,
+		"of what was asked meets the bar.",
+	].join("\n");
+
+// Splits the model's output into the document and the excluded-items
+// report. The document written to disk never contains the trailer.
+function splitNotIncorporated(text) {
+	const i = String(text).indexOf(NOT_INCORPORATED);
+	if (i === -1) return { doc: String(text).trim(), excluded: null };
+	return {
+		doc: String(text).slice(0, i).trim(),
+		excluded: String(text).slice(i + NOT_INCORPORATED.length).trim() || null,
+	};
+}
+
 // The reconcile instruction. Deliberately framed as a per-section
 // decision rather than "rewrite the document": the failure mode being
 // designed against is a model quietly dropping a fact it wasn't asked to
@@ -92,6 +133,7 @@ function reconcileDirective(persona, existing, newTurnsText) {
 		"not asked to remove is the failure to avoid — specifics especially: numbers, named competitors, named",
 		"regulations, prices, dates. If the new conversation adds nothing to this document, output the current",
 		"document unchanged.",
+		partialClause(persona),
 	].join("\n");
 }
 
@@ -123,16 +165,17 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 	const before = wordCount(existing);
 	const directive = existing
 		? reconcileDirective(persona, existing, formatTurns(turns))
-		: `Write the ${persona.outputTitle} from the conversation below, as a complete document.\n\n${formatTurns(turns)}`;
+		: `Write the ${persona.outputTitle} from the conversation below, as a complete document.${partialClause(persona)}\n\n${formatTurns(turns)}`;
 
 	const result = await runPersonaTurn({ id, mode, threadContext: "", userText: directive, maxTokens: 8000 });
 	if (result.refusal) return { ok: false, reason: "refused", refusal: result.refusal };
 
-	const after = wordCount(result.text);
+	const { doc: docText, excluded } = splitNotIncorporated(result.text);
+	const after = wordCount(docText);
 	const shrankBy = before ? Math.round(((before - after) / before) * 100) : 0;
 	const materialShrink = before > 200 && shrankBy >= 40;
 
-	writeDoc(id, mode, result.text);
+	writeDoc(id, mode, docText);
 	chats.updateChat(id, chatTs, { synced_through: { ...(chat.synced_through || {}), [mode]: to } });
 
 	if (announce && client && channel) {
@@ -141,17 +184,21 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 		const warn = materialShrink
 			? `\n\n⚠️ *This shrank the document by ${shrankBy}%.* Check nothing was dropped — the previous version is in git history.`
 			: "";
-		const summary = await summarizeForThread(result.text).catch(() => result.text.slice(0, 400));
+		const summary = await summarizeForThread(docText).catch(() => docText.slice(0, 400));
+		// One message: what went in, and what did not and why. Splitting
+		// these across two posts is how a founder reads the first and
+		// misses the second.
+		const left = excluded ? `\n\n*Not incorporated:*\n${excluded}` : "";
 		// Surface the next action at the moment it becomes possible, rather
 		// than only in the error you get for not knowing it existed.
 		const next = persona.actionHint ? `\n\n_${persona.actionHint}_` : "";
 		await client.chat
-			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* from this chat${delta}:\n\n${summary}${warn}${next}` })
+			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* from this chat${delta}:\n\n${summary}${left}${warn}${next}` })
 			.catch(() => {});
 		await attachFullDocument(client, { id, mode, channel, threadTs });
 	}
 
-	return { ok: true, created: !existing, before, after, shrankBy, materialShrink, turnsFolded: turns.length };
+	return { ok: true, created: !existing, before, after, shrankBy, materialShrink, turnsFolded: turns.length, excluded };
 }
 
 // maybeSyncCurrentMode (fold the current mode up every N turns) lived
@@ -183,4 +230,4 @@ async function syncPreviousMode({ id, chatTs, client, channel, threadTs }) {
 	return { ...res, mode: prev };
 }
 
-module.exports = { syncModeDocument, syncPreviousMode, unsyncedTurns };
+module.exports = { syncModeDocument, syncPreviousMode, unsyncedTurns, splitNotIncorporated, NOT_INCORPORATED };

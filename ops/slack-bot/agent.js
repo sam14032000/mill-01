@@ -269,9 +269,18 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 				{
 					role: "system",
 					content:
-						"Decide ONE thing: does this role refuse the founder's latest message? If yes, reply with " +
-						"exactly `REFUSAL:` then `UNBLOCK:` lines and nothing else. If this role can engage with it " +
-						"normally, reply with exactly: PROCEED",
+						"Decide ONE thing about the founder's latest message, and answer with one of exactly three " +
+						"forms and nothing else:\n" +
+						"1. `PROCEED` — this role can engage with it normally.\n" +
+						"2. `PARTIAL` — the founder is asking you to WRITE or UPDATE this mode's document, and some " +
+						"of what they described meets this role's bar even though some of it does not. Answer with " +
+						"the single word PARTIAL. Do not list what fails here; the document write handles that " +
+						"per item and reports it.\n" +
+						"3. `REFUSAL:` then `UNBLOCK:` lines — this role refuses, and there is nothing in the " +
+						"request it can act on. Use this for a request that is not a document write, or one where " +
+						"NOTHING offered meets the bar.\n" +
+						"Prefer PARTIAL over REFUSAL whenever the founder asked for a document write and any part " +
+						"of it is usable — refusing the whole write throws away work they did specify.",
 				},
 				{ role: "user", content: text },
 			],
@@ -287,7 +296,14 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 			return null;
 		});
 		trace.step(veto ? "veto returned" : "veto failed — falling through");
-		const refusal = veto && parseRefusal(veto.content);
+		// PARTIAL: the founder asked for a document write and some of it
+		// passes. Fall through to the loop so `save` runs; the save's own
+		// persona call accepts per item and reports what it left out, so
+		// the founder gets the work they did specify plus a named refusal
+		// for the rest -- in one message, rather than losing both.
+		const partial = /^\s*PARTIAL\b/i.test(String(veto?.content || ""));
+		if (partial) trace.step("veto: partial — letting the write decide per item");
+		const refusal = !partial && veto && parseRefusal(veto.content);
 		// A refusal with no UNBLOCK is a dead end, which the persona
 		// contract forbids in as many words ("Never refuse with a dead
 		// end"). Posting one anyway is worse than not refusing: it blocks

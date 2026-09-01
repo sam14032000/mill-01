@@ -237,6 +237,7 @@ async function saveModeDocument({ id, mode, client, channel, threadTs }) {
 	return {
 		ok: true, mode, created: !!res.created, wordCount: res.after,
 		previousWordCount: res.before, shrankBy: res.shrankBy, materialShrink: res.materialShrink,
+		excluded: res.excluded || null,
 	};
 }
 
@@ -260,7 +261,12 @@ async function runSaveForThread({ id, mode, client, channel, threadTs, progressT
 				// founder; say which thread it needs.
 				? "_I can only save from inside a chat thread — open the chat and ask there._"
 				: `_Nothing new to add — ${result.skipped}._`
-			: `_Saved (${result.wordCount} words)._`
+			: result.excluded
+				// The detail is already in the sync's own post; this line
+				// just makes sure the founder cannot read "Saved" and miss
+				// that something was deliberately left out.
+				? `_Saved (${result.wordCount} words) — with part of that request left out; see above._`
+				: `_Saved (${result.wordCount} words)._`
 		: result.refusal
 			? `${result.refusal.what}\nUNBLOCK: ${result.refusal.unblock}`
 			: `Couldn't save: ${result.reason}`;

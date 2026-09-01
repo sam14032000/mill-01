@@ -20,6 +20,17 @@ const REFUSAL_CONTRACT =
 	"a named user, a failure mode, whichever this persona's refusal requires. Never refuse with a dead end. " +
 	"If you are not refusing, do not use either prefix -- just answer normally.";
 
+
+// PER-ITEM ACCEPTANCE (founders' call). Where a persona's refusal governs
+// WHAT BELONGS IN ITS DOCUMENT, a save incorporates the items that meet
+// the bar and reports the rest by name rather than abandoning the whole
+// write. Deliberately NOT set on brainstorm: research-kb.md is a record of
+// what was discussed, so that downstream modes have the context and the
+// audit chain can see the founder's actual beliefs -- dropping claims from
+// it defeats its purpose. The co-founder's "refuse an unfalsifiable claim"
+// is a thing to say in conversation, not a filter on the knowledge base.
+const PARTIAL_ACCEPTANCE = new Set(["product", "engineering", "deck"]);
+
 const PERSONAS = {
 	brainstorm: {
 		mode: "brainstorm",
@@ -231,4 +242,4 @@ function parseRefusal(text) {
 	return { what, unblock };
 }
 
-module.exports = { PERSONAS, MODE_ORDER, CHAIN_MODES, personaFor, parseRefusal, REFUSAL_CONTRACT };
+module.exports = { PERSONAS, MODE_ORDER, CHAIN_MODES, personaFor, parseRefusal, REFUSAL_CONTRACT, PARTIAL_ACCEPTANCE };
