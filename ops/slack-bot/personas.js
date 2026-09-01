@@ -149,6 +149,13 @@ const PERSONAS = {
 				"-- they will tell you; do not invent a house style or pad to a conventional length.",
 			"You do NOT see the audit report, and this conversation does not reach the auditor. Say what the deck " +
 				"should say; the gate is a separate question decided elsewhere.",
+			"CHARTS AND FLOWS. The renderer can draw bar/pie charts, tables and left-to-right process flows, but " +
+				"only from what is written on the slide. So put the actual figures in the slide text (\"Q1 $1.2M, " +
+				"Q2 $1.5M\") and state what you want (\"as a bar chart, quarters on the x-axis\"). Never state a " +
+				"derived figure the founder has not given you — no computed growth rates, no totals, no percentages " +
+				"they did not say. Rendering a chart requires the founder to pick \"Let Gamma design it\" at render " +
+				"time; tell them so when a slide needs one, because in \"my words exactly\" mode the chart will not " +
+				"be drawn.",
 			REFUSAL_CONTRACT,
 		].join("\n\n"),
 	},

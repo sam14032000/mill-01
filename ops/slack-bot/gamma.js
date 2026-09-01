@@ -8,7 +8,16 @@
 //   preserve — "keeps your supplied text as-is without AI rewriting".
 //     The deck persona authors; Gamma only renders. Verified with nonsense
 //     markers and clumsy sentences read back out of the PPTX.
-//   generate — Gamma restructures the content into its own layouts.
+//   generate — Gamma restructures the content into its own layouts, and
+//     is the ONLY mode that gets additionalInstructions (see below).
+//
+// CHARTS, TABLES AND PROCESS FLOWS are supported — no special syntax,
+// driven by explicit data in the text plus a natural-language instruction
+// ("display this as a bar chart with quarters on the x-axis"). They come
+// back rasterised, not as PPTX chart objects. But they need
+// additionalInstructions, and instructions break preserve — so charts and
+// "my words exactly" are mutually exclusive. Verified: 40 credits for two
+// chart slides against 5/slide for plain text, so charts are ~4x.
 //
 // Measured, not assumed (both probes committed to ops/BUILD-LOG.md):
 // generate KEPT every fact given to it (Shopify, WMS, 10-digit HTS,
@@ -151,7 +160,18 @@ async function startGeneration({ inputText, themeId = null, exportAs = "pptx", t
 		// Always explicit — never Gamma's unstated default.
 		imageOptions: { source: imageSource },
 		...(title ? { title: String(title).slice(0, 500) } : {}),
-		...(additionalInstructions ? { additionalInstructions: String(additionalInstructions).slice(0, 5000) } : {}),
+		// additionalInstructions is DROPPED under preserve, measured not
+		// assumed. A probe sent "Q1: $1.2M / Q2: $1.5M / ..." in preserve
+		// mode with an instruction to chart it. Gamma rendered the chart --
+		// and replaced the literal figures with prose containing "a 75%
+		// increase over the full year", a computed claim nobody wrote.
+		// Instructions override preserve, so passing them there silently
+		// voids the one guarantee that makes this integration acceptable.
+		// Charts therefore require generate mode, where rewriting is the
+		// declared behaviour and the founder has chosen it.
+		...(additionalInstructions && textMode === TEXT_MODES.generate
+			? { additionalInstructions: String(additionalInstructions).slice(0, 5000) }
+			: {}),
 	};
 	const { json } = await request("/generations", { method: "POST", body });
 	const id = json.generationId || json.id;

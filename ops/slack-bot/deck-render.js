@@ -170,6 +170,13 @@ async function renderDeck({ id, chatTs, client, channel, progressTs = null }) {
 			exportAs,
 			imageSource,
 			textMode,
+			// Only reaches Gamma in generate mode (gamma.js drops it under
+			// preserve, deliberately). Nudges charts where the persona asked
+			// for one, using the specificity the API guide calls for.
+			additionalInstructions:
+				"Where a slide states explicit figures and asks for a chart, render that chart with the stated axes. " +
+				"Where a slide describes a sequence of steps, render it as a left-to-right process flow with labelled " +
+				"boxes. Do not invent figures, percentages or trends that are not written on the slide.",
 			title: `${chats.readChat(id, chatTs)?.title || id} — deck`,
 		});
 	} catch (err) {
