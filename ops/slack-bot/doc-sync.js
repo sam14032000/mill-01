@@ -41,6 +41,16 @@ const wordCount = (t) => String(t || "").split(/\s+/).filter(Boolean).length;
 // document. The watermark advances past turns of other modes too — they
 // are not this document's business and re-examining them later would only
 // risk pulling an engineering aside into a research base.
+// Turns recorded BEFORE mode-tagging existed carry no `mode`. Treating
+// them as belonging to no stage silently excluded them from every sync --
+// f05e's 46-turn brainstorm was filtered to nothing and never reached the
+// research KB. Every chat starts in brainstorm (it is the mandatory entry
+// mode), and any chat old enough to hold untagged turns began there, so an
+// untagged turn is attributed to brainstorm rather than dropped.
+function turnMode(t) {
+	return t.mode || "brainstorm";
+}
+
 function unsyncedTurns(session, chat, mode) {
 	const from = chat?.synced_through?.[mode] ?? 0;
 	return {
@@ -48,7 +58,7 @@ function unsyncedTurns(session, chat, mode) {
 		to: session.turns.length,
 		turns: session.turns
 			.slice(from)
-			.filter((t) => t.mode === mode && t.text?.trim() && t.kind !== "command"),
+			.filter((t) => turnMode(t) === mode && t.text?.trim() && t.kind !== "command"),
 	};
 }
 
@@ -98,9 +108,14 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 
 	const { to, turns } = unsyncedTurns(session, chat, mode);
 	if (!turns.length) {
-		// Still advance the watermark: there was nothing of this mode's to
-		// fold in, and leaving it behind would re-scan the same turns.
-		chats.updateChat(id, chatTs, { synced_through: { ...(chat.synced_through || {}), [mode]: to } });
+		// Do NOT advance the watermark here.
+		//
+		// It used to, to avoid re-scanning. That made a no-op sync
+		// destructive: when tagging changed what counted as a brainstorm
+		// turn, a sync matched nothing, moved the watermark past 47 real
+		// turns, and permanently marked a conversation as folded in that
+		// never was. Re-scanning is an in-memory filter; losing a
+		// conversation is forever. The asymmetry decides it.
 		return { ok: true, skipped: "nothing new in this stage's conversation" };
 	}
 
