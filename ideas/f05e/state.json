@@ -3,7 +3,7 @@
   "state": "open",
   "founder": "saksham",
   "created_at": "2026-08-28T13:58:59.031Z",
-  "updated_at": "2026-08-31T20:38:06.813Z",
+  "updated_at": "2026-09-01T06:51:17.148Z",
   "origin": "chat",
   "origin_chat_ts": "1787923060.248729",
   "has_assumption": true,
@@ -19,11 +19,17 @@
   "chats": {
     "1787925538.266179": {
       "title": "Cross-border export compliance",
-      "mode": "brainstorm",
+      "mode": "product",
       "created_by": "saksham",
       "created_at": "2026-08-31T05:41:18.918Z",
-      "last_active_at": "2026-08-31T20:38:06.811Z",
-      "last_ts": "1788208683.932279"
+      "last_active_at": "2026-09-01T06:51:17.147Z",
+      "last_ts": "1788245464.952759",
+      "prev_mode": null,
+      "banner_ts": "1788245346.435329",
+      "banner_at_turn": 46,
+      "synced_through": {
+        "brainstorm": 47
+      }
     }
   },
   "active_chat_ts": "1787925538.266179",
