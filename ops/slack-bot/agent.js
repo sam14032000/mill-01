@@ -96,7 +96,53 @@ function parseArgs(tc) {
 	}
 }
 
-async function runTurn({ session, message, client }) {
+// Wraps the turn so a "Thinking…" placeholder ALWAYS resolves.
+//
+// It didn't. A founder's message sat on "_Thinking…_" for half an hour
+// with the process idle and nothing logged: flash-fast returned empty
+// content and no tool calls (the same payload WITHOUT tools returned a
+// full answer -- tools change the response, as they did for refusals),
+// the loop retried to MAX_STEPS, then emitted `max_steps` telemetry and
+// returned without touching the placeholder. Telemetry recorded the
+// failure; the founder saw silence.
+//
+// So the invariant is enforced here rather than at each exit: whatever
+// happens inside -- return, throw, or falling out of the loop -- the
+// founder is told something. The failure is now loud in the thread, not
+// only in a JSONL file nobody is watching mid-conversation.
+async function runTurn(args) {
+	const { session, message, client } = args;
+	const placeholderTs = await client.chat
+		.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: "_Thinking…_" })
+		.then((r) => r.ts)
+		.catch(() => null);
+
+	let settled = false;
+	const settle = async (text) => {
+		if (settled) return;
+		settled = true;
+		if (placeholderTs) {
+			await client.chat.update({ channel: message.channel, ts: placeholderTs, text }).catch(() => {});
+		} else {
+			await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text }).catch(() => {});
+		}
+	};
+
+	try {
+		return await runTurnInner({ ...args, placeholderTs, settle });
+	} catch (err) {
+		console.error(`agent: turn threw (${session.threadTs}): ${err.stack || err.message}`);
+		await settle("_That turn failed and nothing was saved. Worth trying again — if it keeps happening, say so._");
+		return true;
+	} finally {
+		// Reached when the loop exhausted without ever answering.
+		await settle(
+			"_I couldn't get a reply out for that one. Nothing was saved. Try rephrasing, or ask for one thing at a time._",
+		);
+	}
+}
+
+async function runTurnInner({ session, message, client, placeholderTs, settle }) {
 	const isProject = session.kind === "project";
 	const ideaId = session.ideaId || null;
 	const stageName = isProject ? "project_turn" : "chat";
@@ -114,11 +160,6 @@ async function runTurn({ session, message, client }) {
 	};
 
 	const text = message.text.trim();
-
-	const placeholderTs = await client.chat
-		.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: "_Thinking…_" })
-		.then((r) => r.ts)
-		.catch(() => null);
 
 	// The chat's mode decides WHO replies, not just which document gets
 	// fed. Before this, mode changed the card label and the document
@@ -182,9 +223,7 @@ async function runTurn({ session, message, client }) {
 		const refusal = veto && parseRefusal(veto.content);
 		if (refusal) {
 			const body = veto.content.trim();
-			await client.chat
-				.update({ channel: message.channel, ts: placeholderTs, text: body })
-				.catch(() => client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: body }));
+			await settle(body);
 			addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
 			addTurn(session, { role: "assistant", text: body });
 			emit(buildEvalEvent({
@@ -249,8 +288,7 @@ async function runTurn({ session, message, client }) {
 			console.error(`agent: model call failed (${session.threadTs}): ${err.message}`);
 			emit(buildEvalEvent({ stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId, status: "failed", reasonCode: "model_call_failed", toolsCalled: [], iterations: step + 1, repliedWithoutTool: false }));
 			const m = `_(couldn't generate a reply: ${err?.message || err})_`;
-			if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: m }).catch(() => {});
-			else await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: m }).catch(() => {});
+			await settle(m);
 			return true;
 		}
 		calls += 1;
@@ -320,8 +358,8 @@ async function runTurn({ session, message, client }) {
 		// No promote button on individual turns: it belongs on the card at
 		// the top of the thread, once, not repeated down every reply.
 		let postedTs = placeholderTs;
-		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: finalReply }).catch(() => {});
-		else postedTs = await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: finalReply }).then((r) => r.ts).catch(() => null);
+		await settle(finalReply);
+		if (!placeholderTs) postedTs = null;
 
 		// A plain conversational turn now counts as activity: it moves the
 		// pin to this chat and refreshes its card (including the
@@ -369,7 +407,7 @@ async function runTurn({ session, message, client }) {
 
 	// Ran out of steps without a plain reply or a tool call.
 	const m = "_(couldn't settle on a response — try rephrasing)_";
-	if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: m }).catch(() => {});
+	await settle(m);
 	emit(buildEvalEvent({ stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId, tokensIn, tokensOut, costUsd, cacheHitRatio: calls ? cacheHits / calls : 0, wallClockS: (Date.now() - t0) / 1000, status: "failed", reasonCode: "max_steps", toolsCalled, iterations: MAX_STEPS, repliedWithoutTool: false }));
 	return true;
 }

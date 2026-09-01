@@ -36,6 +36,19 @@ const KEY_ENV_BY_MODEL = {
 
 // Gemini 3.x rejects temperature/top_p/top_k -- deliberately not
 // exposed as options here so no caller can accidentally send them.
+// The abort timer must stay armed until the BODY is fully read.
+//
+// fetch() resolves when response HEADERS arrive, not when the body is
+// complete. Clearing the timer in a finally around the fetch therefore
+// disarms it at exactly the wrong moment: if the body then stalls -- which
+// a proxied LLM response can do -- the subsequent res.json()/res.text()
+// awaits with no abort armed and hangs forever.
+//
+// Found live: a founder's message sat on "_Thinking…_" for 3h40m. The
+// process was idle, nothing was logged, and no telemetry was emitted,
+// because the turn never reached ANY exit -- it was parked on a body read
+// that could not time out. This affected every model call in the system,
+// not one code path.
 async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = {}) {
 	const keyEnvVar = KEY_ENV_BY_MODEL[model];
 	if (!keyEnvVar) {
@@ -63,16 +76,16 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 			signal: controller.signal,
 		});
 	} catch (err) {
+		clearTimeout(timeout);
 		if (err.name === "AbortError") {
 			throw new Error(`${model} call timed out after ${REQUEST_TIMEOUT_MS}ms`);
 		}
 		throw err;
-	} finally {
-		clearTimeout(timeout);
 	}
 
 	if (!res.ok) {
 		const body = await res.text().catch(() => "");
+		clearTimeout(timeout);
 		throw new Error(`${model} call failed: HTTP ${res.status} ${body.slice(0, 300)}`);
 	}
 
@@ -95,7 +108,16 @@ async function callFlash(messages, { model = "flash-fast", maxTokens = 4096 } = 
 		? 0
 		: Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
 
-	const data = await res.json();
+	// Body read happens with the timer STILL ARMED (see note above).
+	let data;
+	try {
+		data = await res.json();
+	} catch (err) {
+		if (err.name === "AbortError") throw new Error(`${model} response body stalled past ${REQUEST_TIMEOUT_MS}ms`);
+		throw err;
+	} finally {
+		clearTimeout(timeout);
+	}
 	const content = data.choices?.[0]?.message?.content;
 	if (typeof content !== "string" || !content.trim()) {
 		// Real tokens (often real reasoning cost) were still spent even
@@ -141,21 +163,30 @@ async function callFlashTools(messages, { model = "flash-fast", maxTokens = 2048
 			signal: controller.signal,
 		});
 	} catch (err) {
+		clearTimeout(timeout);
 		if (err.name === "AbortError") throw new Error(`${model} tool call timed out after ${REQUEST_TIMEOUT_MS}ms`);
 		throw err;
-	} finally {
-		clearTimeout(timeout);
 	}
 
 	if (!res.ok) {
 		const body = await res.text().catch(() => "");
+		clearTimeout(timeout);
 		throw new Error(`${model} tool call failed: HTTP ${res.status} ${body.slice(0, 300)}`);
 	}
 
 	const cacheHit = res.headers.get("x-litellm-cache-key") != null;
 	const costUsd = cacheHit ? 0 : Number.parseFloat(res.headers.get("x-litellm-response-cost")) || 0;
 
-	const data = await res.json();
+	// Timer stays armed through the body read -- see the note on callFlash.
+	let data;
+	try {
+		data = await res.json();
+	} catch (err) {
+		if (err.name === "AbortError") throw new Error(`${model} response body stalled past ${REQUEST_TIMEOUT_MS}ms`);
+		throw err;
+	} finally {
+		clearTimeout(timeout);
+	}
 	const choice = data.choices?.[0] || {};
 	const msg = choice.message || {};
 	return {
