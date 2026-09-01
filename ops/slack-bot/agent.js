@@ -26,6 +26,7 @@ const { personaFor, parseRefusal } = require("./personas");
 const { callFlash } = require("./llm");
 const { readState, readAssumption, readLatestResearch } = require("./ideas");
 const { toolSpecs, runTool } = require("./tools");
+const { withDeadline, softDeadline, tracer, DeadlineError } = require("./deadline");
 
 const MODEL = "flash-fast";
 const MAX_STEPS = Number(process.env.MILL_AGENT_MAX_STEPS) || 3;
@@ -110,39 +111,99 @@ function parseArgs(tc) {
 // happens inside -- return, throw, or falling out of the loop -- the
 // founder is told something. The failure is now loud in the thread, not
 // only in a JSONL file nobody is watching mid-conversation.
+// The whole turn is bounded. A turn that has not answered within
+// TURN_DEADLINE_MS is a hang, not a slow turn: the longest legitimate
+// path is the veto (~4s) plus MAX_STEPS model calls at the 120s llm.js
+// ceiling, and a tool that posts its own output settles the placeholder
+// itself long before this. Tools that legitimately wait on a HUMAN —
+// `/test`'s 30-minute field-evidence prompt — post their own message and
+// own the thread from that point, so they are not sitting on the
+// placeholder when this fires.
+const TURN_DEADLINE_MS = Number(process.env.MILL_TURN_DEADLINE_MS) || 300_000;
+// Ceiling on any single Slack write in the turn path. Slack's own client
+// is now bounded too (index.js clientOptions), so this is belt and
+// braces on the one call whose failure is invisible to the founder.
+const WRITE_DEADLINE_MS = Number(process.env.MILL_WRITE_DEADLINE_MS) || 20_000;
+
 async function runTurn(args) {
 	const { session, message, client } = args;
-	const placeholderTs = await client.chat
-		.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: "_Thinking…_" })
-		.then((r) => r.ts)
-		.catch(() => null);
+	const trace = tracer(session.threadTs);
+	trace.step("placeholder");
+	const placeholderTs = await softDeadline(
+		client.chat
+			.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: "_Thinking…_" })
+			.then((r) => r.ts),
+		WRITE_DEADLINE_MS,
+		"placeholder post",
+	).catch(() => null);
 
+	// `settled` used to be set BEFORE the write. That looked like simple
+	// idempotency and was in fact the bug that made every other guard
+	// here useless: when the Slack write stalled (no timeout, 30-minute
+	// retry budget) the flag was already true, so the `finally` below
+	// became a no-op and the founder sat on "_Thinking…_" indefinitely —
+	// with the answer already generated. The flag now flips only once a
+	// write has actually landed, and every write is bounded.
 	let settled = false;
+	const post = (text) =>
+		softDeadline(
+			client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text }).then(() => true),
+			WRITE_DEADLINE_MS,
+			"settle post",
+			false,
+		).catch(() => false);
 	const settle = async (text) => {
 		if (settled) return;
-		settled = true;
+		// Update the placeholder in place when we have one — that's the
+		// whole point of posting it. But a stalled update must not swallow
+		// the answer, so fall back to a fresh message in the thread. Losing
+		// the in-place edit is cosmetic; losing the reply is the failure.
+		let ok = false;
 		if (placeholderTs) {
-			await client.chat.update({ channel: message.channel, ts: placeholderTs, text }).catch(() => {});
-		} else {
-			await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text }).catch(() => {});
+			ok = await softDeadline(
+				client.chat.update({ channel: message.channel, ts: placeholderTs, text }).then(() => true),
+				WRITE_DEADLINE_MS,
+				"settle update",
+				false,
+			).catch(() => false);
+			if (!ok) console.error(`agent: placeholder update stalled for ${session.threadTs} — posting the reply separately`);
 		}
+		if (!ok) ok = await post(text);
+		if (ok) settled = true;
+		else console.error(`agent: could not deliver the reply for ${session.threadTs} at all`);
 	};
 
 	try {
-		return await runTurnInner({ ...args, placeholderTs, settle });
+		return await withDeadline(
+			runTurnInner({ ...args, placeholderTs, settle, trace }),
+			TURN_DEADLINE_MS,
+			`turn ${session.threadTs}`,
+		);
 	} catch (err) {
-		console.error(`agent: turn threw (${session.threadTs}): ${err.stack || err.message}`);
-		await settle("_That turn failed and nothing was saved. Worth trying again — if it keeps happening, say so._");
+		// A hang and a throw are reported differently, because they mean
+		// different things to the founder: one is worth retrying as-is,
+		// the other usually isn't. Both name the phase they died in, so
+		// the next one is diagnosable from the log instead of from /proc.
+		const stalled = err instanceof DeadlineError;
+		console.error(
+			`agent: turn ${stalled ? "STALLED" : "threw"} (${session.threadTs}) in phase "${trace.last()}" after ${trace.elapsed()}ms: ${err.stack || err.message}`,
+		);
+		await settle(
+			stalled
+				? `_This turn stalled at "${trace.last()}" and I've stopped waiting on it. Nothing was saved — worth sending again._`
+				: "_That turn failed and nothing was saved. Worth trying again — if it keeps happening, say so._",
+		);
 		return true;
 	} finally {
 		// Reached when the loop exhausted without ever answering.
 		await settle(
 			"_I couldn't get a reply out for that one. Nothing was saved. Try rephrasing, or ask for one thing at a time._",
 		);
+		trace.step("done");
 	}
 }
 
-async function runTurnInner({ session, message, client, placeholderTs, settle }) {
+async function runTurnInner({ session, message, client, placeholderTs, settle, trace }) {
 	const isProject = session.kind === "project";
 	const ideaId = session.ideaId || null;
 	const stageName = isProject ? "project_turn" : "chat";
@@ -200,6 +261,7 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 	// -- is untouched and costs nothing extra; when a refusal does fire it
 	// replaces the agent call rather than adding to it.
 	if (mode !== "brainstorm") {
+		trace.step(`veto (${mode})`);
 		const veto = await callFlash(
 			[
 				{ role: "system", content: personaBrief },
@@ -220,6 +282,7 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 			console.error(`agent: refusal check failed (${session.threadTs}): ${err.message}`);
 			return null;
 		});
+		trace.step(veto ? "veto returned" : "veto failed — falling through");
 		const refusal = veto && parseRefusal(veto.content);
 		if (refusal) {
 			const body = veto.content.trim();
@@ -261,6 +324,7 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 	// dig into that" imperative runs `find` broad directly -- the model
 	// has been unreliable on these in long threads.
 	if (shouldForceBroadFind(text)) {
+		trace.step("forced broad find");
 		if (placeholderTs) await client.chat.update({ channel: message.channel, ts: placeholderTs, text: "_On it — researching that…_" }).catch(() => {});
 		const before = session.turns.length;
 		const out = await runTool("find", { query: text, mode: "broad" }, { ...ctx, progressTs: placeholderTs, progressChannel: message.channel });
@@ -282,6 +346,7 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 
 	for (let step = 0; step < MAX_STEPS; step++) {
 		let res;
+		trace.step(`model call ${step + 1}/${MAX_STEPS}`);
 		try {
 			res = await callFlashTools(messages, { model: MODEL, maxTokens: 2048, tools: toolSpecs() });
 		} catch (err) {
@@ -306,7 +371,9 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 			toolsCalled.push(name);
 
 			const before = session.turns.length;
+			trace.step(`tool ${name}`);
 			const out = await runTool(name, args, { ...ctx, progressTs: placeholderTs, progressChannel: message.channel });
+			trace.step(`tool ${name} returned (posted=${!!out.posted})`);
 			if (out.search) searchInitiatedBy = out.search; // "agent" (inline) | "founder" (broad)
 
 			// Keep the thread transcript continuous even when the handler
@@ -358,6 +425,7 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 		// No promote button on individual turns: it belongs on the card at
 		// the top of the thread, once, not repeated down every reply.
 		let postedTs = placeholderTs;
+		trace.step("settle reply");
 		await settle(finalReply);
 		if (!placeholderTs) postedTs = null;
 
@@ -369,14 +437,16 @@ async function runTurnInner({ session, message, client, placeholderTs, settle })
 		if (isProject && ideaId) {
 			try {
 				const { touchAndRepin } = require("./chat-card");
-				await touchAndRepin(client, ideaId, session.threadTs, { latestTs: postedTs });
+				trace.step("repin card");
+				await softDeadline(touchAndRepin(client, ideaId, session.threadTs, { latestTs: postedTs }), 30_000, "repin card");
 			} catch (err) {
 				console.error(`agent: chat touch failed (${session.threadTs}): ${err.message}`);
 			}
 		}
 
 		try {
-			const marker = await maybeCompact(session);
+			trace.step("compact");
+			const marker = await softDeadline(maybeCompact(session), 60_000, "compaction");
 			if (marker) await client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: marker }).catch(() => {});
 		} catch (err) {
 			console.error(`agent: compaction failed (${session.threadTs}): ${err.message}`);

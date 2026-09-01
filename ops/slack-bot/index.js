@@ -51,6 +51,17 @@ const app = new App({
 	token: process.env.SLACK_BOT_TOKEN,
 	appToken: process.env.SLACK_APP_TOKEN,
 	socketMode: true,
+	// Bounded, deliberately. @slack/web-api defaults to NO request timeout
+	// and `tenRetriesInAboutThirtyMinutes` — so a single stalled call can
+	// hold a turn open for half an hour with nothing logged. That is how a
+	// founder's message sat on "_Thinking…_" with the process idle: the
+	// reply had already been generated and the chat.update that would have
+	// shown it never came back. Same unbounded-network-wait class as the
+	// llm.js body-read stall (D-08 amendment), one layer out.
+	clientOptions: {
+		timeout: 15_000,
+		retryConfig: { retries: 3, factor: 2, minTimeout: 500, maxTimeout: 4_000 },
+	},
 });
 
 // The models emit standard Markdown; Slack doesn't parse it. Convert
