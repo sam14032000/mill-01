@@ -279,6 +279,16 @@ app.event("app_mention", async ({ event, client }) => {
 			await post("Run `@Mill deck` inside a chat thread.");
 			return;
 		}
+		// Check for the deck BEFORE offering to render it. Otherwise the
+		// founder picks a theme, taps Render, and only then learns there is
+		// nothing to render -- after a themes API call and two decisions.
+		if (!require("./mode-docs").readDoc(project.id, "deck")) {
+			await post(
+				"There's no `deck.md` yet. Switch this chat to *deck* mode and work through the slides — " +
+					"who each one is for and what it should make them do — then `@Mill deck` to render it.",
+			);
+			return;
+		}
 		await postDeckControl(client, project.id, chatTs, event.channel);
 		return;
 	}
@@ -471,10 +481,26 @@ app.action("deck_pick", async ({ ack, body, client }) => {
 	const [id, chatTs, themeId] = String(body.actions?.[0]?.value || "").split("::");
 	if (!id || !chatTs) return;
 	require("./deck-render").rememberSettings(id, chatTs, { deck_theme: themeId });
-	const st = readState(id);
-	await client.chat
-		.postMessage({ channel: st?.channel_id, thread_ts: chatTs, text: `_Theme set to *${themeId}*._` })
-		.catch(() => {});
+	// Confirm INSIDE the modal. Posting to the channel instead left the
+	// founder staring at an unchanged list of themes with no sign the tap
+	// registered -- they cannot see the thread while the modal is open.
+	const viewId = body.view?.id;
+	if (viewId) {
+		await client.views
+			.update({
+				view_id: viewId,
+				view: {
+					type: "modal",
+					title: { type: "plain_text", text: "Deck themes" },
+					close: { type: "plain_text", text: "Done" },
+					blocks: [
+						{ type: "section", text: { type: "mrkdwn", text: `✅ Theme set to *${themeId}*.` } },
+						{ type: "context", elements: [{ type: "mrkdwn", text: "Close this and hit *Render* in the thread." }] },
+					],
+				},
+			})
+			.catch((e) => console.error("deck_pick: view update failed:", e?.data?.error || e.message));
+	}
 });
 app.action("deck_render_go", async ({ ack, body, client }) => {
 	await ack();
