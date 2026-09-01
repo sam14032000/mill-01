@@ -2,13 +2,27 @@
 
 // Gamma Generate API — the RENDERING service for deck mode.
 //
-// THE LOAD-BEARING SETTING IS `textMode: "preserve"`. Gamma's docs define
-// it as "keeps your supplied text as-is without AI rewriting", which is
-// the whole reason this integration is acceptable: the deck persona
-// authors the deck, Gamma renders it. `generate` (invent content from a
-// topic) and `condense` (summarise) would both put a non-LiteLLM model in
-// a path authoring founder-facing content, which D-43/D-53 keep out.
-// If a future change flips textMode, the persona becomes decorative.
+// `textMode` is the setting that decides who authors the deck, and it is
+// a FOUNDER CHOICE per deck — never a silent default.
+//
+//   preserve — "keeps your supplied text as-is without AI rewriting".
+//     The deck persona authors; Gamma only renders. Verified with nonsense
+//     markers and clumsy sentences read back out of the PPTX.
+//   generate — Gamma restructures the content into its own layouts.
+//
+// Measured, not assumed (both probes committed to ops/BUILD-LOG.md):
+// generate KEPT every fact given to it (Shopify, WMS, 10-digit HTS,
+// de-minimis, ops lead, threshold, shortfall all survived) and produced
+// step-sequence flow layouts preserve cannot — restructuring prose into
+// labelled boxes IS rewriting. It also cost 9 credits against 15. The
+// price is register: it added "seamless", "purpose-built", "automated" —
+// marketing prose nobody wrote. No invented facts; embellishment.
+//
+// So `preserve` stays the default (an evidence-bearing deck should say
+// what the founder said) and `generate` is offered for decks where the
+// visual structure is the point, with the trade named in the UI. What
+// must never happen is textMode changing silently: that would make the
+// persona decorative with nothing to reveal it.
 //
 // `cardSplit: "inputTextBreaks"` keeps slide boundaries ours too: Gamma
 // splits at the markers in deck.md rather than deciding card breaks
@@ -120,13 +134,17 @@ const IMAGE_SOURCES = {
 };
 const DEFAULT_IMAGE_SOURCE = IMAGE_SOURCES.stock;
 
-async function startGeneration({ inputText, themeId = null, exportAs = "pptx", title = null, additionalInstructions = null, imageSource = DEFAULT_IMAGE_SOURCE }) {
+const TEXT_MODES = { preserve: "preserve", generate: "generate" };
+const DEFAULT_TEXT_MODE = TEXT_MODES.preserve;
+
+async function startGeneration({ inputText, themeId = null, exportAs = "pptx", title = null, additionalInstructions = null, imageSource = DEFAULT_IMAGE_SOURCE, textMode = DEFAULT_TEXT_MODE }) {
 	const body = {
 		inputText: String(inputText).slice(0, MAX_INPUT_CHARS),
 		// The two settings that keep authorship ours. Do not change these
 		// without re-reading this module's header.
-		textMode: "preserve",
-		cardSplit: "inputTextBreaks",
+		textMode,
+		// Only meaningful under preserve; in generate mode Gamma decides breaks.
+		...(textMode === TEXT_MODES.preserve ? { cardSplit: "inputTextBreaks" } : {}),
 		format: "presentation",
 		exportAs,
 		...(themeId ? { themeId } : {}),
@@ -177,6 +195,8 @@ module.exports = {
 	BASE_URL,
 	IMAGE_SOURCES,
 	DEFAULT_IMAGE_SOURCE,
+	TEXT_MODES,
+	DEFAULT_TEXT_MODE,
 	SLIDE_BREAK,
 	MAX_INPUT_CHARS,
 	slideCount,

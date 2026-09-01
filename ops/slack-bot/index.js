@@ -461,6 +461,11 @@ app.action("deck_theme", async ({ ack, body, client }) => {
 	const [id, chatTs, themeId] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
 	if (id && chatTs) require("./deck-render").rememberSettings(id, chatTs, { deck_theme: themeId });
 });
+app.action("deck_textmode", async ({ ack, body }) => {
+	await ack();
+	const [id, chatTs, mode] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
+	if (id && chatTs) require("./deck-render").rememberSettings(id, chatTs, { deck_textmode: mode });
+});
 app.action("deck_images", async ({ ack, body }) => {
 	await ack();
 	const [id, chatTs, source] = String(body.actions?.[0]?.selected_option?.value || "").split("::");

@@ -35,6 +35,7 @@ function deckSettings(id, chatTs) {
 		themeId: chat.deck_theme || null,
 		exportAs: chat.deck_export || DEFAULT_EXPORT,
 		imageSource: chat.deck_images || gamma.DEFAULT_IMAGE_SOURCE,
+		textMode: chat.deck_textmode || gamma.DEFAULT_TEXT_MODE,
 	};
 }
 
@@ -59,6 +60,14 @@ function renderBlocks(id, chatTs, { themes = [], settings }) {
 	// a constant buried in code. Labels name the cost, because "AI images"
 	// reads as free until it isn't.
 	const imgOpt = (v, label) => ({ text: { type: "plain_text", text: label }, value: `${id}::${chatTs}::${v}` });
+	// Who authors the deck. Labelled in founder terms, not API terms, and
+	// naming the trade -- measured, not guessed: generate keeps the facts
+	// and adds marketing register.
+	const tmOpt = (v, label) => ({ text: { type: "plain_text", text: label }, value: `${id}::${chatTs}::${v}` });
+	const textModes = [
+		tmOpt(gamma.TEXT_MODES.preserve, "My words exactly"),
+		tmOpt(gamma.TEXT_MODES.generate, "Let Gamma design it (rewrites)"),
+	];
 	const images = [
 		imgOpt(gamma.IMAGE_SOURCES.stock, "Stock photos (free)"),
 		imgOpt(gamma.IMAGE_SOURCES.none, "No images"),
@@ -94,6 +103,13 @@ function renderBlocks(id, chatTs, { themes = [], settings }) {
 						placeholder: { type: "plain_text", text: "Images" },
 						initial_option: images.find((i) => i.value.endsWith(`::${settings.imageSource}`)) || images[0],
 						options: images,
+					},
+					{
+						type: "static_select",
+						action_id: "deck_textmode",
+						placeholder: { type: "plain_text", text: "Words" },
+						initial_option: textModes.find((t) => t.value.endsWith(`::${settings.textMode}`)) || textModes[0],
+						options: textModes,
 					},
 					{ type: "button", action_id: "deck_browse", text: { type: "plain_text", text: "Browse themes" }, value: `${id}::${chatTs}` },
 					{ type: "button", action_id: "deck_render_go", style: "primary", text: { type: "plain_text", text: "Render" }, value: `${id}::${chatTs}` },
@@ -136,7 +152,7 @@ async function renderDeck({ id, chatTs, client, channel, progressTs = null }) {
 		return { ok: false, reason: "there's no `deck.md` yet — write the deck in deck mode first" };
 	}
 	const state = readState(id);
-	const { themeId, exportAs, imageSource } = deckSettings(id, chatTs);
+	const { themeId, exportAs, imageSource, textMode } = deckSettings(id, chatTs);
 	const slides = gamma.slideCount(deck);
 
 	const say = async (text) => {
@@ -153,6 +169,7 @@ async function renderDeck({ id, chatTs, client, channel, progressTs = null }) {
 			themeId,
 			exportAs,
 			imageSource,
+			textMode,
 			title: `${chats.readChat(id, chatTs)?.title || id} — deck`,
 		});
 	} catch (err) {
