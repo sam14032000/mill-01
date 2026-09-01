@@ -195,3 +195,23 @@ Mode: brainstorm (Co-founder)
 - The founder initially planned to address both freight forwarder pain points (customs/CHA operations and sales/commercial conversion) simultaneously to provide a complete solution [FOUNDER BELIEF].
 - The founder believes that partnering with the sales/commercial side of a freight forwarder offers a better entry point / opportunity for a pilot than customs/CHA operations, despite anticipated difficulty [FOUNDER BELIEF].
 - The founder plans to restrict the initial pilot intake filter to a single product category covering only a couple of SKUs [FOUNDER BELIEF].
+
+---
+### 2026-09-01T10:55:33.861Z
+
+**Mode:** product
+
+Mode: product (PM)
+
+Research passes run so far, for citation and NOT-DISCUSSED checking:
+(no research passes have run for this idea yet)
+
+- Target customer segment defined as mid-sized/mid-market Indian consumer brands (500–5,000 orders/day or ₹15Cr–₹150Cr ARR) looking to export bulk/palletized inventory (LCL/pallets, 2–5 pallets) to international fulfillment networks, specifically US Amazon FBA [FOUNDER BELIEF].
+- Stated problem is that destination compliance (US MoCRA/FDA, IOR bonds, 10-digit HTS mapping, FBA pallet/carton specs) causes severe fear of stranded capital and port demurrage ($150–$300/day), while freight forwarders disclaim compliance liability, leading to high drop-off rates on export freight quotes [FOUNDER BELIEF].
+- Proposed MVP pilot mechanism: forwarder sales reps offer free pre-clearance for 2 hero SKUs to 5 stalled/dropped export leads in Beauty/Skincare or Apparel to get them to book freight [FOUNDER BELIEF].
+- Proposed pilot success metrics include: $\ge 30\%$ lead-to-booking conversion rate from dropped forwarder export leads; $< 48$ hours turnaround time for certified pre-clearance documentation generation; and 0 customs detentions, demurrage penalties, or Amazon dock rejections on pre-cleared pilot runs [FOUNDER BELIEF].
+- Proposed product scope for MVP focuses exclusively on Beauty/Skincare exports from India to US Amazon FBA (governed by US MoCRA/FDA and 10-digit HTS rules), excluding apparel, food, electronics, other destinations (EU, UK, GCC), direct cargo insurance underwriting, physical lab testing, and automated bank e-BRC / EDPMS reconciliation [FOUNDER BELIEF].
+- Proposed product flow consists of 4 main screens/views: (1) Forwarder Pipeline Tracker for audit link generation and readiness tracking; (2) Brand SKU Intake for uploading COAs, ingredient formulation lists, domestic HSN, and packaging dielines/photos; (3) Pre-Clearance Audit & Remediation Hub covering 10-digit US HTS mapping, MoCRA/FDA checks, and physical packaging/labeling remediation steps; and (4) Master Export Pack delivering downloadable certified commercial invoices, packing lists, FDA Prior Notice confirmation references, and Amazon FBA carton/pallet spec sheets to trigger freight booking [FOUNDER BELIEF].
+
+CONTRADICTS: none.
+NOT DISCUSSED: none.
