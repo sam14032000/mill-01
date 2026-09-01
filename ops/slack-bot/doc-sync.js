@@ -127,8 +127,11 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 			? `\n\n⚠️ *This shrank the document by ${shrankBy}%.* Check nothing was dropped — the previous version is in git history.`
 			: "";
 		const summary = await summarizeForThread(result.text).catch(() => result.text.slice(0, 400));
+		// Surface the next action at the moment it becomes possible, rather
+		// than only in the error you get for not knowing it existed.
+		const next = persona.actionHint ? `\n\n_${persona.actionHint}_` : "";
 		await client.chat
-			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* from this chat${delta}:\n\n${summary}${warn}` })
+			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* from this chat${delta}:\n\n${summary}${warn}${next}` })
 			.catch(() => {});
 		await attachFullDocument(client, { id, mode, channel, threadTs });
 	}

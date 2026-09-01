@@ -24,6 +24,9 @@ const PERSONAS = {
 	brainstorm: {
 		mode: "brainstorm",
 		label: "Co-founder",
+		// Shown on the mode banner: how to ACT in this mode. Without it
+		// the only route to discovering a command was getting it wrong.
+		actionHint: "Talk it through. `@Mill attack` turns it into a falsifiable assumption.",
 		inputDoc: null, // mandatory entry point (Change 1) -- nothing upstream
 		outputDoc: "research-kb.md",
 		outputTitle: "Research knowledge base",
@@ -45,6 +48,9 @@ const PERSONAS = {
 	product: {
 		mode: "product",
 		label: "PM",
+		// Shown on the mode banner: how to ACT in this mode. Without it
+		// the only route to discovering a command was getting it wrong.
+		actionHint: "Talk it through — the spec is written from this conversation.",
 		inputDoc: "research-kb.md",
 		outputDoc: "product-spec.md",
 		outputTitle: "Product spec",
@@ -67,6 +73,9 @@ const PERSONAS = {
 	engineering: {
 		mode: "engineering",
 		label: "Engineer",
+		// Shown on the mode banner: how to ACT in this mode. Without it
+		// the only route to discovering a command was getting it wrong.
+		actionHint: "Talk it through — the spec is written from this conversation.",
 		inputDoc: "product-spec.md",
 		outputDoc: "engineering-spec.md",
 		outputTitle: "Engineering spec",
@@ -92,6 +101,10 @@ const PERSONAS = {
 	proto: {
 		mode: "proto",
 		label: "Builder",
+		producesLabel: "prototype artifacts",
+		// Shown on the mode banner: how to ACT in this mode. Without it
+		// the only route to discovering a command was getting it wrong.
+		actionHint: "`@Mill proto <assumption>` builds the smallest artifact that tests it.",
 		inputDoc: "engineering-spec.md",
 		outputDoc: null, // artifacts under ideas/<id>/proto/<n>/, not a spec document
 		outputTitle: null,
@@ -118,6 +131,9 @@ const PERSONAS = {
 	deck: {
 		mode: "deck",
 		label: "Deck writer",
+		// Shown on the mode banner: how to ACT in this mode. Without it
+		// the only route to discovering a command was getting it wrong.
+		actionHint: "`@Mill deck` renders these slides when you are ready.",
 		branch: true,
 		// Enforces "brainstorm must have run" for free, via checkMissingInput.
 		inputDoc: "research-kb.md",
@@ -153,6 +169,12 @@ const PERSONAS = {
 	audit: {
 		mode: "audit",
 		label: "Auditor",
+		// outputTitle is null (the verdict is audit-<stamp>.json, written by
+		// the gate) but "artifacts" is the wrong word for it on the banner.
+		producesLabel: "a verdict, from the real gate",
+		// Shown on the mode banner: how to ACT in this mode. Without it
+		// the only route to discovering a command was getting it wrong.
+		actionHint: "`@Mill audit` runs the real gate when the evidence is in.",
 		inputDoc: null, // buildContextMessages deliberately loads no documents in audit
 		outputDoc: null, // the verdict is audit-<stamp>.json, written by the gate
 		outputTitle: null,

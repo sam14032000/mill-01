@@ -46,7 +46,11 @@ function modeBannerText(mode, { byFounder = null } = {}) {
 	const persona = PERSONAS[mode];
 	const emoji = MODE_EMOJI[mode] || "▶️";
 	const who = byFounder ? ` — switched by ${byFounder}` : "";
-	return `${emoji} *Mode: ${persona.label === "Co-founder" ? "Brainstorm" : mode[0].toUpperCase() + mode.slice(1)}* (${persona.label})${who}. Produces: ${persona.outputTitle || "artifacts"}.`;
+	const name = persona.label === "Co-founder" ? "Brainstorm" : mode[0].toUpperCase() + mode.slice(1);
+	// The hint is how you ACT in this mode. Before it, the only way to learn
+	// a mode's command was to guess wrong and read the error.
+	const hint = persona.actionHint ? ` ${persona.actionHint}` : "";
+	return `${emoji} *Mode: ${name}* (${persona.label})${who}. Produces: ${persona.outputTitle || persona.producesLabel || "artifacts"}.${hint}`;
 }
 
 // Creates the channel, invites every active founder, sets the topic to
