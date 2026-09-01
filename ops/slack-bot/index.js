@@ -279,13 +279,45 @@ app.event("app_mention", async ({ event, client }) => {
 			await post("Run `@Mill deck` inside a chat thread.");
 			return;
 		}
-		// Check for the deck BEFORE offering to render it. Otherwise the
-		// founder picks a theme, taps Render, and only then learns there is
-		// nothing to render -- after a themes API call and two decisions.
+		// Fold the conversation into deck.md FIRST.
+		//
+		// The persona drafts slides in the thread; nothing writes the
+		// document on a conversational turn. Without this, a founder who had
+		// just worked through their slides in deck mode was told "there's no
+		// deck.md yet — switch to deck mode and work through the slides",
+		// which is both wrong and insulting when they are in deck mode and
+		// have done exactly that. Consistent with D-57: syncing a document
+		// from its own stage's conversation is bookkeeping, not an edit
+		// needing approval, and the founder should not have to know
+		// `@Mill save` exists to render what they just wrote.
+		const { chatMode } = require("./chats");
+		if (chatMode(project.id, chatTs) === "deck") {
+			const note = await client.chat
+				.postMessage({ channel: event.channel, thread_ts: chatTs, text: "_Folding this conversation into the deck…_" })
+				.catch(() => null);
+			const synced = await require("./doc-sync")
+				.syncModeDocument({ id: project.id, mode: "deck", chatTs, client, channel: event.channel, threadTs: chatTs, announce: false })
+				.catch((e) => {
+					console.error(`deck: sync failed for ${project.id}: ${e.message}`);
+					return { ok: false, reason: e.message };
+				});
+			if (note) {
+				const line = synced.skipped
+					? "_Deck already up to date with this chat._"
+					: synced.ok
+						? `_Deck updated from this chat${synced.before ? ` · ${synced.before} → ${synced.after} words` : ` · ${synced.after} words`}._`
+						: `_Couldn't fold the conversation in: ${synced.reason}_`;
+				await client.chat.update({ channel: event.channel, ts: note.ts, text: line }).catch(() => {});
+			}
+		}
+
+		// Only now is "there is nothing to render" a true statement.
 		if (!require("./mode-docs").readDoc(project.id, "deck")) {
+			const inDeckMode = chatMode(project.id, chatTs) === "deck";
 			await post(
-				"There's no `deck.md` yet. Switch this chat to *deck* mode and work through the slides — " +
-					"who each one is for and what it should make them do — then `@Mill deck` to render it.",
+				inDeckMode
+					? "There's still nothing to render — we haven't worked out any slides in this chat yet. Tell me who a slide is for and what it should make them do, then `@Mill deck`."
+					: "There's no `deck.md` for this project yet. Switch a chat to *deck* mode, work through the slides — who each one is for and what it should make them do — then `@Mill deck`.",
 			);
 			return;
 		}
