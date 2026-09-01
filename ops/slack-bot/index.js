@@ -262,12 +262,26 @@ app.event("app_mention", async ({ event, client }) => {
 	const post = (text) =>
 		client.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text }).catch(() => {});
 	if (!parsed) {
-		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`, `mode <name>`, `save`. Or run the slash command from the channel body.");
+		await post("I can run: `@Mill attack`, `find <query>`, `cross`, `blindspot`, `themes`, `test`, `proto <assumption>`, `spinoff <idea>`, `audit`, `mode <name>`, `save`, `deck`. Or run the slash command from the channel body.");
 		return;
 	}
 	// Change 1: mode switching is a control action on the project, not an
 	// idea-lifecycle command -- handled directly rather than through
 	// command-shim's HANDLERS map (dispatchCommand would 404 on "mode").
+	if (parsed.action === "deck") {
+		const project = findIdeaByChannel(event.channel);
+		if (!project) {
+			await post("`deck` renders a project's deck — it only works inside a project.");
+			return;
+		}
+		const chatTs = event.thread_ts || null;
+		if (!chatTs) {
+			await post("Run `@Mill deck` inside a chat thread.");
+			return;
+		}
+		await postDeckControl(client, project.id, chatTs, event.channel);
+		return;
+	}
 	if (parsed.action === "save") {
 		const project = findIdeaByChannel(event.channel);
 		if (!project) {
@@ -412,6 +426,74 @@ app.action(/^mode_switch/, async ({ ack, body, client }) => {
 	} catch (e) {
 		console.error("mode_switch failed:", e);
 		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Mode switch failed — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+// --- deck rendering (D-56) --------------------------------------------
+// `@Mill deck` posts the render control; the selects remember their
+// choice on the chat; Render does the work with a progress message.
+async function postDeckControl(client, id, chatTs, channel) {
+	const deckRender = require("./deck-render");
+	const gamma = require("./gamma");
+	const themes = await gamma.listThemes().catch((e) => {
+		console.error(`deck: listThemes failed: ${e.message}`);
+		return [];
+	});
+	const settings = deckRender.deckSettings(id, chatTs);
+	const { text, blocks } = deckRender.renderBlocks(id, chatTs, { themes, settings });
+	await client.chat.postMessage({ channel, thread_ts: chatTs, text, blocks }).catch(() => {});
+}
+
+app.action("deck_theme", async ({ ack, body, client }) => {
+	await ack();
+	const [id, chatTs, themeId] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
+	if (id && chatTs) require("./deck-render").rememberSettings(id, chatTs, { deck_theme: themeId });
+});
+app.action("deck_export", async ({ ack, body }) => {
+	await ack();
+	const [id, chatTs, exportAs] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
+	if (id && chatTs) require("./deck-render").rememberSettings(id, chatTs, { deck_export: exportAs });
+});
+app.action("deck_browse", async ({ ack, body, client }) => {
+	await ack();
+	try {
+		const [id, chatTs] = String(body.actions?.[0]?.value || "").split("::");
+		const themes = await require("./gamma").listThemes();
+		await client.views.open({ trigger_id: body.trigger_id, view: require("./deck-render").themeModal(id, chatTs, themes) });
+	} catch (e) {
+		console.error("deck_browse failed:", e?.data?.error || e.message);
+	}
+});
+app.action("deck_pick", async ({ ack, body, client }) => {
+	await ack();
+	const [id, chatTs, themeId] = String(body.actions?.[0]?.value || "").split("::");
+	if (!id || !chatTs) return;
+	require("./deck-render").rememberSettings(id, chatTs, { deck_theme: themeId });
+	const st = readState(id);
+	await client.chat
+		.postMessage({ channel: st?.channel_id, thread_ts: chatTs, text: `_Theme set to *${themeId}*._` })
+		.catch(() => {});
+});
+app.action("deck_render_go", async ({ ack, body, client }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, chatTs] = String(body.actions?.[0]?.value || "").split("::");
+		const st = readState(id);
+		const channel = body.channel?.id || st?.channel_id;
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "▶️ Rendering…" });
+		const progress = await client.chat
+			.postMessage({ channel, thread_ts: chatTs, text: "_Rendering…_" })
+			.then((r) => r.ts)
+			.catch(() => null);
+		const result = await require("./deck-render").renderDeck({ id, chatTs, client, channel, progressTs: progress });
+		if (!result.ok && progress) {
+			await client.chat.update({ channel, ts: progress, text: `Couldn't render: ${result.reason}` }).catch(() => {});
+		}
+	} catch (e) {
+		console.error("deck_render_go failed:", e);
 	} finally {
 		buttonResolve.releaseTap(body);
 	}

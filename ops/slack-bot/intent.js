@@ -34,6 +34,8 @@ const MENTION_ALIASES = {
 	mode: "mode", switch: "mode",
 	// `@Mill save` writes the current mode's document from the conversation.
 	save: "save", write: "save",
+	// `@Mill deck` posts the render control for the current chat.
+	deck: "deck", render: "deck",
 	// `@Mill chat <title>` opens a new chat inside a project channel.
 	chat: "chat", newchat: "chat",
 };
