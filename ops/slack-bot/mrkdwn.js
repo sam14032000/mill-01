@@ -105,15 +105,78 @@ function convertBlocks(blocks) {
 // Idempotently patch a WebClient so every chat.postMessage / chat.update
 // gets its text and mrkdwn blocks converted. One choke point instead of
 // ~20 call sites, and it can't be forgotten at a new one.
+// Slack rejects a message over 4000 characters with `msg_too_long`. That
+// is a REJECTION, not a truncation — and it cost a founder a full reply:
+// a product spec was generated, recorded in the session and folded into
+// audit-reference.md, and the chat.update that would have shown it was
+// rejected into a `.catch(() => {})`. The turn then completed normally,
+// so the process went idle with nothing logged and the thread sat on
+// "_Thinking…_". Length is not an edge case here: personas write specs.
+//
+// 3800 leaves room for the mrkdwn conversion above to grow the string.
+const SLACK_TEXT_MAX = Number(process.env.MILL_SLACK_TEXT_MAX) || 3800;
+
+// Splits a long message on paragraph, then line, then sentence, then a
+// hard cut — the conservative markdown-aware strategy D-39 took from the
+// reference bridges. Lives here rather than in promotion.js because the
+// choke point is where every outbound message can actually be protected.
+function chunkForSlack(text, max = SLACK_TEXT_MAX) {
+	if (text.length <= max) return [text];
+	const out = [];
+	let rest = text;
+	while (rest.length > max) {
+		let cut = rest.lastIndexOf("\n\n", max);
+		if (cut < max * 0.5) cut = rest.lastIndexOf("\n", max);
+		if (cut < max * 0.5) cut = rest.lastIndexOf(". ", max);
+		if (cut < max * 0.5) cut = max;
+		// Don't end a message on a heading whose body is in the next one.
+		// A paragraph boundary sits right after a heading line as readily
+		// as after a paragraph, and a spec is mostly headings, so this
+		// happens constantly: "## Screen 16" alone at the foot of one
+		// message and its content at the top of the next.
+		let head = rest.slice(0, cut);
+		const lastLine = head.slice(head.lastIndexOf("\n") + 1).trim();
+		if (/^(#{1,6}\s+\S|\*[^*\n]+\*$)/.test(lastLine) && head.lastIndexOf("\n") > max * 0.3) {
+			cut = head.lastIndexOf("\n");
+			head = rest.slice(0, cut);
+		}
+		out.push(head.trim());
+		rest = rest.slice(cut).trim();
+	}
+	if (rest) out.push(rest);
+	return out;
+}
+
 function wrapClientFormatting(client) {
 	if (!client?.chat || client.__mrkdwnWrapped) return client;
 	for (const method of ["postMessage", "update"]) {
 		const orig = client.chat[method];
 		if (typeof orig !== "function") continue;
-		client.chat[method] = function wrapped(args) {
+		client.chat[method] = async function wrapped(args) {
 			if (args && typeof args === "object") {
 				if (typeof args.text === "string") args.text = toSlackMrkdwn(args.text);
 				if (Array.isArray(args.blocks)) convertBlocks(args.blocks);
+			}
+			const text = args && typeof args.text === "string" ? args.text : null;
+			if (text && text.length > SLACK_TEXT_MAX) {
+				// With blocks, `text` is only the notification fallback and
+				// Slack renders the blocks — trim it rather than splitting a
+				// message whose real content lives elsewhere.
+				if (Array.isArray(args.blocks) && args.blocks.length) {
+					return orig.call(this, { ...args, text: text.slice(0, SLACK_TEXT_MAX) });
+				}
+				const parts = chunkForSlack(text, SLACK_TEXT_MAX);
+				const first = await orig.call(this, { ...args, text: parts[0] });
+				// A continuation goes into the same thread. For an update
+				// that means threading off the message just edited: Slack
+				// resolves a thread_ts pointing at a reply to that reply's
+				// parent, so the remainder lands in the founder's thread
+				// rather than starting a new one.
+				const threadTs = args.thread_ts || (method === "update" ? args.ts : undefined);
+				for (const part of parts.slice(1)) {
+					await client.chat.postMessage({ channel: args.channel, thread_ts: threadTs, text: part });
+				}
+				return first;
 			}
 			return orig.call(this, args);
 		};
@@ -127,4 +190,4 @@ function wrapClientFormatting(client) {
 	return client;
 }
 
-module.exports = { toSlackMrkdwn, convertBlocks, wrapClientFormatting };
+module.exports = { toSlackMrkdwn, convertBlocks, wrapClientFormatting, chunkForSlack, SLACK_TEXT_MAX };

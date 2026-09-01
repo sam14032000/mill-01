@@ -74,24 +74,9 @@ async function summarizeChat(session) {
 // "failed channel creation creates no idea at all" verification -- it
 // throws at the point Part 16's channel creation will sit, before any
 // idea directory is written.
-// Splits a long turn on paragraph, then sentence, then hard boundaries --
-// the same conservative strategy the Slack bridges use (D-39) and the one
-// this bot's other message formatting follows.
-function chunkForSlack(text, max) {
-	if (text.length <= max) return [text];
-	const out = [];
-	let rest = text;
-	while (rest.length > max) {
-		let cut = rest.lastIndexOf("\n\n", max);
-		if (cut < max * 0.5) cut = rest.lastIndexOf("\n", max);
-		if (cut < max * 0.5) cut = rest.lastIndexOf(". ", max);
-		if (cut < max * 0.5) cut = max;
-		out.push(rest.slice(0, cut).trim());
-		rest = rest.slice(cut).trim();
-	}
-	if (rest) out.push(rest);
-	return out;
-}
+// Splitting lives at the outbound choke point now (mrkdwn.js), so every
+// path gets it rather than only the ones that remembered to call it.
+const { chunkForSlack } = require("./mrkdwn");
 
 // `_idOverride` is a TEST HOOK, alongside the existing `_simulateFailure`.
 // Without it a test that exercises this path calls generateIdeaId(), which
