@@ -71,6 +71,14 @@ async function handleFirstMessage({ session, message, client }) {
 		);
 	}
 
+	// 1b. Fold the CURRENT mode's conversation up once enough has
+	//     accumulated, so a founder who never switches still ends up with a
+	//     document. Runs after the upstream sync and before the reply, and
+	//     stays silent when there is nothing to fold.
+	await require("./doc-sync")
+		.maybeSyncCurrentMode({ id, chatTs, client, channel, threadTs: chatTs })
+		.catch((err) => console.error(`mode-entry: current-mode sync failed for ${id}: ${err.message}`));
+
 	// 2. Does the mode we are now in have its input document?
 	const missing = checkMissingInput(id, mode);
 	if (!missing) return false;

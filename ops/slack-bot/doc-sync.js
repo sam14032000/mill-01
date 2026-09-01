@@ -154,6 +154,33 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 	return { ok: true, created: !existing, before, after, shrankBy, materialShrink, turnsFolded: turns.length };
 }
 
+// How many unsynced turns in the CURRENT mode before its document is
+// folded up. A document that only writes itself when you leave a mode
+// never exists for a founder who stays in one -- which is the same silent
+// gap as the two before it: the card shows a document as absent, nothing
+// says why, and the fix (`@Mill save`) is undiscoverable.
+const SYNC_EVERY = Number(process.env.MILL_SYNC_EVERY_TURNS) || 6;
+
+// Folds the CURRENT mode's conversation into its own document once enough
+// has accumulated. Returns null when there is nothing to do, so callers
+// can stay quiet rather than narrating a no-op.
+async function maybeSyncCurrentMode({ id, chatTs, client, channel, threadTs }) {
+	const chat = chats.readChat(id, chatTs);
+	if (!chat) return null;
+	const mode = chat.mode || "brainstorm";
+	const persona = personaFor(mode);
+	if (!persona.outputDoc) return null; // proto/audit own no document
+
+	const { getSession } = require("./chat-session");
+	const session = getSession(chatTs);
+	if (!session) return null;
+
+	const { turns } = unsyncedTurns(session, chat, mode);
+	if (turns.length < SYNC_EVERY) return null;
+
+	return syncModeDocument({ id, mode, chatTs, client, channel, threadTs });
+}
+
 // Called on the first message after a mode switch: bring the mode the
 // chat just LEFT up to date, so the document carries the context forward
 // rather than the new mode dragging the old thread's turns along.
@@ -168,4 +195,4 @@ async function syncPreviousMode({ id, chatTs, client, channel, threadTs }) {
 	return { ...res, mode: prev };
 }
 
-module.exports = { syncModeDocument, syncPreviousMode, unsyncedTurns };
+module.exports = { syncModeDocument, syncPreviousMode, maybeSyncCurrentMode, unsyncedTurns, SYNC_EVERY };
