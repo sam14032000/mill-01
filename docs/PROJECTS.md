@@ -117,8 +117,8 @@ Never silently refuse. The button is always the next step.
 
 1. Generates an idea id, creates `ideas/<id>/`
 2. Writes the **full chat transcript** to `ideas/<id>/origin-chat.md` — this is the idea's memory, and the reason promoting late loses nothing
-3. Creates the project channel with its stage threads
-4. Seeds the Brainstorm thread with a summary of the origin chat and a link back to the chat thread
+3. Creates the project channel and its first chat (whose card is that chat's thread root)
+4. **Transfers the chat turn by turn** into that first chat — each turn reposted in order, attributed (`*saksham:*` / `*Mill:*`), verbatim. Slack cannot move messages between channels, so "attach" means replaying the conversation as it read, not collapsing it into a summary
 5. Posts a link to the new channel in the chat thread and in `#mill-ideas`
 6. Sets the assumption if one came from `/attack`; otherwise leaves it unset and notes that `/test` needs one
 
@@ -128,26 +128,43 @@ Retroactive, not prospective. A founder never has to decide up front whether a t
 
 ## Projects
 
-### Structure
+### Structure — chats and modes (supersedes the five stage threads)
 
-Slack threads are one level deep — replying inside a thread stays in that thread. So stages are threads within a channel, not threads within a thread.
+A project channel holds **many chats**. Each chat is a Slack thread whose **root message is its card**; replies to it are the conversation. Card and conversation are therefore the same thread by construction and cannot drift apart.
 
 ```
 #idea-a3f9-batter
-  ├─ 🧠 Brainstorm     ← /think /cross /blindspot /attack, conversation
-  ├─ 🔍 Research       ← /test, field evidence, reports
-  ├─ ⚖️  Audit          ← verdicts
-  ├─ 🔨 Prototype      ← /proto, touches
-  └─ 📎 Documents      ← uploads
+  ├─ 💬 Customs wedge      ← a chat. Its card is the thread root.        [📋 product ▾]
+  ├─ 💬 Pricing model      ← another chat, in its own mode.              [🧠 brainstorm ▾]
+  └─ 💬 Returns            ← the last active one is the pinned card.     [🔧 engineering ▾]
 ```
 
-Five anchor messages at creation; their `thread_ts` stored in `state.json`. Every command posts into its stage thread. Because these are threads, commands are run by `@Mill <command>` or a tapped offer, not a slash command — see "Running commands in threads" above.
+**Superseded:** the five per-stage anchor threads (Brainstorm / Research / Audit / Prototype / Documents). A stage is no longer a thread — it is a **mode** on a chat, and the same chat moves between modes.
 
-**Context is keyed on `thread_ts`, never on channel.** One channel hosts four parallel conversations, and binding sessions at channel level causes silent context bleed — research findings leaking into brainstorm, prototype talk contaminating an audit.
+**Modes.** Each chat carries one, changed by the `static_select` on its card or `@Mill mode <name>`:
 
-### The pinned state card (D-52)
+| Mode | Persona | Owns | Refuses |
+|---|---|---|---|
+| brainstorm | Co-founder | `research-kb.md` | an unfalsifiable claim |
+| product | PM | `product-spec.md` | a feature with no user/JTBD/metric; prescribing implementation |
+| engineering | Engineer | `engineering-spec.md` | a design with no failure modes/cost; reopening product decisions |
+| proto | Builder | artifacts | building with no engineering spec |
+| deck *(branch)* | Deck writer | `deck.md` | a slide with no audience and no intended effect |
+| audit | Auditor | the verdict is the gate's | giving a verdict in conversation |
 
-Slack opens a long thread at the top, so returning to a busy project means scrolling to find where things stand. Each project channel carries **one pinned "current state" card** — assumption (or what it's blocked on), current state, last verdict, what's next, and a permalink to the latest activity. It's posted once and edited in place (`chat.update`) on **every state transition** — promotion, `/attack`, `/test`, `/audit`, `/proto`, kill, `/spinoff` — never on a timer. A returning founder reads that one message. The channel **topic** carries a one-line version that's visible in the header without opening anything. (`#chats` sessions get no card — they're disposable and every reply already has the promote button.) The pin itself needs the `pins:write` scope; without it the card and topic still work, the card just isn't sticky.
+Modes are sequential in **dependency** (each persona's input is the previous mode's document) but never in **gating** — switching is always allowed. `deck` is a branch off brainstorm, not a link in the chain (D-56).
+
+**Documents carry context between stages, not the thread** (D-57). On the first message after a switch, the mode just left is synced from that chat's conversation, so the new mode reads a current upstream document. A document syncs only from turns spoken in its own mode.
+
+**Context is keyed on `thread_ts`, never on channel.** One channel hosts several parallel chats, and binding sessions at channel level causes silent context bleed.
+
+### The pinned card
+
+Exactly **one card is pinned per project: the last active chat.** It is that chat's thread root, re-rendered on every transition and whenever the chat is active, and `repin` unpins the previous so the channel pin is never ambiguous.
+
+The card shows the chat title and who opened it, the assumption, the document chain as **links** (`research KB · product spec · engineering spec · audit report`, present ones hyperlinked), and a "▶ Continue where you left off" permalink to the newest message in that chat. The mode lives on the `static_select` accessory rather than in the text — the control *is* the status display.
+
+**Deliberately not shown:** the `open/researched/audited` lifecycle and a prescribed "Next: run X" line. Both encoded D-41's linear pipeline that modes replaced, and both went stale on their own.
 
 ### Naming and membership
 
@@ -292,7 +309,7 @@ PDF and images go to Gemini natively. `.docx`/`.xlsx` need conversion. Text and 
 
 **P2 — Promotion.** The button, triggered prompts, transcript capture, idea creation. Project channels can wait — promote into the current flat structure first.
 
-**P3 — Project channels.** `channels:manage`, channel creation, stage threads, per-thread routing.
+**P3 — Project channels.** `channels:manage`, channel creation, chats-with-modes, per-thread routing.
 
 **P4 — Documents.** Upload capture, size limits, indexing, the context rules.
 

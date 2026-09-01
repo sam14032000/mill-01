@@ -807,3 +807,52 @@ The pinned card is the one message a returning founder reads, so its defects are
 **The process lesson, which recurs.** The refusal failure was diagnosed only after three prompt-wording changes and one ordering change had failed — the same error recorded in D-54's compressor amendment, where a prompt was tuned three times against a bug that was never about wording. Both times the answer came from an experiment isolating one variable, and both times that experiment was available from the start. When a prompt does not do what it is told, isolate before rewriting.
 
 **Revisit when:** the veto pass shows up as material cost on `mill-flash` (it fires only on non-brainstorm turns and replaces the agent call when it refuses, so it should not), or a future model no longer suppresses refusal under tool presence — in which case re-run the isolation test before removing the gate, do not assume.
+
+---
+
+### D-56 · Deck mode: an optional branch off brainstorm, rendered by Gamma
+
+**Decision.** A fifth working mode, `deck`, that hangs **off** brainstorm rather than joining the chain. It is optional, never offered and never nudged toward. Its input document is `research-kb.md`, which is what enforces "brainstorm must have run" — reusing `checkMissingInput` rather than adding a gate. It reads **every project asset except the audit report**, gates nothing downstream, and `deck.md` is never any mode's input.
+
+**Why a branch and not a stage.** A deck is a communication artifact, not a step toward building. It can be made as soon as there is something to say, it wants everything the project knows rather than one upstream document, and nothing depends on it. `MODE_ORDER` had been doing double duty as both the picker order and the dependency chain; `CHAIN_MODES` and a `branch: true` flag now separate the two, so "what feeds what" is stated rather than inferred from array position.
+
+**Two exclusions, deliberately symmetric.**
+- Deck never sees `audit-reference.md` or any `audit-*.json`. Implemented as a named `DECK_FORBIDDEN` deny-list, not as an accident of what happens to get loaded — removing it should require arguing for it. The audit report is the auditor's working record (raw founder beliefs, contradiction flags, kill reasoning) and a deck is the artifact most likely to be shown to outsiders.
+- Deck conversation is excluded from the audit report in return. A deck is persuasion — how the idea gets framed for an audience — and feeding "here's how we'll pitch it" to the gate is close to the laundering the compressor exists to prevent (D-54).
+
+**The persona refuses a slide with no named audience and no stated intended effect** (founders' choice). **Deliberately not adopted:** a refusal on claims that trace to no asset. The consequence is worth stating rather than discovering later — the deck is the one artifact shown to outsiders and now the one place with no evidence guard.
+
+**Rendering: Gamma, via `textMode: "preserve"`.** Presenton was chosen first (cheaper, open-source escape hatch, a scoped login-free share URL via `/presentation/integrate`) and reversed on maturity. Gamma's `preserve` mode plus `cardSplit: "inputTextBreaks"` gives the property that made the integration acceptable at all — the deck persona authors, the vendor renders — via markdown rather than schema-conforming JSON.
+
+**Verified, not trusted.** `preserve` is a vendor claim, so it was tested: deliberately clumsy sentences and three nonsense markers were sent, the returned PPTX unzipped, and its slide XML read back. Every marker present exactly once, every awkward sentence verbatim, 3 slides in and 3 out. Had `preserve` quietly rewritten, the persona and its refusal would have been decorative with nothing to reveal it.
+
+**Gamma decides per-card layout and cannot be overridden — this is why the integration is *less* code.** Per-slide layout was never going to be a founder choice (twelve layout decisions on a phone, for layouts you cannot see), so letting Gamma own it deletes the whole fetch-live-schemas → emit-conforming-JSON → validate → retry pipeline the Presenton path required, and the failure class with it.
+
+**Cost, measured rather than estimated.** 15 credits for a 3-slide deck — 5 per slide, not the 1 per slide extrapolated from Presenton's pricing. A Pro allowance (4,000/month, ~₹1,300) is therefore roughly 65 twelve-slide decks. Fits the buffer freed by D-01's correction. `credits.deducted` and `credits.remaining` are captured on every render, so this is observable rather than inferred.
+
+**D-17 exception, recorded because it crosses a standing boundary.** Deck content — the whole idea, its positioning, any numbers on it — goes to a third party. Self-hosted Presenton (Apache 2.0, drives a LiteLLM proxy, content never leaves the box) was the alternative that would have avoided it, set aside for operational simplicity rather than cost. `gammaUrl` is Gamma's editable web app, which also answered "should we host a settings page on our own ngrok tunnel": no — the mount container has deny-all egress (D-48) and could not POST a form back, it would evict whatever holds the single slot, and its basic-auth credential is shared rather than per-founder.
+
+**Polling, not webhooks.** Gamma offers completion webhooks; consuming them needs an inbound HTTP endpoint and D-04 is explicit that nothing here opens one.
+
+**Revisit when:** Gamma's `preserve` semantics change (re-run the marker test before trusting it again — do not assume), or per-slide design control becomes worth the JSON pipeline it costs.
+
+---
+
+### D-57 · Documents carry context between stages; automatic sync replaces explicit save
+
+**Decision.** A stage's document is kept current with its conversation **automatically**, on the first message after a mode switch. The mode just left is reconciled from that chat's turns before the new persona replies, so the new mode reads a current upstream document instead of dragging the previous thread's turns along.
+
+**This reverses an earlier decision in this build, and the reversal should be visible.** `@Mill save` was built first, explicitly founder-triggered, reasoning from D-30 that a document downstream modes feed on should not be rewritten without a human in the loop. In practice a founder could work for an hour, switch mode, and carry none of it forward — the document silently went stale while the card still showed it as present. The founders' call is that these are machine-maintained artifacts, not founder prose, so keeping them in sync is bookkeeping rather than an edit needing approval. `@Mill save` remains for an explicit mid-mode save.
+
+**Three mitigations make automatic safe**, and they are the reason this is not simply a weakening of D-30:
+1. **Incremental.** `chat.synced_through[mode]` is a watermark — how far that chat's turns have been folded in. A sync considers only what is new, so ping-ponging between stages never re-processes a thread.
+2. **Reconciled, not regenerated.** The current document is *in the prompt*, and the instruction is a per-section decision — UNCHANGED / APPEND / REVISE — because handing a model a blank-page rewrite is what makes it silently drop facts. Proven: a save over a KB containing a DGFT trade notice, three competitor names and unit economics wiped all three when the model could not see the document it was replacing. Fixed and re-proven; the same test now shows the document growing while every prior specific survives.
+3. **Reported.** Every sync posts a word delta, and a contraction over 40% on a substantial document is flagged loudly. Change 3's rule is "never silently overwrite what the founder wrote"; a large shrink is exactly what a summary hides.
+
+**Scope: a document syncs only from turns spoken in its own stage** (founders' call). Turns now record the mode they were spoken in, *at the time* — a chat's current mode says nothing about which mode a given turn belongs to. So an engineering tangent cannot rewrite the research base. A research-relevant remark made in engineering mode still reaches `audit-reference.md`; it just does not reach the KB.
+
+**Ordering is the load-bearing part.** On a stage skip (brainstorm → engineering with no product spec) the upstream sync runs **before** generation, so the product spec is drafted from a research KB that already contains the brainstorm conversation — the generator never needs the raw chat.
+
+**Also decided here.** The missing-document offer moved from switch time to the first message: a founder stepping through modes to decide where to start was getting an offer per switch, about work not yet begun. Declining it switches *that chat* to the missing stage rather than opening a new one, keeping a single line of thinking in one thread. And consecutive switches with nothing said between them edit one banner in place instead of narrating an unmade decision three times.
+
+**Revisit when:** a sync is observed dropping material despite the reconcile framing (the word-delta flag is the tripwire), or founders want a document that is genuinely hand-authored and should never be machine-touched — which would need a per-document opt-out this design does not have.

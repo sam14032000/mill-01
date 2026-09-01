@@ -521,11 +521,39 @@ FOUNDER_VAIBHAV=U03GHI
 SLACK_CHANNEL_MILL=C...
 SLACK_CHANNEL_RESEARCH=C...
 SLACK_CHANNEL_GRAVEYARD=C...
+SLACK_CHANNEL_CHATS=C...
+TAVILY_API_KEY=tvly-...
+GAMMA_API_KEY=sk-gamma-...
 ```
 
 ```bash
 chmod 600 ~/.config/mill/env
 ```
+
+**`GAMMA_API_KEY` — deck rendering (D-56).** Optional: everything except deck
+mode's *render* step works without it, and `gamma.js` raises a clear error
+rather than failing silently when it is absent. Requires a Gamma **Pro** plan
+or above — API keys are not issued on Free or Plus. Create it in Gamma's
+workspace settings; the value looks like `sk-gamma-…`.
+
+**Adding it needs a service RESTART, not a SIGHUP.** `config.js` re-reads this
+file on SIGHUP, but only for the values *it* owns (founder IDs, channel IDs).
+`gamma.js` reads `process.env.GAMMA_API_KEY`, and `process.env` is fixed when
+the process spawns — systemd passes this file in via `EnvironmentFile=` at
+start. So:
+
+```bash
+# add it without the secret entering shell history
+read -rs GAMMA_KEY && printf 'GAMMA_API_KEY=%s\n' "$GAMMA_KEY" >> ~/.config/mill/env && unset GAMMA_KEY
+sudo systemctl restart mill-chat
+
+# verify the RUNNING PROCESS has it, without printing it
+sudo tr '\0' '\n' < /proc/$(systemctl show mill-chat -p MainPID --value)/environ | grep -c '^GAMMA_API_KEY=sk-gamma'
+```
+
+A `1` from the last command means the running bot holds a well-formed key.
+Checking the file alone is not sufficient — it says nothing about whether the
+process that reads it has been restarted since.
 
 Map Slack user IDs to `minds/<name>/` directories. **Attribution drives profile routing and is not optional** (D-40). Identity comes only from Slack's verified `user_id` against this static map — no passphrase, no secondary login. Anything off the map is dropped silently.
 

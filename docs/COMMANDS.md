@@ -72,6 +72,16 @@ Every command builds its prompt from parts. Order matters for prefix caching —
 
 ---
 
+## Modes (D-54 / D-56 / D-57)
+
+A project chat carries a **mode**, which selects the persona that replies and the document that chat owns. Changed by the card's mode select or `@Mill mode <name>`; `@Mill save` writes the current mode's document mid-flow.
+
+`brainstorm → product → engineering → proto` is a dependency chain (each persona is fed the previous stage's document, and nothing further upstream). `deck` branches off brainstorm and gates nothing. `audit` is entered, not triggered — its persona discusses readiness and refuses to give a verdict, because the verdict is one pass of the real gate on Fable (D-10).
+
+Switching is never blocked. On the **first message** after a switch: the mode just left is synced from that chat's conversation, and if the new mode's input document is missing you are asked once whether to draft it or switch to the stage that owns it.
+
+---
+
 ## Invocation paths (D-53)
 
 Slack rejects slash commands typed inside a thread (D-51). Two ways to reach a command:

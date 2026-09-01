@@ -200,7 +200,8 @@ Each founder reads and hand-corrects their own profile monthly. It will be wrong
 | Research (~16 passes @ $1.50) | $24 |
 | **Audit — Fable 5 (~15 @ $1.60)** | **$24** |
 | Prototype + touches | $12 |
-| Buffer | $23 |
+| Deck rendering — Gamma Pro (D-56) | $15 |
+| Buffer | $8 |
 | **Total** | **$100** |
 
 MiniMax M3 (the old "mechanical" $3 line) was removed in the projects phase — D-46. Document indexing uses `flash-fast`; the $3 folds into the buffer.
@@ -209,7 +210,7 @@ Slack free tier is adequate. Transcription is gone — Gemini handles audio nati
 
 **Per founder: roughly five research passes and five audits a month** — about one idea fully processed per founder per week.
 
-**Headroom already taken.** The host moved to Hetzner (~4GB for about $5 against DigitalOcean's $12) — D-01's revisit condition was met and acted on. That freed roughly $7/month, which sits in the buffer above (now $23) until something claims it.
+**Headroom already taken.** The host moved to Hetzner (~4GB for about $5 against DigitalOcean's $12) — D-01's revisit condition was met and acted on. That freed roughly $7/month, which the deck-rendering line now claims. Deck credits are measured, not estimated: 5 per slide (a 3-slide test deck cost 15 of 4,000), so a Pro allowance is roughly 65 twelve-slide decks a month.
 
 **Spend caps** (DECISIONS D-23): per provider, at ~1.5× expected. Fable's line is a tripwire — gate-only use means above $35/month something is calling it outside the gate.
 
