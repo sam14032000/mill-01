@@ -834,7 +834,9 @@ The pinned card is the one message a returning founder reads, so its defects are
 
 **Polling, not webhooks.** Gamma offers completion webhooks; consuming them needs an inbound HTTP endpoint and D-04 is explicit that nothing here opens one.
 
-**Revisit when:** Gamma's `preserve` semantics change (re-run the marker test before trusting it again — do not assume), or per-slide design control becomes worth the JSON pipeline it costs.
+**`preserve` preserves TEXT, not the whole artifact — imagery is still Gamma's.** Unzipping the verification deck showed one photo per slide, added with no `imageOptions` sent at all. Two consequences of leaving that unpinned, so it is now always explicit. **Cost:** `aiGenerated` bills 2–125 credits *per image* by model tier, so a 12-slide deck could run 900+ credits against a 4,000/month allowance, versus ~60 with stock. **Fabrication:** this persona refuses on audience rather than on evidence, so imagery is the one route by which an unearned claim reaches a founder-facing artifact. Default is `webFreeToUseCommercially` — real photographs, cleared for commercial use (a deck goes to investors and customers, so licensing is not incidental), zero generation credits. Image source is the **third** control on the render block, and its option labels name the credit cost, because "AI images" reads as free until it isn't. Charts are not produced: no chart or diagram parts appeared in the output, and Gamma's docs do not describe generating data visualisations from input content.
+
+**Revisit when:** Gamma's `preserve` semantics change (re-run the marker test before trusting it again — do not assume), Gamma starts generating data charts from input (which would need an evidence guard the deck persona deliberately lacks), or per-slide design control becomes worth the JSON pipeline it costs.
 
 ---
 

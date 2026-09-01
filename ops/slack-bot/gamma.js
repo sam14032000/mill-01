@@ -102,7 +102,25 @@ async function listThemes() {
 
 // Starts a generation. `inputText` is deck.md verbatim — never a summary
 // of it, and never a prompt describing what to make.
-async function startGeneration({ inputText, themeId = null, exportAs = "pptx", title = null, additionalInstructions = null }) {
+// Image sources, from Gamma's own list. Ordered by what this system
+// should default to rather than by what looks best.
+//
+// Gamma adds imagery on its own — verified by unzipping a rendered deck:
+// one photo per slide appeared with no imageOptions sent at all. Leaving
+// that unpinned is two risks. Cost: `aiGenerated` bills 2–125 credits PER
+// IMAGE by model tier, so a 12-slide deck could run 900+ credits against a
+// 4,000/month allowance, versus ~60 with stock. And fabrication: the deck
+// persona refuses on audience, not on evidence (D-56), so imagery is the
+// one place an unearned claim can reach a founder-facing artifact.
+const IMAGE_SOURCES = {
+	stock: "webFreeToUseCommercially", // real photos, cleared for commercial use, 0 credits
+	pexels: "pexels",
+	none: "noImages",
+	ai: "aiGenerated", // invents imagery; 2–125 credits each
+};
+const DEFAULT_IMAGE_SOURCE = IMAGE_SOURCES.stock;
+
+async function startGeneration({ inputText, themeId = null, exportAs = "pptx", title = null, additionalInstructions = null, imageSource = DEFAULT_IMAGE_SOURCE }) {
 	const body = {
 		inputText: String(inputText).slice(0, MAX_INPUT_CHARS),
 		// The two settings that keep authorship ours. Do not change these
@@ -112,6 +130,8 @@ async function startGeneration({ inputText, themeId = null, exportAs = "pptx", t
 		format: "presentation",
 		exportAs,
 		...(themeId ? { themeId } : {}),
+		// Always explicit — never Gamma's unstated default.
+		imageOptions: { source: imageSource },
 		...(title ? { title: String(title).slice(0, 500) } : {}),
 		...(additionalInstructions ? { additionalInstructions: String(additionalInstructions).slice(0, 5000) } : {}),
 	};
@@ -155,6 +175,8 @@ async function pollGeneration(generationId, { onTick = null, sleep = (ms) => new
 
 module.exports = {
 	BASE_URL,
+	IMAGE_SOURCES,
+	DEFAULT_IMAGE_SOURCE,
 	SLIDE_BREAK,
 	MAX_INPUT_CHARS,
 	slideCount,

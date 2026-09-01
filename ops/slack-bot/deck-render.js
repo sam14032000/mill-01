@@ -6,11 +6,17 @@
 // slide), so it happens when the founder asks — not on every deck-mode
 // turn, and not on a save.
 //
-// Only two settings survive as API parameters, because the from-markdown
-// flow takes no others: the theme and the export format. Slide count and
-// tone are conversational — the persona writes deck.md and the number of
-// `---` breaks in it IS the slide count. Language is hardcoded `en`
-// (D-35). Per-card layout is Gamma's to decide and cannot be set.
+// Three settings, and no more: theme, export format, and image source.
+// Slide count and tone are conversational — the persona writes deck.md
+// and the number of `---` breaks in it IS the slide count. Language is
+// hardcoded `en` (D-35). Per-card layout is Gamma's and cannot be set.
+//
+// Image source earned its place on the control rather than being a
+// constant: Gamma adds imagery whether or not you ask, `aiGenerated`
+// bills 2–125 credits PER IMAGE, and the deck persona refuses on audience
+// rather than on evidence — so this is the one deck setting with both a
+// cost and a fabrication consequence. The option labels name the cost,
+// because "AI images" reads as free until it isn't.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -25,14 +31,18 @@ const DEFAULT_EXPORT = "pptx"; // editable is the point of a deck
 
 function deckSettings(id, chatTs) {
 	const chat = chats.readChat(id, chatTs) || {};
-	return { themeId: chat.deck_theme || null, exportAs: chat.deck_export || DEFAULT_EXPORT };
+	return {
+		themeId: chat.deck_theme || null,
+		exportAs: chat.deck_export || DEFAULT_EXPORT,
+		imageSource: chat.deck_images || gamma.DEFAULT_IMAGE_SOURCE,
+	};
 }
 
 function rememberSettings(id, chatTs, patch) {
 	chats.updateChat(id, chatTs, patch);
 }
 
-// The in-thread control: two selects and a Render button. Deliberately
+// The in-thread control: three selects and a Render button. Deliberately
 // names rather than thumbnails — a grid of 50 theme images in a thread is
 // unreadable on a phone. "Browse themes" opens a modal, which Slack
 // renders full-screen on mobile, for anyone who wants to see them.
@@ -44,6 +54,16 @@ function renderBlocks(id, chatTs, { themes = [], settings }) {
 	const current = settings.themeId && themeOptions.find((o) => o.value.endsWith(`::${settings.themeId}`));
 	const exportOpt = (v, label) => ({ text: { type: "plain_text", text: label }, value: `${id}::${chatTs}::${v}` });
 	const exports = [exportOpt("pptx", "PowerPoint (editable)"), exportOpt("pdf", "PDF"), exportOpt("png", "Images")];
+	// Third control, added deliberately: the image source has real cost and
+	// fabrication consequences, so it should be a visible choice rather than
+	// a constant buried in code. Labels name the cost, because "AI images"
+	// reads as free until it isn't.
+	const imgOpt = (v, label) => ({ text: { type: "plain_text", text: label }, value: `${id}::${chatTs}::${v}` });
+	const images = [
+		imgOpt(gamma.IMAGE_SOURCES.stock, "Stock photos (free)"),
+		imgOpt(gamma.IMAGE_SOURCES.none, "No images"),
+		imgOpt(gamma.IMAGE_SOURCES.ai, "AI images (2–125 credits each)"),
+	];
 
 	const text = "*Render this deck.* Pick a look, or just hit Render — the defaults are fine.";
 	return {
@@ -67,6 +87,13 @@ function renderBlocks(id, chatTs, { themes = [], settings }) {
 						placeholder: { type: "plain_text", text: "Format" },
 						initial_option: exports.find((e) => e.value.endsWith(`::${settings.exportAs}`)) || exports[0],
 						options: exports,
+					},
+					{
+						type: "static_select",
+						action_id: "deck_images",
+						placeholder: { type: "plain_text", text: "Images" },
+						initial_option: images.find((i) => i.value.endsWith(`::${settings.imageSource}`)) || images[0],
+						options: images,
 					},
 					{ type: "button", action_id: "deck_browse", text: { type: "plain_text", text: "Browse themes" }, value: `${id}::${chatTs}` },
 					{ type: "button", action_id: "deck_render_go", style: "primary", text: { type: "plain_text", text: "Render" }, value: `${id}::${chatTs}` },
@@ -109,7 +136,7 @@ async function renderDeck({ id, chatTs, client, channel, progressTs = null }) {
 		return { ok: false, reason: "there's no `deck.md` yet — write the deck in deck mode first" };
 	}
 	const state = readState(id);
-	const { themeId, exportAs } = deckSettings(id, chatTs);
+	const { themeId, exportAs, imageSource } = deckSettings(id, chatTs);
 	const slides = gamma.slideCount(deck);
 
 	const say = async (text) => {
@@ -125,6 +152,7 @@ async function renderDeck({ id, chatTs, client, channel, progressTs = null }) {
 			inputText: deck,
 			themeId,
 			exportAs,
+			imageSource,
 			title: `${chats.readChat(id, chatTs)?.title || id} — deck`,
 		});
 	} catch (err) {
