@@ -78,9 +78,9 @@ A project chat carries a **mode**, which selects the persona that replies and th
 
 `brainstorm → product → engineering → proto` is a dependency chain (each persona is fed the previous stage's document, and nothing further upstream). `deck` branches off brainstorm and gates nothing. `audit` is entered, not triggered — its persona discusses readiness and refuses to give a verdict, because the verdict is one pass of the real gate on Fable (D-10).
 
-Switching is never blocked and never rewrites anything on its own. On the **first message** after a switch, if the new mode's input document is missing you are asked once whether to draft it or switch to the stage that owns it — a button, not a silent write.
+Switching is never blocked. On the **first message** after a switch: the mode just left is synced from that chat's conversation (so the new persona reads a current upstream document rather than a stale one), and if the new mode's input document is missing you are asked once — a button — whether to draft it or switch to the stage that owns it.
 
-**Documents are written when you ask.** Say "create the product spec", "update the spec with what we just decided", or `@Mill save`, and the current mode's document is reconciled with the conversation section by section: unchanged sections are reproduced verbatim, new material is appended, superseded material is revised with a `## Changed in this update` line. Nothing is written automatically.
+**Otherwise documents are written when you ask.** Say "create the product spec", "update the spec with what we just decided", or `@Mill save`, and the current mode's document is reconciled with the conversation section by section: unchanged sections reproduced verbatim, new material appended, superseded material revised with a `## Changed in this update` line. There is no periodic write — a document changes when you ask, or when you leave the stage that owns it.
 
 ---
 

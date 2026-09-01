@@ -155,15 +155,23 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 }
 
 // maybeSyncCurrentMode (fold the current mode up every N turns) lived
-// here and is REMOVED. It, and syncPreviousMode below, existed because
-// `@Mill save` was the only way to write a document and nothing surfaced
-// it. Now that `save` is a tool the agent calls when asked, automatic
-// writing only means a file can change without the founder asking --
-// two authors for one document, one of them invisible. Founders' call.
+// here and is REMOVED. It fired mid-work on a turn counter, so a document
+// changed with no founder action to attribute it to. `save` is now a tool
+// the agent calls when asked, which covers that case properly.
+//
+// syncPreviousMode below is DELIBERATELY KEPT. It is not the same thing:
+// it fires at a boundary the founder just created by switching stages,
+// and forgetting to save before a switch is silent and deferred -- the
+// next persona reads a stale upstream document and answers confidently
+// from it. "Ask for a save" is not a substitute for that, because a
+// founder will not reliably remember.
 
-// NO LONGER CALLED. Kept because it is the correct implementation of
-// "bring the mode just left up to date" if automatic syncing is ever
-// wanted again; nothing invokes it today (see the note above).
+// Called on the first message after a mode switch: bring the mode the
+// chat just LEFT up to date, so the document carries the context forward
+// rather than the new mode dragging the old thread's turns along.
+//
+// On the FIRST MESSAGE rather than at switch time, so a founder stepping
+// through modes to decide where to start doesn't fire a sync per switch.
 async function syncPreviousMode({ id, chatTs, client, channel, threadTs }) {
 	const chat = chats.readChat(id, chatTs);
 	const prev = chat?.prev_mode;

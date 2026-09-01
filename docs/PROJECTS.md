@@ -154,7 +154,7 @@ A project channel holds **many chats**. Each chat is a Slack thread whose **root
 
 Modes are sequential in **dependency** (each persona's input is the previous mode's document) but never in **gating** — switching is always allowed. `deck` is a branch off brainstorm, not a link in the chain (D-56).
 
-**Documents carry context between stages, not the thread** (D-57). A document is written when you ask for it — "create the product spec", "update it with what we just said", `@Mill save` — and is reconciled with the conversation rather than regenerated, so prior specifics survive. It draws only on turns spoken in its own mode. Nothing writes a document automatically; the only unprompted thing is the button-gated offer when a mode's *input* document is missing or stale.
+**Documents carry context between stages, not the thread** (D-57). A document is written when you ask — "create the product spec", "update it with what we just said", `@Mill save` — and on the first message after you switch away from its mode, so the next persona reads a current upstream document without you having to remember. Either way it is reconciled with the conversation rather than regenerated, so prior specifics survive, and it draws only on turns spoken in its own mode. There is no periodic write.
 
 **Context is keyed on `thread_ts`, never on channel.** One channel hosts several parallel chats, and binding sessions at channel level causes silent context bleed.
 
