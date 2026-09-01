@@ -18,7 +18,6 @@
 
 const { personaFor } = require("./personas");
 const { checkMissingInput } = require("./mode-docflow");
-const { syncPreviousMode } = require("./doc-sync");
 const chats = require("./chats");
 
 // A chat waiting on the founder's answer to the auto-gen question.
@@ -63,21 +62,23 @@ async function handleFirstMessage({ session, message, client }) {
 	const mode = chat.mode || "brainstorm";
 	const channel = message.channel;
 
-	// 1. Bring the mode we just left up to date from this chat. Runs before
-	//    any generation so a skipped stage is generated from current input.
-	if (chat.prev_mode) {
-		await syncPreviousMode({ id, chatTs, client, channel, threadTs: chatTs }).catch((err) =>
-			console.error(`mode-entry: sync of ${chat.prev_mode} failed for ${id}: ${err.message}`),
-		);
-	}
-
-	// 1b. Fold the CURRENT mode's conversation up once enough has
-	//     accumulated, so a founder who never switches still ends up with a
-	//     document. Runs after the upstream sync and before the reply, and
-	//     stays silent when there is nothing to fold.
-	await require("./doc-sync")
-		.maybeSyncCurrentMode({ id, chatTs, client, channel, threadTs: chatTs })
-		.catch((err) => console.error(`mode-entry: current-mode sync failed for ${id}: ${err.message}`));
+	// NO AUTOMATIC DOCUMENT WRITES. Founders' call, reversing D-57.
+	//
+	// Two automatic syncs used to run here: the mode just left was folded
+	// up on the first message after a switch, and the current mode was
+	// folded up every 6 turns. Both existed because `@Mill save` was the
+	// only way to write a document and nothing surfaced it -- so a founder
+	// could work for an hour and carry none of it forward. That reasoning
+	// expired the moment `save` became a tool the agent calls when asked
+	// ("create a product spec", "update the spec with what we just said").
+	//
+	// Automatic writing is worth removing rather than merely redundant: it
+	// meant the same file had two authors, one of them invisible, so a
+	// document could change without the founder asking and without them
+	// being able to point at what caused it.
+	//
+	// What is NOT removed: the missing-input and stale-input OFFERS below.
+	// Those are button-gated, so a founder still approves every write.
 
 	// 2. Does the mode we are now in have its input document?
 	const missing = checkMissingInput(id, mode);
