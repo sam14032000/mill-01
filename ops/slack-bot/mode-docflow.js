@@ -237,7 +237,7 @@ async function saveModeDocument({ id, mode, client, channel, threadTs, docqRound
 	return {
 		ok: true, mode, created: !!res.created, wordCount: res.after,
 		previousWordCount: res.before, shrankBy: res.shrankBy, materialShrink: res.materialShrink,
-		excluded: res.excluded || null, questions: res.questions || 0,
+		excluded: res.excluded || null, questions: res.questions || 0, unchanged: !!res.unchanged,
 	};
 }
 
@@ -262,7 +262,9 @@ async function runSaveForThread({ id, mode, client, channel, threadTs, progressT
 				? "_I can only save from inside a chat thread — open the chat and ask there._"
 				: `_Nothing new to add — ${result.skipped}._`
 			: result.questions
-				? `_Saved (${result.wordCount} words) — ${result.questions} question${result.questions === 1 ? "" : "s"} below to finish it off._`
+				? result.unchanged
+					? `_Nothing saved yet — ${result.questions} question${result.questions === 1 ? "" : "s"} below first._`
+					: `_Saved (${result.wordCount} words) — ${result.questions} question${result.questions === 1 ? "" : "s"} below to finish it off._`
 				: result.excluded
 				// The detail is already in the sync's own post; this line
 				// just makes sure the founder cannot read "Saved" and miss

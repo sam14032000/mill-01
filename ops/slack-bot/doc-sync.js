@@ -199,19 +199,33 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 	chats.updateChat(id, chatTs, { synced_through: { ...(chat.synced_through || {}), [mode]: to } });
 
 	if (announce && client && channel) {
-		const verb = existing ? "Updated" : "Created";
-		const delta = existing ? ` · ${before} → ${after} words` : ` · ${after} words`;
+		// Don't claim an update that didn't happen. When everything the
+		// founder asked for was deferred to a question, the document is
+		// byte-identical -- and reporting "Updated · 1038 → 1038 words"
+		// over an unchanged file, with the real request sitting unanswered
+		// below it, reads as though the work landed. Observed live.
+		const unchanged = !!existing && docText.trim() === existing.trim();
+		const verb = !existing ? "Created" : unchanged ? "No change to" : "Updated";
+		const delta = !existing
+			? ` · ${after} words`
+			: unchanged
+				? ` · still ${after} words`
+				: ` · ${before} → ${after} words`;
 		const warn = materialShrink
 			? `\n\n⚠️ *This shrank the document by ${shrankBy}%.* Check nothing was dropped — the previous version is in git history.`
 			: "";
-		const summary = await summarizeForThread(docText).catch(() => docText.slice(0, 400));
+		const summary = unchanged
+			? "_The document is unchanged._"
+			: await summarizeForThread(docText).catch(() => docText.slice(0, 400));
 		// One message: what went in, and what did not and why. Splitting
 		// these across two posts is how a founder reads the first and
 		// misses the second.
 		const allExcluded = [excluded, cappedOut].filter(Boolean).join("\n");
 		const left = allExcluded ? `\n\n*Not incorporated:*\n${allExcluded}` : "";
 		const asking = questions.length
-			? `\n\n_${questions.length} thing${questions.length === 1 ? "" : "s"} still to settle — see the question${questions.length === 1 ? "" : "s"} below._`
+			? unchanged
+				? `\n\n_Nothing went in yet — answer the question${questions.length === 1 ? "" : "s"} below and I'll fold it in._`
+				: `\n\n_${questions.length} thing${questions.length === 1 ? "" : "s"} still to settle — see the question${questions.length === 1 ? "" : "s"} below._`
 			: "";
 		// Surface the next action at the moment it becomes possible, rather
 		// than only in the error you get for not knowing it existed.
@@ -227,6 +241,7 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 
 	return {
 		ok: true, created: !existing, before, after, shrankBy, materialShrink,
+		unchanged: !!existing && docText.trim() === existing.trim(),
 		turnsFolded: turns.length, excluded: [excluded, cappedOut].filter(Boolean).join("\n") || null,
 		questions: questions.length,
 	};

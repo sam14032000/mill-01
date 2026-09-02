@@ -151,6 +151,12 @@ async function runTurn(args) {
 	// with the answer already generated. The flag now flips only once a
 	// write has actually landed, and every write is bounded.
 	let settled = false;
+	// A command that posts its own output has ANSWERED the founder -- the
+	// placeholder is its business, not ours. Without this the `finally`
+	// below fired on every successful tool turn and told the founder
+	// "I couldn't get a reply out for that one" seconds before the real
+	// answer appeared. Observed live on a `save`.
+	const markAnswered = () => { settled = true; };
 	const post = (text) =>
 		softDeadline(
 			client.chat.postMessage({ channel: message.channel, thread_ts: session.threadTs, text }).then(() => true),
@@ -181,7 +187,7 @@ async function runTurn(args) {
 
 	try {
 		return await withDeadline(
-			runTurnInner({ ...args, placeholderTs, settle, trace }),
+			runTurnInner({ ...args, placeholderTs, settle, markAnswered, trace }),
 			TURN_DEADLINE_MS,
 			`turn ${session.threadTs}`,
 		);
@@ -209,7 +215,7 @@ async function runTurn(args) {
 	}
 }
 
-async function runTurnInner({ session, message, client, placeholderTs, settle, trace, askChain = 0 }) {
+async function runTurnInner({ session, message, client, placeholderTs, settle, markAnswered = () => {}, trace, askChain = 0 }) {
 	const isProject = session.kind === "project";
 	const ideaId = session.ideaId || null;
 	const stageName = isProject ? "project_turn" : "chat";
@@ -343,6 +349,7 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 		const before = session.turns.length;
 		const out = await runTool("find", { query: text, mode: "broad" }, { ...ctx, progressTs: placeholderTs, progressChannel: message.channel });
 		if (out.search) searchInitiatedBy = out.search;
+		markAnswered();
 		if (session.turns.length === before) addTurn(session, { role: "assistant", text: "[ran `find` (broad) — report is in the thread]", kind: "command" });
 		if (!out.posted && placeholderTs) {
 			await client.chat.update({ channel: message.channel, ts: placeholderTs, text: `_${out.result}_` }).catch(() => {});
@@ -401,6 +408,9 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 			if (out.posted) {
 				// The command put its output in the thread and owns the
 				// response. Stop -- no framing round-trip (D-52 Root Cause A).
+				// It also owns the placeholder, so nothing here may claim
+				// the turn failed.
+				markAnswered();
 				emit(
 					buildEvalEvent({
 						stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId,
