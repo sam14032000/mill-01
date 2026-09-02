@@ -225,19 +225,19 @@ async function regenerateStaleSections({ id, mode, client, channel, threadTs }) 
 // explicitly rather than by turn count.
 //
 // Kept as a named export because callers and tests reference it.
-async function saveModeDocument({ id, mode, client, channel, threadTs }) {
+async function saveModeDocument({ id, mode, client, channel, threadTs, docqRound = 1 }) {
 	const persona = personaFor(mode);
 	if (!persona.outputDoc) {
 		return { ok: false, reason: `${mode} mode produces no document (proto writes artifacts, audit writes a verdict)` };
 	}
 	const { syncModeDocument } = require("./doc-sync");
-	const res = await syncModeDocument({ id, mode, chatTs: threadTs, client, channel, threadTs, announce: true });
+	const res = await syncModeDocument({ id, mode, chatTs: threadTs, client, channel, threadTs, announce: true, docqRound });
 	if (!res.ok) return res;
 	if (res.skipped) return { ok: true, mode, skipped: res.skipped, wordCount: null };
 	return {
 		ok: true, mode, created: !!res.created, wordCount: res.after,
 		previousWordCount: res.before, shrankBy: res.shrankBy, materialShrink: res.materialShrink,
-		excluded: res.excluded || null,
+		excluded: res.excluded || null, questions: res.questions || 0,
 	};
 }
 
@@ -249,8 +249,8 @@ async function saveModeDocument({ id, mode, client, channel, threadTs }) {
 // for this exact operation -- could never reach it. The agent had ten
 // tools and none of them wrote a document, so the PM answered in prose
 // and the spec appeared later as a side effect of turn-count bookkeeping.
-async function runSaveForThread({ id, mode, client, channel, threadTs, progressTs = null }) {
-	const result = await saveModeDocument({ id, mode, client, channel, threadTs });
+async function runSaveForThread({ id, mode, client, channel, threadTs, progressTs = null, docqRound = 1 }) {
+	const result = await saveModeDocument({ id, mode, client, channel, threadTs, docqRound });
 	const text = result.ok
 		? result.skipped
 			// Honest rather than silent: an explicit save with nothing new
@@ -261,7 +261,9 @@ async function runSaveForThread({ id, mode, client, channel, threadTs, progressT
 				// founder; say which thread it needs.
 				? "_I can only save from inside a chat thread — open the chat and ask there._"
 				: `_Nothing new to add — ${result.skipped}._`
-			: result.excluded
+			: result.questions
+				? `_Saved (${result.wordCount} words) — ${result.questions} question${result.questions === 1 ? "" : "s"} below to finish it off._`
+				: result.excluded
 				// The detail is already in the sync's own post; this line
 				// just makes sure the founder cannot read "Saved" and miss
 				// that something was deliberately left out.

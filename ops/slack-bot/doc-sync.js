@@ -80,31 +80,41 @@ function formatTurns(turns) {
 // reliability problem, and the document is the payload here.
 const NOT_INCORPORATED = "---NOT-INCORPORATED---";
 
-const partialClause = (persona) =>
-	!PARTIAL_ACCEPTANCE.has(persona.mode)
-		? ""
-		: [
-		"",
-		"THIS ROLE'S BAR APPLIES PER ITEM, NOT TO THE WHOLE REQUEST.",
-		"Incorporate everything the founder described that meets your bar. For anything that does NOT,",
-		"leave it out of the document entirely -- do not write a placeholder section for it, and do not",
-		"weaken your bar to include it. Then, AFTER the document, emit this line on its own:",
-		NOT_INCORPORATED,
-		"and below it one entry per excluded item, each as a `REFUSAL:` line naming the item and what it",
-		"lacks, followed by an `UNBLOCK:` line naming the specific thing that would let it in. Omit the",
-		`line entirely if you incorporated everything. Never refuse the whole ${persona.outputTitle} when part`,
-		"of what was asked meets the bar.",
-	].join("\n");
+const { askClause, parseNeedsInput } = require("./doc-questions");
+
+// Personas whose bar governs document CONTENT ask/refuse per item. Not
+// brainstorm: research-kb.md records what was discussed so downstream
+// modes have context and the audit chain sees the founder's actual
+// beliefs, and filtering it defeats that.
+const partialClause = (persona) => (PARTIAL_ACCEPTANCE.has(persona.mode) ? askClause(persona) : "");
 
 // Splits the model's output into the document and the excluded-items
 // report. The document written to disk never contains the trailer.
 function splitNotIncorporated(text) {
 	const i = String(text).indexOf(NOT_INCORPORATED);
-	if (i === -1) return { doc: String(text).trim(), excluded: null };
-	return {
-		doc: String(text).slice(0, i).trim(),
-		excluded: String(text).slice(i + NOT_INCORPORATED.length).trim() || null,
-	};
+	let doc = i === -1 ? String(text).trim() : String(text).slice(0, i).trim();
+	let excluded = i === -1 ? null : String(text).slice(i + NOT_INCORPORATED.length).trim() || null;
+
+	// Salvage: a refusal written INSIDE the document rather than below the
+	// trailer. Observed -- the PM correctly refused a Postgres schema in a
+	// product spec and then wrote "REFUSAL: ..." as the closing line of the
+	// spec itself, so the file gained a refusal and the founder was told
+	// nothing was excluded. A document must never contain a bare REFUSAL:
+	// line, whatever the model does with the delimiter, so they are lifted
+	// out here rather than trusted to the prompt.
+	const lines = doc.split("\n");
+	const strays = [];
+	while (lines.length) {
+		const last = lines[lines.length - 1].trim();
+		if (!last) { lines.pop(); continue; }
+		if (/^(REFUSAL|UNBLOCK):/i.test(last)) { strays.unshift(lines.pop().trim()); continue; }
+		break;
+	}
+	if (strays.length) {
+		doc = lines.join("\n").trim();
+		excluded = [excluded, strays.join("\n")].filter(Boolean).join("\n");
+	}
+	return { doc, excluded };
 }
 
 // The reconcile instruction. Deliberately framed as a per-section
@@ -139,7 +149,7 @@ function reconcileDirective(persona, existing, newTurnsText) {
 
 // Reconciles one mode's document with the unsynced conversation in one
 // chat. Returns { ok, skipped?, created?, before, after, shrankBy }.
-async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, announce = true }) {
+async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, announce = true, docqRound = 1 }) {
 	const persona = personaFor(mode);
 	if (!persona.outputDoc) return { ok: true, skipped: "mode produces no document" };
 
@@ -170,7 +180,17 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 	const result = await runPersonaTurn({ id, mode, threadContext: "", userText: directive, maxTokens: 8000 });
 	if (result.refusal) return { ok: false, reason: "refused", refusal: result.refusal };
 
-	const { doc: docText, excluded } = splitNotIncorporated(result.text);
+	// Two trailers, two meanings: questions the founder can answer, and
+	// refusals no answer would change.
+	const parsedQ = parseNeedsInput(result.text);
+	const { doc: docText, excluded } = splitNotIncorporated(parsedQ.rest);
+	const { MAX_ROUNDS, askAll } = require("./doc-questions");
+	// Past the round cap the questions stop and become plain exclusions,
+	// so an answer the persona keeps finding inadequate can't loop.
+	const questions = docqRound <= MAX_ROUNDS ? parsedQ.items : [];
+	const cappedOut = docqRound > MAX_ROUNDS && parsedQ.items.length
+		? parsedQ.items.map((it) => `REFUSAL: ${it.item} — still ${it.question}\nUNBLOCK: say it in the thread and ask me to save again.`).join("\n")
+		: null;
 	const after = wordCount(docText);
 	const shrankBy = before ? Math.round(((before - after) / before) * 100) : 0;
 	const materialShrink = before > 200 && shrankBy >= 40;
@@ -188,17 +208,28 @@ async function syncModeDocument({ id, mode, chatTs, client, channel, threadTs, a
 		// One message: what went in, and what did not and why. Splitting
 		// these across two posts is how a founder reads the first and
 		// misses the second.
-		const left = excluded ? `\n\n*Not incorporated:*\n${excluded}` : "";
+		const allExcluded = [excluded, cappedOut].filter(Boolean).join("\n");
+		const left = allExcluded ? `\n\n*Not incorporated:*\n${allExcluded}` : "";
+		const asking = questions.length
+			? `\n\n_${questions.length} thing${questions.length === 1 ? "" : "s"} still to settle — see the question${questions.length === 1 ? "" : "s"} below._`
+			: "";
 		// Surface the next action at the moment it becomes possible, rather
 		// than only in the error you get for not knowing it existed.
 		const next = persona.actionHint ? `\n\n_${persona.actionHint}_` : "";
 		await client.chat
-			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* from this chat${delta}:\n\n${summary}${left}${warn}${next}` })
+			.postMessage({ channel, thread_ts: threadTs, text: `💾 ${verb} *${persona.outputTitle}* from this chat${delta}:\n\n${summary}${left}${asking}${warn}${next}` })
 			.catch(() => {});
 		await attachFullDocument(client, { id, mode, channel, threadTs });
+		if (questions.length) {
+			await askAll({ id, chatTs, mode, items: questions, client, channel, round: docqRound });
+		}
 	}
 
-	return { ok: true, created: !existing, before, after, shrankBy, materialShrink, turnsFolded: turns.length, excluded };
+	return {
+		ok: true, created: !existing, before, after, shrankBy, materialShrink,
+		turnsFolded: turns.length, excluded: [excluded, cappedOut].filter(Boolean).join("\n") || null,
+		questions: questions.length,
+	};
 }
 
 // maybeSyncCurrentMode (fold the current mode up every N turns) lived

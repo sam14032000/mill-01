@@ -510,6 +510,106 @@ app.action("deck_export", async ({ ack, body }) => {
 	const [id, chatTs, exportAs] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
 	if (id && chatTs) require("./deck-render").rememberSettings(id, chatTs, { deck_export: exportAs });
 });
+// ---- document questions: answer, write your own, or skip -------------
+//
+// An item that falls short for want of INFORMATION becomes a question
+// with the answers already drafted, rather than a refusal the founder has
+// to resolve in prose. Skip is not "leave it out" -- it means "you
+// choose", and takes the top recommendation, which the message says
+// before it is tapped and the resolved message records after.
+async function answerDocQuestion({ body, client, index, answer, skipped, id, chatTs }) {
+	const { recordAnswer, completeIfDone, outstanding, getPending } = require("./doc-questions");
+	recordAnswer(id, chatTs, index, answer, { skipped });
+	await buttonResolve.resolveMessage({
+		client, body,
+		outcomeText: skipped ? `Skipped — used: ${answer}` : `Answered: ${answer}`,
+	});
+	const left = outstanding(getPending(id, chatTs));
+	if (left === 0) {
+		await completeIfDone({ id, chatTs, client, channel: body.channel?.id }).catch((e) =>
+			console.error(`docq: re-save failed for ${id}: ${e.message}`),
+		);
+	}
+}
+
+app.action(/^docq_pick_/, async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, chatTs, index, opt] = String(action.value).split("::");
+		const item = require("./doc-questions").getPending(id, chatTs)?.items?.[Number(index)];
+		const chosen = item?.options?.[Number(opt)];
+		if (!chosen) return;
+		await answerDocQuestion({ body, client, index: Number(index), answer: chosen.answer, skipped: false, id, chatTs });
+	} catch (e) {
+		console.error("docq_pick failed:", e?.data?.error || e.message);
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+app.action("docq_skip", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const [id, chatTs, index] = String(action.value).split("::");
+		const item = require("./doc-questions").getPending(id, chatTs)?.items?.[Number(index)];
+		const top = item?.options?.[0];
+		if (!top) return;
+		await answerDocQuestion({ body, client, index: Number(index), answer: top.answer, skipped: true, id, chatTs });
+	} catch (e) {
+		console.error("docq_skip failed:", e?.data?.error || e.message);
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+app.action("docq_custom", async ({ ack, body, client, action }) => {
+	await ack();
+	try {
+		const [id, chatTs, index] = String(action.value).split("::");
+		const item = require("./doc-questions").getPending(id, chatTs)?.items?.[Number(index)];
+		if (!item) return;
+		// The message keeps its buttons until the modal is submitted --
+		// opening a dialog is not an answer, and cancelling must leave the
+		// question still answerable.
+		await client.views.open({
+			trigger_id: body.trigger_id,
+			view: require("./doc-questions").customModal({ id, chatTs, index: Number(index), item }),
+		});
+	} catch (e) {
+		console.error("docq_custom failed:", e?.data?.error || e.message);
+	}
+});
+
+app.view("docq_custom_modal", async ({ ack, body, view, client }) => {
+	await ack();
+	try {
+		const [id, chatTs, index] = String(view.private_metadata).split("::");
+		const answer = view.state?.values?.docq_answer?.value?.value?.trim();
+		if (!answer) return;
+		const { recordAnswer, completeIfDone, outstanding, getPending } = require("./doc-questions");
+		recordAnswer(id, chatTs, Number(index), answer, { skipped: false });
+		// No `body.message` on a view submission, so the question message
+		// cannot be resolved in place the way a button tap resolves it.
+		// Post the answer into the thread instead, which is honest about
+		// what happened and keeps the record in one place.
+		const channel = readState(id)?.channel_id;
+		if (!channel) {
+			console.error(`docq_custom_modal: no channel_id on ${id}; answer recorded but not posted`);
+			return;
+		}
+		await client.chat.postMessage({ channel, thread_ts: chatTs, text: `_Answered:_ ${answer}` }).catch(() => {});
+		if (outstanding(getPending(id, chatTs)) === 0) {
+			await completeIfDone({ id, chatTs, client, channel }).catch((e) =>
+				console.error(`docq: re-save failed for ${id}: ${e.message}`),
+			);
+		}
+	} catch (e) {
+		console.error("docq_custom_modal failed:", e?.data?.error || e.message);
+	}
+});
+
 app.action("deck_browse", async ({ ack, body, client }) => {
 	await ack();
 	try {
