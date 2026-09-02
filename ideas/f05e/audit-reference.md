@@ -215,3 +215,27 @@ Research passes run so far, for citation and NOT-DISCUSSED checking:
 
 CONTRADICTS: none.
 NOT DISCUSSED: none.
+
+---
+### 2026-09-01T19:15:09.605Z
+
+**Mode:** product
+
+Mode: product (PM)
+
+- Hypothetical MVP product specification created for an export pre-clearance and orchestration tool targeted at mid-market Indian D2C beauty and skincare brands (₹15Cr–₹150Cr ARR) shipping bulk palletized inventory (LCL/FCL) to Amazon US FBA. [FOUNDER BELIEF]
+- Spec defines target personas as Brand Operations Leads, Freight Forwarder Commercial Reps, and US Customs Brokers / Receiving 3PLs. [FOUNDER BELIEF]
+- Spec targets proposed success metrics: $\ge 30\%$ lead-to-booking conversion on dropped forwarder leads, $\le 48$ hours pre-clearance turnaround time, and zero port customs detentions or Amazon dock rejections on pre-cleared pilot shipments. [FOUNDER BELIEF]
+- Spec scope defines 5 MVP user stories covering forwarder audit invite generation, SKU intake (ingredients, Certificate of Analysis lab reports, packaging dielines/photos, domestic HSN), MoCRA/FDA compliance and 10-digit HTS tariff checks, label remediation verification, and certified master export pack generation (Commercial Bill of Entry, US FDA Prior Notice reference, FBA carton/pallet manifest). Excludes e-BRC/EDPMS reconciliation, cargo insurance underwriting, non-US destinations, and multi-category shipments. [FOUNDER BELIEF]
+- Spec outlines a 4-page UI flow: Forwarder Pipeline Tracker, Brand SKU Intake & Target Setup, Pre-Clearance Audit & Remediation Hub, and Master Export Pack & Booking Handshake. [FOUNDER BELIEF]
+- Founder proposed revising the product structure so the core interface is shown to agencies to plug in their third-party providers (such as logistics), paired with a brand-facing compliance tracking and reporting screen that is initially information-heavy and non-interactive. [FOUNDER BELIEF]
+
+---
+### 2026-09-02T05:19:44.561Z
+
+**Mode:** product
+
+Mode: product (PM)
+
+- The proposed product should allow agencies to connect their third-party providers (such as logistics) and provide a tracking screen on the other end for brands to see how much compliance readiness they have to proceed with shipping. [FOUNDER BELIEF]
+- The brand-facing interface can initially be an information-heavy, read-only reporting screen without user interactions. [FOUNDER BELIEF]
