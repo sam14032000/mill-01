@@ -528,3 +528,38 @@ Two changes in `agent.js`:
 Regex logic 11/11 standalone (incl. the exact reported message → forced; "run the research pass" → not; "we could research this later" → not). `_agent.js` case 4d (embedded imperative → `forced_broad_find`, `tools_called=[find]`) passed. Also added: `chat-session.js` `maybeCompact` now emits a `compaction` telemetry event (the compaction LLM call was spent but never logged — C-23 under-reported any window containing a compaction; cutoff bumped).
 
 **Note:** the day's `mill-flash` $1.00 budget was exhausted by this session's repeated live test runs (agent loop = one model call per turn; broad `/find` = 2 large-input gens; forced-find spike). Reset the `spend` counter to 0 via `/key/update` (cap, duration, models, key value unchanged) so the founder isn't blocked until UTC midnight. The agent-loop workload genuinely runs hotter than $0.50/day — watch whether real usage approaches $1.00.
+
+---
+
+## Correction — the "orphaned question buttons" never happened (2026-09-02)
+
+Commit `67cb7e9` states as fact that a question posted in `f05e` at
+07:42:44 "has live buttons and no pending record behind it", and
+speculates that the pending record may have been destroyed by an agent
+running `git stash push ideas/` around the live bot's writes. **Both are
+wrong.** Not force-pushing to correct history (D-45), so the record is
+corrected here.
+
+What actually happened: the founder **answered** the question at 07:47 by
+tapping an option. `button-resolve` retired the buttons and wrote the
+outcome line ("Answered: Export Management Agencies (EMAs) managing
+multi-brand catalogs configure their contracted forwarders and CHAs…"),
+`completeIfDone` cleared the pending record — which is what it is
+supposed to do — appended the answer as a founder turn, and re-ran the
+write: **1038 → 1572 words**, with the agency/EMA/read-only-dashboard
+content in the spec (14/16/9 hits). `writeDoc`'s new auto-commit landed
+it as `be918ed`. The whole ask → answer → re-save chain worked in
+production, first time.
+
+**The diagnostic error, which is the durable part.** "No pending record"
+was read as "the state was lost" when the far likelier reading — the one
+the design makes routine — is "the question was answered." The thread
+itself held the evidence (a resolved outcome line, a save 5 minutes
+later, a word count that had grown), and it was not checked before
+reaching for a cause. Absence of state is not evidence of failure in a
+system that clears state on success; check the success path first.
+
+The `staleDocQuestion` guard added in `67cb7e9` is **kept**, reclassified
+from a fix to a defensive one: a tap on a question the bot genuinely has
+no record for should retire the buttons and say so rather than silently
+returning. That gap was real, it was just never exercised.
