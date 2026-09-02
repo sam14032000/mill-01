@@ -246,22 +246,30 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 	// role is what the founder is talking to; the tool rules are how it
 	// operates. A short restatement still trails the context so the
 	// refusals sit next to the live turns as well.
-	// THE REFUSAL GATE.
+	// THE REFUSAL GATE, run AFTER the loop rather than before it.
 	//
-	// Measured, not assumed: with an identical message list, the persona
-	// refuses correctly when called WITHOUT tools and emits a bare tool
-	// call when the same messages are sent WITH tools. Offering a tool set
-	// pulls the model toward acting rather than declining, which silently
-	// disabled the refusals that are the entire point of the personas --
-	// and no amount of prompt emphasis fixed it, because the prompt was
-	// never the cause.
+	// Measured, not assumed (D-55): with an identical message list the
+	// persona refuses correctly when called WITHOUT tools and emits a bare
+	// tool call when the same messages are sent WITH tools. Offering a tool
+	// set pulls the model toward acting rather than declining. That finding
+	// stands; what was wrong was running the check FIRST.
 	//
-	// So the role's veto is asked FIRST, with no tools, and only for the
-	// modes whose refusals are load-bearing. Brainstorm -- the common case
-	// -- is untouched and costs nothing extra; when a refusal does fire it
-	// replaces the agent call rather than adding to it.
-	if (mode !== "brainstorm") {
-		trace.step(`veto (${mode})`);
+	// Running it first made it decide something it cannot see: whether the
+	// turn is a document write. A founder asking to modify the spec got the
+	// whole turn replaced by a refusal, so the `save` -- which now asks per
+	// item for what's missing rather than refusing over it -- never ran. And
+	// because the check reads the thread, two earlier refusals for the same
+	// message biased it toward a third: the same momentum problem D-52
+	// recorded for command routing.
+	//
+	// So the loop decides first. If it calls a tool, that command owns the
+	// turn and enforces its own gates (a save asks or refuses per item). Only
+	// when the turn is about to answer in PROSE -- the case the gate was
+	// actually built for -- is the role asked, with no tools, whether it
+	// refuses. Cheaper too: a tool turn now makes one model call, not two.
+	const refusalCheck = async () => {
+		if (mode === "brainstorm") return null;
+		trace.step(`refusal check (${mode})`);
 		const veto = await callFlash(
 			[
 				{ role: "system", content: personaBrief },
@@ -269,64 +277,32 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 				{
 					role: "system",
 					content:
-						"Decide ONE thing about the founder's latest message, and answer with one of exactly three " +
-						"forms and nothing else:\n" +
-						"1. `PROCEED` — this role can engage with it normally.\n" +
-						"2. `PARTIAL` — the founder is asking you to WRITE or UPDATE this mode's document, and some " +
-						"of what they described meets this role's bar even though some of it does not. Answer with " +
-						"the single word PARTIAL. Do not list what fails here; the document write handles that " +
-						"per item and reports it.\n" +
-						"3. `REFUSAL:` then `UNBLOCK:` lines — this role refuses, and there is nothing in the " +
-						"request it can act on. Use this for a request that is not a document write, or one where " +
-						"NOTHING offered meets the bar.\n" +
-						"Prefer PARTIAL over REFUSAL whenever the founder asked for a document write and any part " +
-						"of it is usable — refusing the whole write throws away work they did specify.",
+						"Does this role refuse the founder's latest message? Answer `PROCEED` if it can engage " +
+						"normally, or `REFUSAL:` then `UNBLOCK:` lines if it refuses. Judge the LATEST message " +
+						"only: an earlier refusal in this thread is not a reason to refuse again.",
 				},
 				{ role: "user", content: text },
 			],
 			// 4096, not 700. The refusal shares this budget with reasoning
-			// (D-08): at 700 a real call spent 675 tokens thinking and the
-			// refusal was truncated before its UNBLOCK line, so the founder got
-			// an accusation with no way forward. llm.js now floors this too.
+			// (D-08): at 700 a real call spent 675 tokens thinking and was
+			// truncated before its UNBLOCK line, so the founder got an
+			// accusation with no way forward. llm.js floors this too now.
 			{ model: MODEL, maxTokens: 4096 },
 		).catch((err) => {
-			// A failed veto must never block the turn -- fall through to the
-			// normal loop rather than leaving the founder with nothing.
+			// A failed check must never block the turn.
 			console.error(`agent: refusal check failed (${session.threadTs}): ${err.message}`);
 			return null;
 		});
-		trace.step(veto ? "veto returned" : "veto failed — falling through");
-		// PARTIAL: the founder asked for a document write and some of it
-		// passes. Fall through to the loop so `save` runs; the save's own
-		// persona call accepts per item and reports what it left out, so
-		// the founder gets the work they did specify plus a named refusal
-		// for the rest -- in one message, rather than losing both.
-		const partial = /^\s*PARTIAL\b/i.test(String(veto?.content || ""));
-		if (partial) trace.step("veto: partial — letting the write decide per item");
-		const refusal = !partial && veto && parseRefusal(veto.content);
-		// A refusal with no UNBLOCK is a dead end, which the persona
-		// contract forbids in as many words ("Never refuse with a dead
-		// end"). Posting one anyway is worse than not refusing: it blocks
-		// the founder's request and tells them nothing about how to
-		// proceed. Treat it as a malformed gate result and fall through to
-		// the normal loop rather than passing the defect on.
+		const refusal = veto && parseRefusal(veto.content);
+		// A refusal with no UNBLOCK is a dead end, which the persona contract
+		// forbids in as many words. Treat it as malformed rather than passing
+		// the defect to the founder.
 		if (refusal && !refusal.unblock) {
-			console.error(`agent: incomplete refusal (no UNBLOCK) in ${mode} for ${session.threadTs} — falling through: ${String(veto.content).slice(0, 120)}`);
+			console.error(`agent: incomplete refusal (no UNBLOCK) in ${mode} for ${session.threadTs} — ignoring: ${String(veto.content).slice(0, 120)}`);
+			return null;
 		}
-		if (refusal && refusal.unblock) {
-			const body = veto.content.trim();
-			await settle(body);
-			addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
-			addTurn(session, { role: "assistant", text: body });
-			emit(buildEvalEvent({
-				stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId,
-				tokensIn: veto.usage?.prompt_tokens ?? 0, tokensOut: veto.usage?.completion_tokens ?? 0,
-				costUsd: veto.costUsd ?? 0, status: "ok", reasonCode: `persona_refusal_${mode}`,
-				toolsCalled: [], iterations: 1, repliedWithoutTool: true,
-			}));
-			return;
-		}
-	}
+		return refusal ? { refusal, veto } : null;
+	};
 
 	const messages = [
 		{ role: "system", content: personaBrief },
@@ -441,6 +417,24 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 			// no content, no tool -- give it one more step, then bail
 			messages.push({ role: "user", content: "(You returned nothing. Reply in prose, or call a tool.)" });
 			continue;
+		}
+
+		// The turn is about to answer in prose -- the case the refusal gate
+		// exists for (a tool call, by contrast, is owned by its command and
+		// enforces its own gates). Ask the role now, with no tools present.
+		const vetoed = await refusalCheck();
+		if (vetoed) {
+			const body = `REFUSAL: ${vetoed.refusal.what}\nUNBLOCK: ${vetoed.refusal.unblock}`;
+			await settle(body);
+			addTurn(session, { role: "assistant", text: body });
+			emit(buildEvalEvent({
+				stage: stageName, model: MODEL, founder: session.ownerFounder, ideaId,
+				tokensIn: tokensIn + (vetoed.veto.usage?.prompt_tokens ?? 0),
+				tokensOut: tokensOut + (vetoed.veto.usage?.completion_tokens ?? 0),
+				costUsd: costUsd + (vetoed.veto.costUsd ?? 0), status: "ok",
+				reasonCode: `persona_refusal_${mode}`, toolsCalled, iterations: step + 1, repliedWithoutTool: true,
+			}));
+			return true;
 		}
 
 		// D-53 Mode 1: an agent-initiated inline search ran this turn --
