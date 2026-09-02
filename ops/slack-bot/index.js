@@ -526,7 +526,7 @@ async function answerDocQuestion({ body, client, index, answer, skipped, id, cha
 	});
 	const left = outstanding(getPending(id, chatTs));
 	if (left === 0) {
-		await completeIfDone({ id, chatTs, client, channel: body.channel?.id }).catch((e) =>
+		await completeIfDone({ id, chatTs, client, channel: body.channel?.id, userId: body.user?.id }).catch((e) =>
 			console.error(`docq: re-save failed for ${id}: ${e.message}`),
 		);
 	}
@@ -601,7 +601,7 @@ app.view("docq_custom_modal", async ({ ack, body, view, client }) => {
 		}
 		await client.chat.postMessage({ channel, thread_ts: chatTs, text: `_Answered:_ ${answer}` }).catch(() => {});
 		if (outstanding(getPending(id, chatTs)) === 0) {
-			await completeIfDone({ id, chatTs, client, channel }).catch((e) =>
+			await completeIfDone({ id, chatTs, client, channel, userId: body.user?.id }).catch((e) =>
 				console.error(`docq: re-save failed for ${id}: ${e.message}`),
 			);
 		}

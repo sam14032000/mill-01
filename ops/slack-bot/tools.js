@@ -89,8 +89,33 @@ const SCHEMAS = [
 	{
 		name: "save",
 		description:
-			"Write THIS chat's current-mode document from the conversation (brainstorm -> research knowledge base, product -> product spec, engineering -> engineering spec, deck -> deck). Project only. Use it when the founder asks you to CREATE, WRITE, UPDATE or SAVE the document this mode owns -- \"create a product spec\", \"write the engineering spec\", \"save this\", \"put that in the doc\". Do NOT use it for ordinary discussion; the document is reconciled with what is already there, never blank-page rewritten.",
+			"Write THIS chat's current-mode document from the conversation (brainstorm -> research knowledge base, product -> product spec, engineering -> engineering spec, deck -> deck). Project only. Use it when the founder asks you to CREATE, WRITE, UPDATE or SAVE the document this mode owns -- \"create a product spec\", \"write the engineering spec\", \"save this\", \"put that in the doc\". This INCLUDES phrasing that never names the document: in a mode that owns one, \"add a returns screen\", \"drop the pricing section\", \"change the metric to 60%\" are all instructions to change it. If the founder is telling you to add, remove or change something in the work product, that is a save. Anything the write finds under-specified it will ask about per item as it writes, so you do not need it fully specified first. Do NOT use it for ordinary discussion; the document is reconciled with what is already there, never blank-page rewritten.",
 		parameters: { type: "object", properties: {}, required: [] },
+	},
+	{
+		name: "ask",
+		description:
+			"Ask the founder for something you genuinely need before you can do the job properly, offering answers you have already drafted. Project only. Use it when you are BLOCKED or a request is UNCLEAR and the gap is a specific decision or fact — an unnamed user, an absent metric, which of two directions they meant, a missing constraint — AND you can propose real options from what this project already knows. Do NOT use it to check in, to confirm something you can infer, or instead of answering; if you can reasonably proceed, proceed. One question per call, at most two questions per turn.",
+		parameters: {
+			type: "object",
+			properties: {
+				question: { type: "string", description: "one direct question (required)" },
+				item: { type: "string", description: "the thing it is about, in a few words" },
+				options: {
+					type: "array",
+					description: "two or three concrete answers you would accept, BEST FIRST — the first is used if the founder taps Skip. Real proposals grounded in this project, never placeholders like 'to be defined'.",
+					items: {
+						type: "object",
+						properties: {
+							label: { type: "string", description: "short button label, max 40 chars" },
+							answer: { type: "string", description: "the full answer this option means" },
+						},
+						required: ["label", "answer"],
+					},
+				},
+			},
+			required: ["question", "options"],
+		},
 	},
 ];
 
@@ -180,6 +205,41 @@ async function runTool(name, args, ctx) {
 		} catch (err) {
 			return { posted: false, result: `\`save\` errored: ${err?.message || err}. Tell the founder it failed.` };
 		}
+	}
+
+	// `ask` posts a question block with drafted answers and ends the turn.
+	// Answering it resumes the conversation with the answer as a founder
+	// message (doc-questions.completeIfDone), so the agent gets what it was
+	// missing without the founder having to compose it.
+	if (name === "ask") {
+		const dq = require("./doc-questions");
+		if (dq.getPending(ctx.project.id, ctx.threadTs)) {
+			return { posted: false, result: "did not ask: there is already a question waiting in this thread. Answer that one first, or reply without asking." };
+		}
+		if ((ctx.askChain || 0) >= dq.MAX_ASK_CHAIN) {
+			return { posted: false, result: `did not ask: ${dq.MAX_ASK_CHAIN} questions in a row already. Work with what you have and say what you assumed.` };
+		}
+		const options = (args.options || [])
+			.filter((o) => o && (o.answer || o.label))
+			.slice(0, 3)
+			.map((o) => ({ label: String(o.label || o.answer).slice(0, 70), answer: String(o.answer || o.label) }));
+		if (!args.question || options.length < 2) {
+			return { posted: false, result: "did not ask: a question needs at least two concrete options you would accept. Either draft them or answer without asking." };
+		}
+		const { chatMode } = require("./chats");
+		await dq.askAll({
+			id: ctx.project.id, chatTs: ctx.threadTs, mode: chatMode(ctx.project.id, ctx.threadTs),
+			items: [{ item: String(args.item || "").slice(0, 120), question: String(args.question), options }],
+			client: ctx.client, channel: ctx.channelId, source: "agent", chain: ctx.askChain || 0,
+		});
+		// The placeholder would otherwise sit on "Thinking…" behind the
+		// question, which reads as though the turn never finished.
+		if (ctx.progressTs) {
+			await ctx.client.chat
+				.update({ channel: ctx.progressChannel || ctx.channelId, ts: ctx.progressTs, text: "_One thing I need first — see below._" })
+				.catch(() => {});
+		}
+		return { posted: true, result: "asked the founder; waiting on their answer." };
 	}
 
 	let disp;

@@ -176,8 +176,8 @@ function customModal({ id, chatTs, index, item }) {
 // --- posting and answering ---------------------------------------------
 
 // Posts one message per outstanding question and records them as pending.
-async function askAll({ id, chatTs, mode, items, client, channel, round = 1 }) {
-	const pending = { mode, round, items: items.map((it) => ({ ...it, answer: null, skipped: false })) };
+async function askAll({ id, chatTs, mode, items, client, channel, round = 1, source = "save", chain = 0 }) {
+	const pending = { mode, round, source, chain, items: items.map((it) => ({ ...it, answer: null, skipped: false })) };
 	setPending(id, chatTs, pending);
 	for (let i = 0; i < pending.items.length; i += 1) {
 		const { text, blocks } = questionBlocks({ id, chatTs, index: i, item: pending.items[i] });
@@ -199,23 +199,51 @@ function recordAnswer(id, chatTs, index, answer, { skipped = false } = {}) {
 const outstanding = (pending) => (pending?.items || []).filter((it) => !it.answer).length;
 
 // Every question answered -> fold the answers back into the conversation
-// as a founder turn and re-run the write. The answers become part of the
-// thread rather than hidden state, so the next save (and audit-reference)
-// sees them the same way it sees anything else the founder said.
-async function completeIfDone({ id, chatTs, client, channel }) {
+// as a founder turn, then continue whatever was blocked on them. The
+// answers become part of the thread rather than hidden state, so the next
+// save (and audit-reference) sees them the way it sees anything else the
+// founder said.
+//
+// What "continue" means depends on who asked:
+//   source "save"  -> re-run the document write
+//   source "agent" -> take another conversational turn, exactly as if the
+//                     founder had typed the answer, so the agent can act
+//                     on what it was missing
+async function completeIfDone({ id, chatTs, client, channel, userId = null }) {
 	const pending = getPending(id, chatTs);
 	if (!pending || outstanding(pending) > 0) return { done: false };
 
 	const { getSession, addTurn } = require("./chat-session");
 	const session = getSession(chatTs);
 	const lines = pending.items.map(
-		(it) => `${it.item} — ${it.question}\n${it.answer}${it.skipped ? "  (I skipped; you chose this for me)" : ""}`,
+		(it) => `${it.item ? `${it.item} — ` : ""}${it.question}\n${it.answer}${it.skipped ? "  (I skipped; you chose this for me)" : ""}`,
 	);
-	if (session) {
-		addTurn(session, { role: "user", text: `Answering what the ${pending.mode} document needed:\n\n${lines.join("\n\n")}` });
-	}
+	const answerText = lines.join("\n\n");
 	clearPending(id, chatTs);
 
+	if (pending.source === "agent") {
+		if (!session) return { done: true, result: null };
+		// The turn has to be added HERE. runTurn does not record the founder
+		// message -- chat-turn.js does that before calling it -- and the
+		// model reads the conversation from the session, not from `message`.
+		// Without this the answer reached nothing: the agent took a turn
+		// that could not see what it had just been told.
+		addTurn(session, { role: "user", text: answerText, userId: userId || null });
+		const agent = require("./agent");
+		const res = await agent.runTurn({
+			session,
+			message: { channel, user: userId || session.ownerUserId, text: answerText, ts: String(Date.now() / 1000) },
+			client,
+			// Survives into the next ask, so a chain of questions with no
+			// human sentence between them cannot run away.
+			askChain: (pending.chain || 0) + 1,
+		});
+		return { done: true, result: res };
+	}
+
+	if (session) {
+		addTurn(session, { role: "user", text: `Answering what the ${pending.mode} document needed:\n\n${answerText}` });
+	}
 	const { runSaveForThread } = require("./mode-docflow");
 	const res = await runSaveForThread({
 		id, mode: pending.mode, client, channel, threadTs: chatTs,
@@ -226,9 +254,15 @@ async function completeIfDone({ id, chatTs, client, channel }) {
 	return { done: true, result: res };
 }
 
+// How many questions the agent may ask in a row without a human sentence
+// between them. An answered question produces another turn, which could
+// ask again; this is what stops that becoming an interrogation.
+const MAX_ASK_CHAIN = Number(process.env.MILL_ASK_CHAIN_MAX) || 3;
+
 module.exports = {
 	NEEDS_INPUT,
 	MAX_ROUNDS,
+	MAX_ASK_CHAIN,
 	askClause,
 	parseNeedsInput,
 	questionBlocks,

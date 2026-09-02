@@ -49,6 +49,12 @@ const SYSTEM_PROMPT = [
 	"When you call a tool, produce no prose — the tool posts the real output.",
 	"Prose replies: short and concrete. Engage with what they said, push on the weak point, ask for the number or the named alternative when a claim is vague. No headings, no essays.",
 	"",
+	"WHEN YOU'RE BLOCKED. You have `ask` — it puts a question in the thread with two or three answers you have already drafted, plus a custom entry and a Skip that takes your first option. Use it when you genuinely cannot do the job properly without a specific decision or fact from the founder: an unnamed user, a missing metric, which of two directions they meant, an unstated constraint. Draft the options from what this project already knows — they must be real proposals a founder could accept as-is, never \"to be defined\".",
+	"The clearest case: the instruction points at something you cannot resolve — \"the other side\", \"that one\", \"like we discussed\", a feature named with no indication who it is for — and guessing would send real work in the wrong direction. Ask rather than pick.",
+	"Do NOT use `ask` to check in, to confirm something you could reasonably infer, or in place of doing the work. If you can proceed and say what you assumed, do that instead — it is cheaper for the founder than a question. Asking is for a genuine block, not for reassurance.",
+	"If the founder asked you to WRITE OR UPDATE a document and the only gap is detail the document itself would pin down, call `save` instead — it asks per item as it writes. Reserve `ask` for when you cannot even tell what they meant.",
+	"NEVER write a `REFUSAL:` for something that is merely MISSING INFORMATION. If your role's bar is unmet only because a user, a metric, a job, a failure mode or a cost has not been stated, that is a question, not a refusal: call `ask` (or `save`, which asks as it writes). A refusal in prose leaves the founder to compose the answer you could have drafted for them. Keep `REFUSAL:` for what is outside this role's remit, where no answer from the founder would change it.",
+	"",
 	"WEB FACTS. You have `find`.",
 	"- `find` with mode:\"quick\": use it MID-ANSWER only when answering well needs one specific, checkable fact you don't have — a price, a market-size number, a named regulation or filing threshold, a date, or whether a specific named company or product actually exists. One or two queries. Fold the finding into your prose reply — do NOT post it as a separate block — and end the reply with the exact marker: _(quick web check — not verified, not evidence)_",
 	"- Do NOT search because you feel unsure, want to double-check, or the founder is being abstract. \"I'm not certain\" is not a trigger. \"I need this number / rule / name to answer correctly, and my answer is wrong or vague without it\" is. Most turns need no search — if you'd be searching on more than about one turn in five, you're fact-checking uncertainty, which kills the brainstorm. Reason from what you know instead.",
@@ -203,7 +209,7 @@ async function runTurn(args) {
 	}
 }
 
-async function runTurnInner({ session, message, client, placeholderTs, settle, trace }) {
+async function runTurnInner({ session, message, client, placeholderTs, settle, trace, askChain = 0 }) {
 	const isProject = session.kind === "project";
 	const ideaId = session.ideaId || null;
 	const stageName = isProject ? "project_turn" : "chat";
@@ -216,6 +222,9 @@ async function runTurnInner({ session, message, client, placeholderTs, settle, t
 		client,
 		inChats: !isProject,
 		project: isProject && ideaId ? readState(ideaId) : null,
+		// Carried so `ask` can refuse to start an interrogation: a question
+		// answered produces another turn, which could ask again.
+		askChain,
 		assumption: isProject && ideaId ? readAssumption(ideaId) : null,
 		research: isProject && ideaId ? readLatestResearch(ideaId) : null,
 	};
