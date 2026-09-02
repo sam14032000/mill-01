@@ -510,6 +510,19 @@ app.action("deck_export", async ({ ack, body }) => {
 	const [id, chatTs, exportAs] = String(body.actions?.[0]?.selected_option?.value || "").split("::");
 	if (id && chatTs) require("./deck-render").rememberSettings(id, chatTs, { deck_export: exportAs });
 });
+// A tap on a question the bot no longer has state for. It happened live:
+// a question was posted, its pending record went missing, and every
+// button on it silently did nothing — forever, because the actions block
+// was never resolved either. A dead control that looks live is worse than
+// no control, so say so and retire the buttons.
+async function staleDocQuestion({ body, client }) {
+	console.error(`docq: tap on a question with no pending state (channel=${body.channel?.id} ts=${body.message?.ts})`);
+	await buttonResolve.resolveMessage({
+		client, body,
+		outcomeText: "⚠️ I've lost track of this question — just tell me in the thread and I'll pick it up.",
+	});
+}
+
 // ---- document questions: answer, write your own, or skip -------------
 //
 // An item that falls short for want of INFORMATION becomes a question
@@ -539,7 +552,7 @@ app.action(/^docq_pick_/, async ({ ack, body, client, action }) => {
 		const [id, chatTs, index, opt] = String(action.value).split("::");
 		const item = require("./doc-questions").getPending(id, chatTs)?.items?.[Number(index)];
 		const chosen = item?.options?.[Number(opt)];
-		if (!chosen) return;
+		if (!chosen) { await staleDocQuestion({ body, client }); return; }
 		await answerDocQuestion({ body, client, index: Number(index), answer: chosen.answer, skipped: false, id, chatTs });
 	} catch (e) {
 		console.error("docq_pick failed:", e?.data?.error || e.message);
@@ -555,7 +568,7 @@ app.action("docq_skip", async ({ ack, body, client, action }) => {
 		const [id, chatTs, index] = String(action.value).split("::");
 		const item = require("./doc-questions").getPending(id, chatTs)?.items?.[Number(index)];
 		const top = item?.options?.[0];
-		if (!top) return;
+		if (!top) { await staleDocQuestion({ body, client }); return; }
 		await answerDocQuestion({ body, client, index: Number(index), answer: top.answer, skipped: true, id, chatTs });
 	} catch (e) {
 		console.error("docq_skip failed:", e?.data?.error || e.message);
@@ -569,7 +582,14 @@ app.action("docq_custom", async ({ ack, body, client, action }) => {
 	try {
 		const [id, chatTs, index] = String(action.value).split("::");
 		const item = require("./doc-questions").getPending(id, chatTs)?.items?.[Number(index)];
-		if (!item) return;
+		if (!item) {
+			// No claimTap on this path (opening a modal is not an answer),
+			// so claim it now before retiring the dead buttons.
+			if (buttonResolve.claimTap(body)) {
+				try { await staleDocQuestion({ body, client }); } finally { buttonResolve.releaseTap(body); }
+			}
+			return;
+		}
 		// The message keeps its buttons until the modal is submitted --
 		// opening a dialog is not an answer, and cancelling must leave the
 		// question still answerable.
