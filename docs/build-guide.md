@@ -411,9 +411,20 @@ curl -s -X POST http://127.0.0.1:4000/key/generate \
        "max_budget":2.00,"budget_duration":"1d",
        "rpm_limit":5}'
 
+# proto's coding agent (Claude Code, headless) — NOT the audit key
+curl -s -X POST http://127.0.0.1:4000/key/generate \
+  -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
+  -d '{"key_alias":"mill-code","models":["claude-sonnet-5","claude-opus-5"],
+       "max_budget":2.00,"budget_duration":"1d"}'
+# store as MILL_CODE_KEY in ~/.config/mill/env
+
 # mill-mech (MiniMax) removed — D-46 / build-guide-projects.md Part 14.1.
-# Skip on a from-scratch build; there are three virtual keys, not four.
+# Skip on a from-scratch build; there are four virtual keys, not five.
 ```
+
+**`mill-code` is separate from `mill-audit` for a reason, not for tidiness.** A founder proposed reusing the audit key so budget tracking stayed in one place. But `mill-audit` is scoped to `models:["audit"]` (Fable), and D-23 makes that line a **detector**: *"Above $35 means something is invoking Fable outside the gate — a D-10 violation, and the cap is how it surfaces."* Coding traffic on that key would run every turn on Fable and turn the one signal that catches D-10 violations into noise. Verified after creation: `mill-code` gets **HTTP 403** on `model:"audit"` — *"This key can only access models=['claude-sonnet-5', 'claude-opus-5']"* — so the gate's model is unreachable from the coding path by construction.
+
+**The `claude-sonnet-5` / `claude-opus-5` `model_name`s deliberately match the real model ids** rather than being short aliases like `audit`. Probed: with `--model audit`, Claude Code emits *"'audit' is not a model this version of Claude Code recognizes"* and falls back to **assuming a 200k context window**. Using the real id makes context handling correct rather than guessed.
 
 The daily amounts on `mill-audit` and `mill-mech` are D-23's monthly caps divided across ~30 days with headroom, not a fresh estimate: $35/30 ≈ $1.17, $10/30 ≈ $0.33, rounded up to $2.00 / $0.50 respectively so a normal day's usage doesn't nuisance-trip the cap while an overnight runaway still gets stopped same-day rather than 30 days later. `mill-flash`/`mill-research` are sized directly from measured per-command cost (`ops/BUILD-LOG.md`), not from D-23's undifferentiated $60 Gemini line — `mill-flash` is **$2.00/day** and `mill-research` **$3.00/day** (roughly two research passes at ~$1.50 each). `mill-flash` was $0.50/day through the D-51 build; D-53 put a `flash-fast` agent-loop call on *every* conversational turn (not just slash commands), observed peak reached $0.50/day and tripped the cap, so it was raised to $1.00 via `/key/update` (D-23). Raised again to **$2.00 on 2 September 2026** — founders' call after a build/verification sweep exhausted the $1.00 cap and blocked live use for the rest of the day. Note what that peak was: agent testing, not founder traffic. Real conversational usage has not yet approached $1.00/day, so this is headroom for verification work rather than evidence that the loop costs more than D-53 measured.
 
@@ -821,7 +832,8 @@ Every check is a grep, a file read, a git command, or an HTTP call to LiteLLM's 
 - [ ] Hetzner Cloud Firewall port 22 rule **removed**
 - [ ] `tailscale funnel status` shows nothing enabled
 - [ ] `curl 127.0.0.1:4000/health/readiness` returns healthy
-- [ ] All three virtual keys (`mill-flash`, `mill-research`, `mill-audit`) created with daily budgets; `/key/info?key=<key>` returns `spend`/`max_budget` for each — `/global/spend/report` is Enterprise-only and will 402, don't use it (`mill-mech` removed, D-46)
+- [ ] All four virtual keys (`mill-flash`, `mill-research`, `mill-audit`, `mill-code`) created with daily budgets; `/key/info?key=<key>` returns `spend`/`max_budget` for each — `/global/spend/report` is Enterprise-only and will 402, don't use it (`mill-mech` removed, D-46)
+- [ ] `mill-code` is confirmed **unable** to reach `audit` (expect HTTP 403) — the gate's model must be unreachable from the coding path, or D-23's Fable tripwire is dead
 - [ ] Nothing outside `~/stack/litellm/.env` contains a provider API key — `grep -rIl "sk-ant\|AIza" ~/workspace` returns nothing
 - [ ] Sandbox leak tests from Part 10 all return `clean` / permission denied, and the default-network vs `MILL_SANDBOX_NETWORK=egress` pair behaves as documented (blocked by default, reaches out when opted in)
 - [ ] Slack: a DM to the bot creates a capture file attributed to the right founder

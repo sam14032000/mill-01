@@ -407,7 +407,7 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 
 **Monthly caps do not stop runaways.** The healthcheck polls daily spend and alerts to Slack above ~$8/day. Provider caps are the last line; `max_tokens` and loop iteration ceilings come first.
 
-**Per-key daily budgets (LiteLLM virtual keys, C-05).** `mill-flash` **$2.00/day**, `mill-research` $3.00/day, `mill-audit` $2.00/day, all `budget_duration: "1d"`. `mill-flash` ran at $0.50/day through the D-51 build; **D-53 put a `flash-fast` agent-loop call on every conversational turn** (previously only slash commands and brainstorm hit `flash-fast`), the observed peak reached $0.50/day and tripped the cap, so it was raised to $1.00 via `/key/update` (key value preserved; `docs/build-guide.md` Part 7.3 updated same commit). **Raised to $2.00/day on 2 September 2026** — founders' call, same mechanism, key value preserved again.
+**Per-key daily budgets (LiteLLM virtual keys, C-05).** `mill-flash` **$2.00/day**, `mill-research` $3.00/day, `mill-audit` $2.00/day, **`mill-code` $2.00/day** (proto's coding agent, D-58), all `budget_duration: "1d"`. `mill-flash` ran at $0.50/day through the D-51 build; **D-53 put a `flash-fast` agent-loop call on every conversational turn** (previously only slash commands and brainstorm hit `flash-fast`), the observed peak reached $0.50/day and tripped the cap, so it was raised to $1.00 via `/key/update` (key value preserved; `docs/build-guide.md` Part 7.3 updated same commit). **Raised to $2.00/day on 2 September 2026** — founders' call, same mechanism, key value preserved again.
 
 **Be honest about what that second peak was.** It was not founder traffic: an agent verification sweep ran ~25 test scaffolds with real model calls, some twice, and pushed the key to $1.0006 — which **blocked every conversational turn and command for the rest of the day**, because `mill-flash` backs all of them. Real use has still never approached $1.00/day. So this raise is headroom for build and verification work, not evidence that D-53's agent loop costs more than it measured, and it must not be read as one when the December pricing change (D-08) is reassessed.
 
@@ -737,6 +737,34 @@ The conversational system prompt now also tells the model: if the founder is ask
 - Telemetry: `search_initiated_by: "agent" | "founder" | null` on every relevant event. `EVAL.md` Layer 2 watches the agent-initiated rate — over ~1/5 of turns means the trigger wording is too loose, visible rather than inferred. Cost: the agent-loop call on every conversational turn put `mill-flash` at its $0.50/day cap, raised to $1.00 (D-23).
 
 **Revisit when:** `replied_without_tool` or the agent-initiated search rate trends wrong (both prompt levers now, visible in telemetry), or dsh reaches 1.0 and the `ops/dsh-investigation.md` spike clears (embed footprint + sandbox seam + session export), at which point swapping `agent.runTurn()` for a maintained loop is an explicit founders' decision.
+
+---
+
+### D-58 · Proto builds with Claude Code on the host, fenced by `--restricted`
+
+**Decision.** `/proto` stops regenerating a single file and becomes a multi-file project that is *edited* across touches. The engine is **Claude Code, invoked headlessly on the host**, routed through LiteLLM on a new `mill-code` virtual key: **plan on Opus, build on Sonnet**, with a founder approving the plan in between.
+
+**What was actually broken, and it was not the surface.** A founder asked for a better way to work intensely on a prototype. `runProto` built its prompt from `[SYSTEM_PROMPT, OUTPUT_FORMAT_INSTRUCTION, assumption]` — no prior artifact, no spec, no conversation — and `parseProtoResponse` rejected any filename containing `/`. So a prototype was **one file, regenerated blind, up to five times**: touch 2 was an unrelated generation from the same one-line assumption, not a revision of touch 1. That is the identical blank-page-rewrite failure D-57 proved destructive for documents (a save wiped a DGFT trade notice, three competitor names and the unit economics), sitting unfixed in proto. No front end could have made that feel like iteration.
+
+**The host choice was the founders', taken against a stated objection.** A Claude Code session on this box runs as `agent` and can reach `~/.config/mill/env` and `~/stack/litellm/.env` — every Gemini, Anthropic, Slack, Tavily, Gamma and ngrok credential. That is worse than the case D-06's non-negotiable was written for, and it reverses D-22's "scaffolding, not part of the running system". The objection was put; the founders chose the host anyway. Recorded as their decision, with the fence below as the mitigation, not as a claim the risk is gone.
+
+**The fence, verified by forcing it rather than by reading flags.**
+
+- **`--restricted`** removes Bash, PowerShell, REPL and every other code-running tool plus WebFetch, ignores user/project/local settings files, refuses `bypassPermissions`, **and confines the file tools to the working directories**. One flag; there is **no `--sandbox` flag** — an earlier draft claimed two independent fences after misreading `--restricted`'s own description, which the probe caught.
+- **Proven mechanical, not ethical.** Asked to copy `~/.config/mill/env` into the working directory, the agent refused — but a refusal reasoned from ethics is not a control. Re-run against **`/etc/hostname`**, a file with no ethical signal at all, it refused again and cited the mechanism: *"I'm restricted to operating within the working directory."* That is the test that matters.
+- **`env -i` allowlist**, not a denylist. `mill-chat` runs as `User=agent` with `EnvironmentFile=/home/agent/.config/mill/env`, so a naively spawned child inherits every key. The child gets `PATH`, `HOME`, `ANTHROPIC_BASE_URL` and `MILL_CODE_KEY` and nothing else.
+- **`--bare`** so the repo-root `CLAUDE.md` — which describes the mill and where its keys live — is never auto-discovered.
+- **Execution is unchanged.** The agent *writes* files; nothing it writes is *run* on the host. Every execution still goes through Part 10's sandbox (D-06, D-48), which is the blast-radius argument D-06 was actually written for.
+
+**Billing: `mill-code`, not `mill-audit`.** The founders' instinct — one key, easier tracking — was right; the specific key was not. `mill-audit` is scoped to Fable, and D-23 makes its $35 line a detector for D-10 violations. Coding traffic there would turn that signal into noise. `mill-code` is scoped to `claude-sonnet-5` + `claude-opus-5` and **verified to 403 on `audit`**. This also closed a real hole: on stored OAuth credentials Claude Code would have billed the founders' Claude subscription, invisible to both D-23 and D-25's "$100 all in".
+
+**Reopens D-09** (Opus removed, *"revisit when the ceiling rises enough to afford a middle tier"*). Opus is planning-only and bounded by `--max-budget-usd` per run plus the key's daily cap. Founders' call.
+
+**Founder-facing controls are three, and dollars is not one of them.** Plan-first / just-build, `--effort` (low…max), and start-fresh. A founder can reason about "think harder about this one" and cannot reason about "$0.40" — and this system already treats thinking level as the lever rather than dollars (D-08's `flash-fast` vs `flash` split). Cost is *reported* after each run; `--max-budget-usd` is an invisible ceiling, in the same position `max_tokens` holds in D-23's layering.
+
+**A founder always lands in plan mode.** It is the default and the mode returns to it after every build, so code never changes without the founder having read what would change. Entry is a `[ Let's Prototype ]` button on the mode-switch banner; once an idea is bootstrapped that button never returns, and coming back to proto later resumes the existing session with a delta brief rather than starting afresh.
+
+**Revisit when:** the touch cap of 5 proves wrong once the loop genuinely iterates (a D-29 revisit, founders' call — the number is one env var), or `--restricted`'s confinement is ever observed to leak, which is a stop-everything event on the same footing as D-04's mounted-prototype clause.
 
 ---
 
