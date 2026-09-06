@@ -60,6 +60,41 @@ async function handleChatTurn({ message, client }) {
 	const text = message.text.trim();
 	if (!text) return true;
 
+	// PROTO ENTRY, BEFORE THE TURN IS RECORDED.
+	//
+	// A founder who switches to proto and starts talking before tapping
+	// [ Let's Prototype ] gets a nudge, and that message is deliberately
+	// NOT stored. The ordering is the whole point: addTurn drives
+	// compaction (COMPACT_AT), the audit-reference compressor (every 5
+	// turns) and the document sync watermarks, so a deflected message
+	// recorded here would pollute all three with something the system
+	// explicitly declined to act on.
+	if (session.kind === "project" && session.ideaId) {
+		const { sessionMode } = require("./chat-session");
+		if (sessionMode(session) === "proto") {
+			const protoFlow = require("./proto-flow");
+			if (protoFlow.needsBootstrap(session.ideaId, session.threadTs)) {
+				await protoFlow
+					.deflect({ id: session.ideaId, chatTs: session.threadTs, client, channel: message.channel })
+					.catch((err) => console.error(`proto: deflect failed for ${session.ideaId}: ${err.message}`));
+				return true;
+			}
+			// Bootstrapped: a message in proto mode IS a change request. It
+			// goes to the plan/build loop rather than the generic agent,
+			// which has no idea a prototype is open.
+			addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
+			await require("./proto-turn")
+				.handleProtoMessage({ session, message, client, text })
+				.catch(async (err) => {
+					console.error(`proto: turn failed for ${session.ideaId}: ${err.stack || err.message}`);
+					await client.chat
+						.postMessage({ channel: message.channel, thread_ts: session.threadTs, text: `That didn't work: ${err.message}` })
+						.catch(() => {});
+				});
+			return true;
+		}
+	}
+
 	addTurn(session, { role: "user", text, userId: message.user, ts: message.ts });
 
 	// FIRST MESSAGE AFTER A MODE SWITCH.

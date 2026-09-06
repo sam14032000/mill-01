@@ -630,6 +630,210 @@ app.view("docq_custom_modal", async ({ ack, body, view, client }) => {
 	}
 });
 
+// ---- proto: [ Let's Prototype ] -> bootstrap -> plan -> build --------
+//
+// A founder always lands in plan mode. The mode returns to plan after
+// every build; "just build" is a manual switch that applies while set,
+// never a state the system drifts into (D-58).
+
+const protoFlow = require("./proto-flow");
+
+function protoTarget(action) {
+	const [id, chatTs] = String(action.value).split("::");
+	return { id, chatTs };
+}
+
+// Post a plan for approval, or report why there isn't one.
+async function postProtoPlan({ client, channel, chatTs, id, res, progressTs }) {
+	const say = async (text, blocks) => {
+		if (progressTs) {
+			await client.chat.update({ channel, ts: progressTs, text, ...(blocks ? { blocks } : { blocks: [] }) }).catch(() => {});
+		} else {
+			await client.chat.postMessage({ channel, thread_ts: chatTs, text, ...(blocks ? { blocks } : {}) }).catch(() => {});
+		}
+	};
+	if (!res.ok) {
+		// A missing binary is a degradation, not a failure: /proto's
+		// flash-fast path still works and the founder is told which one ran.
+		const note = res.missing
+			? "The coding agent isn't available on this box, so `@Mill proto <assumption>` will build with the fallback engine instead."
+			: `Couldn't plan that: ${res.reason}`;
+		await say(note);
+		return;
+	}
+	protoFlow.setProto(id, chatTs, { proto_pending_plan: { at: Date.now(), sessionId: res.sessionId } });
+	const { text, blocks } = protoFlow.planBlocks(id, chatTs, res.plan);
+    const cost = res.cost ? `\n\n_Planned for $${Number(res.cost).toFixed(3)}._` : "";
+	await say(text, [...blocks, ...protoFlow.controlBlocks(id, chatTs)]);
+	if (cost) await client.chat.postMessage({ channel, thread_ts: chatTs, text: cost }).catch(() => {});
+}
+
+app.action("proto_lets_start", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	const { id, chatTs } = protoTarget(action);
+	const channel = body.channel?.id;
+	try {
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "Setting the session up…" });
+		const progress = await client.chat
+			.postMessage({ channel, thread_ts: chatTs, text: "_Bringing the specs across and planning…_" })
+			.catch(() => null);
+
+		// The founders' sequence: staleness, then autogen, then say what was
+		// filled in and where to correct it — all the existing D-54 flow,
+		// unchanged — before the session is briefed.
+		const gaps = await protoBootstrapGaps({ id, chatTs, client, channel });
+		if (gaps.length) {
+			await client.chat
+				.postMessage({
+					channel, thread_ts: chatTs,
+					text: `I drafted ${gaps.map((g) => `*${g.label}*`).join(" and ")} from what the project already knows, because ${gaps.length === 1 ? "it wasn't" : "they weren't"} there yet. If any of it is wrong, switch to ${gaps.map((g) => `*${g.mode}*`).join(" / ")} mode and tell that persona — don't correct it here.`,
+				})
+				.catch(() => {});
+		}
+
+		const res = await protoFlow.bootstrap({ id, chatTs, client, channel });
+		await postProtoPlan({ client, channel, chatTs, id, res, progressTs: progress?.ts });
+	} catch (e) {
+		console.error("proto_lets_start failed:", e?.data?.error || e.message);
+		await client.chat.postMessage({ channel, thread_ts: chatTs, text: `Couldn't start: ${e.message}` }).catch(() => {});
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+// Fill any missing upstream document through ITS OWN persona (D-54): a
+// missing product spec is written by the PM, never by an engineering
+// shortcut. Returns what was generated so the founder can be told.
+async function protoBootstrapGaps({ id, chatTs, client, channel }) {
+	const { checkMissingInput, generateMissingDoc } = require("./mode-docflow");
+	const filled = [];
+	for (const mode of protoFlow.UPSTREAM) {
+		const { readDoc } = require("./mode-docs");
+		if (readDoc(id, mode)) continue;
+		const missing = checkMissingInput(id, mode === "brainstorm" ? "product" : mode);
+		if (mode !== "brainstorm" && !missing) continue;
+		const gen = await generateMissingDoc({ id, mode, client, channel, threadTs: chatTs }).catch((err) => {
+			console.error(`proto: could not generate ${mode} for ${id}: ${err.message}`);
+			return { ok: false };
+		});
+		if (gen?.ok) filled.push({ mode, label: protoFlow.DOC_LABEL[mode] });
+	}
+	return filled;
+}
+
+app.action("proto_build", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	const { id, chatTs } = protoTarget(action);
+	const channel = body.channel?.id;
+	try {
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "Building…" });
+		const progress = await client.chat.postMessage({ channel, thread_ts: chatTs, text: "_Building…_" }).catch(() => null);
+		const res = await protoFlow.buildApproved({ id, chatTs });
+		await reportProtoBuild({ client, channel, chatTs, id, res, progressTs: progress?.ts });
+	} catch (e) {
+		console.error("proto_build failed:", e?.data?.error || e.message);
+		await client.chat.postMessage({ channel, thread_ts: chatTs, text: `The build failed: ${e.message}` }).catch(() => {});
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+// Reporting lives in proto-turn.js so the button path and the message
+// path cannot drift apart — two copies of "what changed" is how one of
+// them ends up lying.
+async function reportProtoBuild({ client, channel, chatTs, id, res, progressTs }) {
+	const say = async (text) => {
+		if (progressTs) await client.chat.update({ channel, ts: progressTs, text }).catch(() => {});
+		else await client.chat.postMessage({ channel, thread_ts: chatTs, text }).catch(() => {});
+	};
+	await require("./proto-turn").reportBuild({ client, channel, chatTs, id, res, say });
+	if (res.ok) {
+		// Back to plan mode, always.
+		protoFlow.setProto(id, chatTs, { proto_plan_first: true });
+		await client.chat
+			.postMessage({ channel, thread_ts: chatTs, text: "_Back in plan mode. Tell me the next change, or mount it to look at._" })
+			.catch(() => {});
+	}
+}
+
+app.action("proto_adjust", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	const { id, chatTs } = protoTarget(action);
+	try {
+		protoFlow.setProto(id, chatTs, { proto_pending_plan: null });
+		await buttonResolve.resolveMessage({
+			client, body,
+			outcomeText: "Tell me what to change and I'll re-plan — nothing has been written.",
+		});
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+app.action("proto_discard", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	const { id, chatTs } = protoTarget(action);
+	try {
+		// The SESSION is kept: discarding a plan is not discarding the
+		// project, and throwing away its context would make the next plan
+		// worse for no reason.
+		protoFlow.setProto(id, chatTs, { proto_pending_plan: null });
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "Discarded — nothing was written." });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+app.action("proto_effort", async ({ ack, body, client, action }) => {
+	await ack();
+	const [id, chatTs, effort] = String(action.selected_option?.value || "").split("::");
+	if (!id) return;
+	protoFlow.setProto(id, chatTs, { proto_effort: effort });
+	await client.chat
+		.postMessage({ channel: body.channel?.id, thread_ts: chatTs, text: `_Effort set to *${effort}* for the next plan and build._` })
+		.catch(() => {});
+});
+
+app.action("proto_planmode", async ({ ack, body, client, action }) => {
+	await ack();
+	const [id, chatTs, val] = String(action.selected_option?.value || "").split("::");
+	if (!id) return;
+	const planFirst = val === "plan";
+	protoFlow.setProto(id, chatTs, { proto_plan_first: planFirst });
+	await client.chat
+		.postMessage({
+			channel: body.channel?.id, thread_ts: chatTs,
+			text: planFirst
+				? "_Plan first: I'll show you what I intend to change and wait for you._"
+				: "_Just build: I'll make the change without showing a plan first. This stays set until you switch it back._",
+		})
+		.catch(() => {});
+});
+
+app.action("proto_fresh", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	const { id, chatTs } = protoTarget(action);
+	try {
+		// Drops the CONVERSATION, never the tree. The files stay; the next
+		// plan reads them cold instead of carrying a thread that has gone
+		// down a wrong path.
+		protoFlow.setProto(id, chatTs, { proto_session_id: null, proto_pending_plan: null, proto_briefed_hash: null });
+		await client.chat
+			.postMessage({
+				channel: body.channel?.id, thread_ts: chatTs,
+				text: "_Started fresh. The files are untouched — the next plan reads them cold, without the conversation so far._",
+			})
+			.catch(() => {});
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
 app.action("deck_browse", async ({ ack, body, client }) => {
 	await ack();
 	try {

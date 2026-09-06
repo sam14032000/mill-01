@@ -57,7 +57,15 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder, chat
 		// otherwise leave three banners narrating a decision the founder
 		// made in one motion. The turn count at post time is the test:
 		// unchanged means nobody has spoken since.
-		const text = modeBannerText(mode, { byFounder });
+		let text = modeBannerText(mode, { byFounder });
+		// Entering proto for the first time, the banner IS the entry point:
+		// the button rides on the mode-switch message rather than arriving
+		// as a second one. Once an idea is bootstrapped this never appears
+		// again — coming back to proto resumes, it does not restart.
+		const protoFlow = require("./proto-flow");
+		const offerStart = mode === "proto" && protoFlow.needsBootstrap(id, targetChat);
+		if (offerStart) text += "\n\nReady when you are — I'll bring the research base and both specs across, then come back with a plan before anything is written.";
+		const bannerBlocks = offerStart ? protoFlow.letsPrototypeBlocks(id, targetChat, text) : null;
 		const chat = chats.readChat(id, targetChat);
 		const { getSession } = require("./chat-session");
 		const turnsNow = getSession(targetChat)?.turns?.length ?? 0;
@@ -65,7 +73,7 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder, chat
 
 		if (canEditInPlace) {
 			const edited = await client.chat
-				.update({ channel: bannerChannel, ts: chat.banner_ts, text })
+				.update({ channel: bannerChannel, ts: chat.banner_ts, text, ...(bannerBlocks ? { blocks: bannerBlocks } : { blocks: [] }) })
 				.then(() => true)
 				.catch((e) => {
 					console.error(`mode-switch: banner edit failed for ${id}: ${e?.data?.error || e.message}`);
@@ -79,7 +87,7 @@ async function switchMode({ id, mode, client, channel, threadTs, byFounder, chat
 
 		async function postFreshBanner() {
 			const posted = await client.chat
-				.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text })
+				.postMessage({ channel: bannerChannel, thread_ts: bannerThread, text, ...(bannerBlocks ? { blocks: bannerBlocks } : {}) })
 				.catch((e) => {
 					console.error(`mode-switch: banner post failed for ${id}: ${e?.data?.error || e.message}`);
 					return null;
