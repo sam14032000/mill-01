@@ -8,6 +8,8 @@ const { founderForUserId, channelId } = require("../config");
 const { callFlash } = require("../llm");
 const { ideaExists, readState, updateState, IDEAS_DIR } = require("../ideas");
 const { runInSandbox } = require("../sandbox");
+const tree = require("../proto-tree");
+const { readDoc } = require("../mode-docs");
 const { commitAndPush } = require("../git");
 const { commandDestination, ensureStageThread } = require("../chat-session");
 const { postNeedsProject } = require("../promotion");
@@ -32,17 +34,42 @@ const BUILD_MAX = Number(process.env.MILL_PROTO_BUILD_ITERS) || 3;
 
 // Verbatim from docs/COMMANDS.md's /proto system prompt.
 const SYSTEM_PROMPT = [
-	"Build the smallest artifact that tests this one assumption. Default to non-code — landing page, mock flow, fake pricing table, one-pager. Single file.",
+	"Build the smallest artifact that tests this one assumption. Default to non-code — landing page, mock flow, fake pricing table, one-pager.",
 	"Only write executable code if the assumption is technical.",
 	"This will be deleted. Do not build for durability.",
+	"A prototype may be several files (a page plus its stylesheet, a few screens in a flow). Keep it as small as the assumption allows — more files is not better.",
 ].join("\n");
 
 // docs/COMMANDS.md doesn't specify an output format for the artifact
 // itself (unlike /attack's ASSUMPTION:/TOO_VAGUE: markers) -- this
 // instruction exists only so the response can be parsed and saved to a
 // real filename; it doesn't change what the model is asked to build.
-const OUTPUT_FORMAT_INSTRUCTION =
-	'Output format: the first line must be exactly "FILENAME: <name.ext>" naming a single file (choose the extension yourself -- .html/.md for non-code, .py/.js/.sh only if the assumption is technical), then a blank line, then the complete file content and nothing else. No explanation before or after.';
+const OUTPUT_FORMAT_INSTRUCTION = [
+	"Output format: for each file, a line that is exactly `===FILE: <relative/path.ext>===` followed by that file's COMPLETE content.",
+	"Repeat for each file. To remove a file, use a line `===DELETE: <relative/path.ext>===` on its own.",
+	"Paths are relative and must stay inside the project — no leading `/`, no `..`.",
+	"Choose extensions yourself: .html/.css/.md for non-code, .py/.js/.sh only if the assumption is technical.",
+	"No explanation before or after the file blocks.",
+].join("\n");
+
+// THE RECONCILE INSTRUCTION — the reason a touch is now an edit.
+//
+// Framed as a per-file decision rather than "build the project", for the
+// reason D-57 records: handing a model a blank page is what makes it
+// silently drop things nobody asked it to remove. Proven there on
+// documents; the same failure was live here, where every touch
+// regenerated from the assumption alone.
+const EDIT_INSTRUCTION = [
+	"You are EDITING an existing prototype, not building a new one.",
+	"Go file by file and decide:",
+	"  • UNCHANGED — the request doesn't touch it. Do NOT emit it at all.",
+	"  • EDIT — emit `===FILE: <path>===` with its complete new content.",
+	"  • ADD — emit `===FILE: <path>===` for a genuinely new file.",
+	"  • DELETE — emit `===DELETE: <path>===`.",
+	"Emit ONLY the files you are changing. A file you do not emit is left exactly as it is,",
+	"which is what you want for everything the founder didn't ask about — re-emitting an",
+	"unchanged file risks losing detail from it for no gain.",
+].join("\n");
 
 // Extensions that get executed in the Part 10 sandbox after being
 // written -- anything else is an artifact only (landing page, pricing
@@ -54,45 +81,71 @@ const EXECUTORS = {
 	".sh": (filename) => `bash /scratch/${filename}`,
 };
 
-function parseProtoResponse(text) {
-	const match = text.match(/^FILENAME:\s*(\S+)\s*\n\n([\s\S]+)$/);
-	if (!match) return null;
-	const filename = match[1].trim();
-	// No path separators -- this is a filename, not a path, and nothing
-	// here should be able to write outside the touch's own directory.
-	if (filename.includes("/") || filename.includes("..")) return null;
-	return { filename, content: match[2] };
-}
 
-const FIX_PROMPT = (assumption, filename, fileContent, command, exitCode, stderr) =>
+
+// The project itself is supplied separately (renderTree), so this stays
+// about the failure rather than restating files the model already has.
+const FIX_PROMPT = (assumption, entry, command, exitCode, stderr) =>
 	[
-		`This artifact was built to test the assumption: ${assumption}`,
-		`It was run in a locked-down sandbox as: ${command}`,
+		`This prototype was built to test the assumption: ${assumption}`,
+		`Its entry point \`${entry}\` was run in a locked-down sandbox as: ${command}`,
 		`It exited with code ${exitCode}. stderr:`,
 		"```",
 		stderr.slice(-2000),
 		"```",
 		"",
-		`Current \`${filename}\`:`,
-		"```",
-		fileContent,
-		"```",
-		"",
-		`Return the corrected file in the same format: first line exactly "FILENAME: ${filename}", a blank line, then the complete corrected file and nothing else. Fix the actual cause of the error; do not remove functionality to make it pass.`,
+		"Emit only the files you need to change to fix this. Fix the actual cause of the error; do not remove functionality to make it pass.",
 	].join("\n");
+
+// Which file the sandbox runs. Convention first (an explicit entry point
+// beats guessing), then any executable file, then nothing — a landing
+// page or a one-pager has no entry point and is not supposed to run.
+const ENTRY_PREFERENCE = ["main.py", "app.py", "main.js", "app.js", "index.js", "run.sh", "main.sh"];
+function pickEntryPoint(files) {
+	const names = Object.keys(files);
+	for (const pref of ENTRY_PREFERENCE) if (names.includes(pref)) return pref;
+	const executables = names.filter((n) => EXECUTORS[path.extname(n)]).sort();
+	return executables[0] || null;
+}
 
 // Generate an artifact and, if it is executable, run it in the sandbox
 // and let the model fix-and-rerun autonomously up to BUILD_MAX times.
 // Returns the final parsed file, the last execution result, and a build
 // log. `scratchRunner` is injectable for tests (defaults to the real
 // Part 10 sandbox).
-async function runProto({ assumption, scratchRunner = null }) {
+// `ideaId` and `touchDir` are what turn this from a blind regeneration
+// into an edit: the model is shown the CURRENT tree and the specs the
+// prototype is supposed to embody, not just a one-line assumption.
+async function runProto({ assumption, request = "", ideaId = null, priorDir = null, scratchRunner = null }) {
 	const runOnce = scratchRunner || defaultScratchRun;
+
+	const priorTree = priorDir ? tree.readTree(priorDir) : {};
+	const isEdit = Object.keys(priorTree).length > 0;
+
+	// Proto's input document is the engineering spec (D-54's feeding
+	// rule); the product spec comes with it because a builder that cannot
+	// see what the thing is for builds the wrong thing.
+	const specs = [];
+	if (ideaId) {
+		const product = readDoc(ideaId, "product");
+		const engineering = readDoc(ideaId, "engineering");
+		if (product) specs.push(`--- PRODUCT SPEC ---\n${product}`);
+		if (engineering) specs.push(`--- ENGINEERING SPEC ---\n${engineering}`);
+	}
 
 	const messages = [
 		{ role: "system", content: SYSTEM_PROMPT },
 		{ role: "system", content: OUTPUT_FORMAT_INSTRUCTION },
-		{ role: "user", content: assumption },
+		...(isEdit ? [{ role: "system", content: EDIT_INSTRUCTION }] : []),
+		// Stable context first, volatile last — prefix caching (COMMANDS.md).
+		...(specs.length ? [{ role: "system", content: specs.join("\n\n") }] : []),
+		...(isEdit ? [{ role: "system", content: tree.renderTree(priorTree) }] : []),
+		{
+			role: "user",
+			content: isEdit
+				? `The assumption under test: ${assumption}\n\nWhat to change: ${request || assumption}`
+				: assumption,
+		},
 	];
 
 	let tokensIn = 0;
@@ -111,7 +164,7 @@ async function runProto({ assumption, scratchRunner = null }) {
 		costUsd += cc ?? 0;
 		calls += 1;
 		if (cacheHit) cacheHits += 1;
-		return parseProtoResponse(content);
+		return tree.parseTreeResponse(content);
 	};
 
 	let parsed = (await gen(messages)) || (await gen(messages)); // one parse retry
@@ -119,19 +172,26 @@ async function runProto({ assumption, scratchRunner = null }) {
 
 	if (!parsed) return { parsed: null, executionResult: null, buildIterations: 0, buildSucceeded: false, buildLog: [], ...cost() };
 
-	const ext = path.extname(parsed.filename);
-	if (!EXECUTORS[ext]) {
+	// The tree as it WILL be: what came back, layered over what was there.
+	// A file the model didn't emit is unchanged, so it has to be carried
+	// forward here or the run would execute a half-project.
+	const merged = { ...priorTree, ...parsed.files };
+	for (const rel of parsed.deletes || []) delete merged[rel];
+
+	const entry = pickEntryPoint(merged);
+	if (!entry) {
 		// Non-executable artifact (landing page, one-pager) -- nothing to run.
 		return { parsed, executionResult: null, buildIterations: 0, buildSucceeded: true, buildLog: [], ...cost() };
 	}
+	const ext = path.extname(entry);
 
 	const buildLog = [];
 	let executionResult = null;
 	let lastStderr = null;
 
 	for (let iter = 1; iter <= BUILD_MAX; iter++) {
-		const command = EXECUTORS[ext](parsed.filename);
-		executionResult = await runOnce({ filename: parsed.filename, content: parsed.content, command });
+		const command = EXECUTORS[ext](entry);
+		executionResult = await runOnce({ files: { ...priorTree, ...parsed.files }, command });
 		buildLog.push({ iter, command, ok: executionResult.ok, exit: executionResult.exitCode ?? (executionResult.ok ? 0 : 1), stderr: (executionResult.stderr || "").slice(-1200) });
 
 		if (executionResult.ok) return { parsed, executionResult, buildIterations: iter, buildSucceeded: true, buildLog, ...cost() };
@@ -146,13 +206,17 @@ async function runProto({ assumption, scratchRunner = null }) {
 
 		const fixed = await gen([
 			{ role: "system", content: OUTPUT_FORMAT_INSTRUCTION },
-			{ role: "user", content: FIX_PROMPT(assumption, parsed.filename, parsed.content, command, executionResult.exitCode ?? 1, stderr) },
+			{ role: "system", content: EDIT_INSTRUCTION },
+			{ role: "system", content: tree.renderTree({ ...priorTree, ...parsed.files }) },
+			{ role: "user", content: FIX_PROMPT(assumption, entry, command, executionResult.exitCode ?? 1, stderr) },
 		]);
 		if (!fixed) {
 			buildLog.push({ iter: iter + 0.5, note: "fix attempt did not return a parseable file — stopping" });
 			break;
 		}
-		parsed = fixed;
+		// A fix is itself an edit: layer it over what we already have
+		// rather than replacing the project with whatever the fix emitted.
+		parsed = { files: { ...parsed.files, ...fixed.files }, deletes: [...(parsed.deletes || []), ...(fixed.deletes || [])] };
 	}
 
 	return { parsed, executionResult, buildIterations: buildLog.filter((e) => e.command).length, buildSucceeded: false, buildLog, ...cost() };
@@ -160,14 +224,38 @@ async function runProto({ assumption, scratchRunner = null }) {
 
 // The real sandbox run (Part 10). Isolated in its own scratch dir per
 // attempt; the whole loop stays inside run.sh -- no new surface.
-async function defaultScratchRun({ filename, content, command }) {
+async function defaultScratchRun({ files, command }) {
 	const scratchDir = fs.mkdtempSync(path.join(os.homedir(), "scratch", "proto-"));
 	try {
-		fs.writeFileSync(path.join(scratchDir, filename), content, "utf8");
+		// The whole project goes in, not just the entry point — a
+		// multi-file prototype that imports a sibling would otherwise fail
+		// in the sandbox for a reason that has nothing to do with the code.
+		// Reuses the same path guard as everything else.
+		for (const [rel, content] of Object.entries(files || {})) {
+			const full = tree.safeJoin(scratchDir, rel);
+			if (!full) continue;
+			fs.mkdirSync(path.dirname(full), { recursive: true });
+			fs.writeFileSync(full, content, "utf8");
+		}
 		return await runInSandbox({ scratchDir, command });
 	} finally {
 		fs.rmSync(scratchDir, { recursive: true, force: true });
 	}
+}
+
+// What actually changed, in a line a founder can read. "wrote app.js"
+// was fine when a prototype was one file; with a tree the useful facts
+// are what moved and what didn't.
+function describeChange(applied) {
+	const added = applied.written.filter((w) => w.added).map((w) => w.path);
+	const edited = applied.written.filter((w) => !w.added).map((w) => w.path);
+	const bits = [];
+	if (added.length) bits.push(`added ${added.map((p) => `\`${p}\``).join(", ")}`);
+	if (edited.length) bits.push(`changed ${edited.map((p) => `\`${p}\``).join(", ")}`);
+	if (applied.removed.length) bits.push(`removed ${applied.removed.map((p) => `\`${p}\``).join(", ")}`);
+	if (!bits.length) bits.push("no files changed");
+	const kept = applied.unchanged.length;
+	return `${bits.join("; ")}${kept ? ` (${kept} other file${kept === 1 ? "" : "s"} untouched)` : ""}`;
 }
 
 async function handleProtoCommand({ command, ack, client }) {
@@ -280,7 +368,12 @@ async function handleProtoCommand({ command, ack, client }) {
 	}
 
 	try {
-		const { parsed, executionResult, buildIterations, buildSucceeded, buildLog, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runProto({ assumption });
+		// The touch we are editing forward FROM. Without this the model
+		// never sees what it built last time, which is the whole bug.
+		const priorDir = touchCount > 0 ? path.join(IDEAS_DIR, id, "proto", String(touchCount)) : null;
+		const { parsed, executionResult, buildIterations, buildSucceeded, buildLog, tokensIn, tokensOut, costUsd, cacheHitRatio, wallClockS } = await runProto({
+			assumption, request: assumption, ideaId: id, priorDir,
+		});
 
 		if (buildIterations > 1 && command.progress && command.progress.channel === millChannel) {
 			await client.chat
@@ -316,14 +409,19 @@ async function handleProtoCommand({ command, ack, client }) {
 		const touchN = touchCount + 1;
 		const touchDir = path.join(IDEAS_DIR, id, "proto", String(touchN));
 		fs.mkdirSync(touchDir, { recursive: true });
+		// Carry the previous touch forward FIRST, then apply only what the
+		// model emitted. This is what makes a touch an edit: everything the
+		// founder didn't ask about is already there, byte-identical, before
+		// a single change lands.
+		if (priorDir) tree.copyTreeForward(priorDir, touchDir);
+		const applied = tree.applyTree(touchDir, parsed);
 		// runProto has already built, run, and (for executables) fix-and-
 		// re-run inside the Part 10 sandbox up to BUILD_MAX times. Persist
 		// the final artifact + its last run output + the build log.
-		fs.writeFileSync(path.join(touchDir, parsed.filename), parsed.content, "utf8");
 		if (executionResult) {
 			fs.writeFileSync(
 				path.join(touchDir, "output.txt"),
-				`command: ${EXECUTORS[path.extname(parsed.filename)]?.(parsed.filename) || "(none)"}\nexit ok: ${executionResult.ok}\n\nstdout:\n${executionResult.stdout}\n\nstderr:\n${executionResult.stderr}\n`,
+				`command: ${executionResult.command || "(none)"}\nexit ok: ${executionResult.ok}\n\nstdout:\n${executionResult.stdout}\n\nstderr:\n${executionResult.stderr}\n`,
 				"utf8",
 			);
 		}
@@ -347,7 +445,7 @@ async function handleProtoCommand({ command, ack, client }) {
 
 		await commitAndPush(
 			[`ideas/${id}`],
-			`idea ${id}: proto touch ${touchN} (${parsed.filename}) by ${founder}`,
+			`idea ${id}: proto touch ${touchN} (${applied.fileCount} files) by ${founder}`,
 			(reason) => console.error(`git commit/push failed for idea ${id} proto: ${reason}`),
 		);
 
@@ -370,7 +468,7 @@ async function handleProtoCommand({ command, ack, client }) {
 		);
 
 		const lines = [
-			`Touch ${touchN}/${TOUCH_CAP} for \`${id}\`: wrote \`${parsed.filename}\`.`,
+			`Touch ${touchN}/${TOUCH_CAP} for \`${id}\`: ${describeChange(applied)}.`,
 		];
 		if (executionResult) {
 			const attemptNote = buildIterations > 1 ? ` (${buildIterations} sandbox attempts)` : "";
@@ -420,4 +518,4 @@ async function handleProtoCommand({ command, ack, client }) {
 	}
 }
 
-module.exports = { handleProtoCommand, runProto, parseProtoResponse };
+module.exports = { handleProtoCommand, runProto, pickEntryPoint, describeChange };
