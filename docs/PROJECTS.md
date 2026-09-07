@@ -148,11 +148,13 @@ A project channel holds **many chats**. Each chat is a Slack thread whose **root
 | brainstorm | Co-founder | `research-kb.md` | an unfalsifiable claim |
 | product | PM | `product-spec.md` | a feature with no user/JTBD/metric; prescribing implementation |
 | engineering | Engineer | `engineering-spec.md` | a design with no failure modes/cost; reopening product decisions |
-| proto | Builder | artifacts | building with no engineering spec |
+| proto | Builder | a multi-file project under `proto/<n>/` | building with no engineering spec |
 | deck *(branch)* | Deck writer | `deck.md` | a slide with no audience and no intended effect |
 | audit | Auditor | the verdict is the gate's | giving a verdict in conversation |
 
 Modes are sequential in **dependency** (each persona's input is the previous mode's document) but never in **gating** — switching is always allowed. `deck` is a branch off brainstorm, not a link in the chain (D-56).
+
+**Proto is entered by a button, not by talking.** Switching to proto puts `[ Let's Prototype ]` on the mode banner; tapping it brings the research base and both specs across and comes back with a plan before anything is written. From then on it is plan → approve → build, always landing back in plan, and the mounted preview updates in place after each build without the URL changing (D-58).
 
 **Documents carry context between stages, not the thread** (D-57). A document is written when you ask — "create the product spec", "update it with what we just said", `@Mill save` — and on the first message after you switch away from its mode, so the next persona reads a current upstream document without you having to remember. Either way it is reconciled with the conversation rather than regenerated, so prior specifics survive, and it draws only on turns spoken in its own mode. There is no periodic write.
 

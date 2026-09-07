@@ -744,8 +744,8 @@ app.action("proto_build", async ({ ack, body, client, action }) => {
 // path cannot drift apart — two copies of "what changed" is how one of
 // them ends up lying.
 async function reportProtoBuild({ client, channel, chatTs, id, res, progressTs }) {
-	const say = async (text) => {
-		if (progressTs) await client.chat.update({ channel, ts: progressTs, text }).catch(() => {});
+	const say = async (text, _blocks, followUp = false) => {
+		if (progressTs && !followUp) await client.chat.update({ channel, ts: progressTs, text }).catch(() => {});
 		else await client.chat.postMessage({ channel, thread_ts: chatTs, text }).catch(() => {});
 	};
 	await require("./proto-turn").reportBuild({ client, channel, chatTs, id, res, say });

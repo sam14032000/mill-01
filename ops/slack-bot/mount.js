@@ -195,6 +195,50 @@ async function dismount({ id, client, channel, threadTs, reason, byUserId }) {
 	emit(buildEvalEvent({ stage: "mount", ideaId: id, founder: mountInfo?.mounted_by || null, status: "ok", reasonCode: "dismount" }));
 }
 
+// Copy a touch's project files into a directory the container serves.
+// readTree excludes the meta files (build-log.md, output.txt) by
+// construction, so internal build notes are never served at a URL the
+// founder may have given to a customer.
+function stageMount(id, touchN, dest) {
+	const tree = require("./proto-tree");
+	const src = path.join(IDEAS_DIR, id, "proto", String(touchN));
+	const files = tree.readTree(src);
+	fs.mkdirSync(dest, { recursive: true });
+	for (const [rel, content] of Object.entries(files)) {
+		const full = tree.safeJoin(dest, rel);
+		if (!full) continue;
+		fs.mkdirSync(path.dirname(full), { recursive: true });
+		fs.writeFileSync(full, content, "utf8");
+	}
+	return Object.keys(files).length;
+}
+
+// After a build, bring the live preview up to date WITHOUT changing the
+// URL. A founder who has shared the link should be able to say "refresh"
+// and see the change, rather than dismount/remount and hand out a new
+// one -- the URL is the same either way, but a remount drops the slot and
+// costs them the shared context.
+//
+// Static content needs nothing more than the re-copy: the container
+// serves the same directory. A server-backed prototype has the old code
+// in memory, so it is restarted.
+async function refreshMount({ id, touchN }) {
+	const state = readState(id) || {};
+	const m = state.mount;
+	if (!m || m.dismounted_at) return { ok: false, reason: "not mounted" };
+	if (!m.scratch || !fs.existsSync(m.scratch)) return { ok: false, reason: "no staging directory to refresh" };
+
+	const n = stageMount(id, touchN ?? m.touch, m.scratch);
+	const entry = touchEntryFile(id, touchN ?? m.touch);
+	const needsRestart = entry && /\.(js|py)$/.test(entry);
+	if (needsRestart) {
+		const up = await sh(["up", m.scratch, entry]);
+		if (up.error) return { ok: false, reason: (up.stderr || up.error.message || "").slice(0, 200) };
+	}
+	if (touchN && touchN !== m.touch) updateState(id, { mount: { ...m, touch: touchN } });
+	return { ok: true, files: n, restarted: !!needsRestart };
+}
+
 async function mount({ id, touchN, byFounder, minutes, client, channel, threadTs }) {
 	const requested = Math.min(minutes || DEFAULT_MIN, CAP_MIN);
 	const existing = findMountedIdea();
@@ -220,7 +264,16 @@ async function mount({ id, touchN, byFounder, minutes, client, channel, threadTs
 		return { ok: false, reason: "no_entry" };
 	}
 	const scratch = fs.mkdtempSync(path.join(os.homedir(), "scratch", "mnt-"));
-	fs.copyFileSync(path.join(IDEAS_DIR, id, "proto", String(touchN), entry), path.join(scratch, entry));
+	// The WHOLE project, not just the entry file. A prototype is a tree
+	// now (D-58), so copying one file served a page whose stylesheet and
+	// scripts 404'd -- and it did so silently, looking like a broken
+	// prototype rather than a broken mount.
+	//
+	// Still a copy rather than a bind of the touch directory: the touch
+	// directory also holds build-log.md and output.txt, which are OURS,
+	// and a mounted prototype is the one thing a founder shows to
+	// customers. `stageMount` uses readTree, which excludes them.
+	stageMount(id, touchN, scratch);
 	fs.chmodSync(scratch, 0o777);
 
 	const up = await sh(["up", scratch, entry]);
@@ -240,6 +293,7 @@ async function mount({ id, touchN, byFounder, minutes, client, channel, threadTs
 	updateState(id, {
 		mount: {
 			touch: touchN,
+			scratch,
 			mounted_at: mountedAt.toISOString(),
 			mounted_by: byFounder,
 			expires_at: expiresAt.toISOString(),
@@ -328,6 +382,8 @@ async function reconcileOnStartup(client) {
 }
 
 module.exports = {
+	refreshMount,
+	stageMount,
 	mount,
 	dismount,
 	extend,

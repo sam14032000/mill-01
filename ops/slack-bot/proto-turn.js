@@ -46,8 +46,11 @@ async function handleProtoMessage({ session, message, client, text }) {
 		.catch(() => null);
 	const progressTs = progress?.ts || null;
 
-	const say = async (t, blocks) => {
-		if (progressTs) await client.chat.update({ channel, ts: progressTs, text: t, ...(blocks ? { blocks } : { blocks: [] }) }).catch(() => {});
+	// `followUp` posts a NEW message instead of editing the placeholder --
+	// for the second and later things a build has to say, which would
+	// otherwise overwrite the first.
+	const say = async (t, blocks, followUp = false) => {
+		if (progressTs && !followUp) await client.chat.update({ channel, ts: progressTs, text: t, ...(blocks ? { blocks } : { blocks: [] }) }).catch(() => {});
 		else await client.chat.postMessage({ channel, thread_ts: chatTs, text: t, ...(blocks ? { blocks } : {}) }).catch(() => {});
 	};
 
@@ -117,6 +120,24 @@ async function reportBuild({ client, channel, chatTs, id, res, say }) {
 	await commitAndPush([`ideas/${id}/proto/${res.touchN}`], `idea ${id}: proto touch ${res.touchN}`, (r) =>
 		console.error(`proto: commit failed: ${r}`),
 	).catch(() => {});
+
+	// LIVE PREVIEW. If this idea holds the mount slot, bring it up to date
+	// in place -- the URL does not change, so a founder who has already
+	// shared the link just refreshes. A failed refresh is reported as a
+	// STALE PREVIEW rather than passed over: the build did land, and
+	// implying the preview shows it when it doesn't is the class of false
+	// claim this project keeps having to correct.
+	const mountMod = require("./mount");
+	const mounted = mountMod.findMountedIdea();
+	if (mounted?.id === id) {
+		const r = await mountMod.refreshMount({ id, touchN: res.touchN }).catch((e) => ({ ok: false, reason: e.message }));
+		if (r.ok) {
+			const url = process.env.NGROK_DOMAIN ? `https://${process.env.NGROK_DOMAIN}` : "the mounted URL";
+			await say(`_Preview updated — refresh ${url}${r.restarted ? " (the server was restarted)" : ""}._`, null, true);
+		} else {
+			await say(`⚠️ _The build landed, but the live preview is now STALE: ${r.reason}. Dismount and mount again to see it._`, null, true);
+		}
+	}
 }
 
 module.exports = { handleProtoMessage, reportBuild, TOUCH_CAP, TOUCH_CAP_TEXT };

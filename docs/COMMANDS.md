@@ -232,8 +232,12 @@ The prompt asks for **behaviour, not intent** (I1) — what people currently do 
 
 ### `/proto <id> <assumption>`
 
-- **Model:** flash-fast (`thinking_level: low`) · **Posts to:** `#mill-ideas`
+- **Engine:** Claude Code, headless and fenced — **plan on Opus, build on Sonnet** (D-58), on the `mill-code` key. Falls back to `flash-fast` if the agent is unavailable, so `/proto` never hard-fails.
 - **Refuses if:** no assumption argument (D-29), or state is `killed`
+- **A prototype is a PROJECT, not a file.** Multi-file, under `ideas/<id>/proto/<n>/`, and each touch copies the previous tree forward and **edits** it — a file you did not ask about comes through byte-identical. It used to regenerate blind from the assumption alone, so touch 2 was an unrelated artifact rather than a revision of touch 1.
+- **Entry:** switching a chat to proto puts a **`[ Let's Prototype ]`** button on the mode banner. A message before you tap it is deflected and **not recorded as a turn**. Once bootstrapped the button never returns — coming back to proto resumes the same session and tree.
+- **Loop:** you say what you want → a **plan** (nothing written) with `[Build it]` / `[Adjust]` / `[Discard]` → the build lands and the mode **returns to plan**. `[Adjust]` re-plans on the same session, as many rounds as you like; only an accepted build counts as a touch.
+- **Three controls:** effort (low…max), plan-first / just-build, start fresh. Cost is reported, never a knob.
 - **System prompt:**
   > Build the smallest artifact that tests this one assumption. Default to non-code — landing page, mock flow, fake pricing table, one-pager. Single file.
   > Only write executable code if the assumption is technical.
