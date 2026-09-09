@@ -241,7 +241,7 @@ async function plan({ cwd, request, brief = "", sessionId = null, resume = false
 
 // BUILD. Resumes the SAME session the plan was made in, so it is acting
 // on its own plan rather than re-deriving one from a summary.
-async function build({ cwd, sessionId, request = "Implement the plan you just described.", effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
+async function build({ cwd, sessionId, request = "Implement the plan you just described.", brief = "", effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
 	if (!apiKey) return { ok: false, reason: "MILL_CODE_KEY not set" };
 	if (!sessionId) return { ok: false, reason: "no session to resume" };
 	const args = [
@@ -250,6 +250,10 @@ async function build({ cwd, sessionId, request = "Implement the plan you just de
 		"--resume", sessionId,
 		"--max-budget-usd", String(MAX_USD_BUILD),
 	];
+	// A resumed session carries the conversation but NOT the system
+	// prompt, so the specs go on every call or the build works from
+	// whatever the conversation happens to still contain.
+	if (brief) args.push("--append-system-prompt", brief);
 
 	let res;
 	try {
