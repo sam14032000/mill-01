@@ -418,12 +418,14 @@ curl -s -X POST http://127.0.0.1:4000/key/generate \
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"key_alias":"mill-code","models":["claude-sonnet-5","claude-opus-5"],
-       "max_budget":2.00,"budget_duration":"1d"}'
+       "max_budget":4.00,"budget_duration":"1d"}'
 # store as MILL_CODE_KEY in ~/.config/mill/env
 
 # mill-mech (MiniMax) removed — D-46 / build-guide-projects.md Part 14.1.
 # Skip on a from-scratch build; there are four virtual keys, not five.
 ```
+
+**`mill-code` is $4.00/day since 9 September 2026** (was $2.00 at creation). Raised on a fresh peak from real founder use, not from testing: a plan → adjust → adjust → build cycle at `effort: high` exhausted $2.00 in one working session, and the build died *after* the founder had approved the plan. Two things changed alongside the raise, so the peak should not recur at that level — the specs moved out of the prompt and onto disk (a ~97.6% smaller brief per turn, D-58) and a pre-flight budget check now refuses *before* spawning rather than dying mid-build.
 
 **`mill-code` is separate from `mill-audit` for a reason, not for tidiness.** A founder proposed reusing the audit key so budget tracking stayed in one place. But `mill-audit` is scoped to `models:["audit"]` (Fable), and D-23 makes that line a **detector**: *"Above $35 means something is invoking Fable outside the gate — a D-10 violation, and the cap is how it surfaces."* Coding traffic on that key would run every turn on Fable and turn the one signal that catches D-10 violations into noise. Verified after creation: `mill-code` gets **HTTP 403** on `model:"audit"` — *"This key can only access models=['claude-sonnet-5', 'claude-opus-5']"* — so the gate's model is unreachable from the coding path by construction.
 
