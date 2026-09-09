@@ -36,6 +36,19 @@ The product audits and certifies SKU formulation, packaging, and regulatory docu
 2. **Specialty Apparel & Home Textiles:** High AOV, high diaspora demand. Friction points: 10-digit HTS fiber composition rules, country of origin labeling, Section 321 crackdowns.
 3. **Nutraceuticals & Dietary Supplements:** High margin, but extreme regulatory barriers (FDA Facility Registration, Bioterrorism Act Prior Notice, Certificate of Analysis verification, heavy metals testing, California Prop 65).
 
+### 2.3 Market Sizing (TAM / SAM / SOM)
+*Macro Baseline (NITI Aayog Data):* MSMEs account for ~48.8% of total Indian exports, yet only ~1.1% of the ~64 million registered MSMEs actively export. Cross-border e-commerce exports from India stand at ~$2B today and are projected by NITI Aayog to scale to $200B–$300B by 2030.
+
+* **TAM (Total Addressable Market) — Macro Enablement:** **$2.5B – $3.0B annually by 2030**.
+  * *Basis:* At $200B in projected Indian e-commerce exports by 2030, a regulatory orchestration, compliance, and manifest automation take rate of 1.0%–1.5% of export GMV yields a ~$2.5B–$3.0B annual software and service enablement pool across all cross-border MSME merchandise.
+* **SAM (Serviceable Addressable Market) — Mid-Market Consumer Brands:** **₹600 Cr – ₹750 Cr (~$75M – $90M ARR)**.
+  * *Basis:* ~15,000 viable mid-market Indian D2C and manufacturing consumer brands (₹15Cr–₹150Cr ARR / 500–5,000 domestic orders/day) operating in high-regulation categories (Beauty/Skincare, Nutraceuticals, Specialty Apparel) expanding into US/EU/UK fulfillment hubs.
+  * *Spend Assumption:* ₹35,000–₹50,000/month (₹4L–₹6L/year) in combined SKU pre-clearance audits, US Domestic Agent pass-throughs, and per-shipment orchestration fees ($15,000 \text{ brands} \times \text{₹4.5L/year} \approx \text{₹675 Cr}$).
+* **SOM (Serviceable Obtainable Market) — 24–36 Month Horizon:** **₹4 Cr – ₹10 Cr (~$500k – $1.2M ARR)**.
+  * *Basis:* Skincare and Beauty brands exporting to **US Amazon FBA / 3PLs** acquired via freight forwarder sales partnerships and export agency channels across Western and Northern India hubs (Nhava Sheva, Delhi NCR, Bangalore).
+  * *Unit Volume:* 200–400 active brands onboarded across 5 partnering freight forwarders and 3 export management agencies within 24 months, scaling to 600 brands by Year 3.
+  * *Account Economics:* Average Revenue Per Account (ARPA) of ~₹1,50,000 – ₹1,80,000/year ($1,800–$2,200), driving ₹4.0 Cr ($480k ARR) at 250 accounts and ₹9.6 Cr ($1.15M ARR) at 600 accounts.
+
 ---
 
 ## 3. Regulatory & Operational Architecture (The Failure Modes)
@@ -130,10 +143,12 @@ Harmonized System classification branches from 8-digit Indian HSN into 10-digit 
    * Scope to a **single category and 1–2 hero SKUs** per brand during the pilot to prevent category fragmentation.
    * Uncover formulation, label die-line, and customs bond friction points manually before codifying validation logic into software engines.
 
-### 5.2 Monetization & Economics
-* **Pre-Clearance SKU Audit Fee / Setup:** Flat fee per SKU audited and certified for target destination markets.
-* **Per-Shipment Orchestration Fee:** Fixed fee per pallet/shipment manifest generated, structured either as a direct SaaS fee or bundled through the forwarder's quotation.
-* **Add-on Compliance Infrastructure:** Pass-through margin on continuous US Customs Bond underwriting and third-party US Domestic Agent / IoR orchestration.
+### 5.2 Monetization & Unit Economics
+* **Hero SKU Pre-Clearance & Regulatory Setup:** ₹25,000 flat one-time setup fee per brand (covering MoCRA foreign facility registration, INCI verification, and Product Listing).
+* **Per-Shipment Orchestration Fee:** ₹15,000 per pallet run $\times$ 6–8 shipments/year = ₹90,000–₹120,000/year (structured as direct SaaS fee or bundled into the forwarder quote).
+* **Compliance Infrastructure Margin:** ~₹35,000/year pass-through margin on continuous US Customs Bond underwriting and designated third-party US Domestic Agent / IoR service.
+* **Target ARPA (Average Revenue Per Account):** **₹1,50,000 – ₹1,80,000/year ($1,800 – $2,200)**.
+* **Economic Value Proposition for ICP:** A single port demurrage penalty ($150–$300/day) or inventory hold ($20k+ capital risk) exceeds the entire annual platform ARPA, creating clear ROI for brands doing 5–10 pallets annually.
 
 ### 5.3 Liability & Risk Boundary
 * **SaaS Accuracy & Process SLA:** Standard commercial SaaS indemnity covering direct penalties and fines caused exclusively by platform calculation or classification errors, capped at annual platform fees paid.
@@ -175,6 +190,5 @@ Harmonized System classification branches from 8-digit Indian HSN into 10-digit 
 ---
 
 ## Changed in this update
-- **Section 3.1 & 3.2 (REVISED):** Corrected export documentation terminology from "Commercial Bill of Entry" to "Commercial Shipping Bill" (Bill of Entry applies strictly to Indian imports); clarified US Importer of Record / US Domestic Agent mandates; specified that FDA Prior Notice applies to food/dietary supplements rather than cosmetics; added analysis of cosmetic-to-drug reclassification risks under FDA rules.
-- **Section 3.3 (APPENDED):** Added comprehensive HTS-10 mapping architecture for Chapter 33, detailing Indian HSN vs US HTS codes, GRI classification rules, and CBP ACE Partner Government Agency (PGA) message sets.
-- **Section 5.3, 6 & 7 (REVISED & APPENDED):** Updated liability boundaries to reflect probabilistic border discretion vs deterministic pre-flight checks, refined the skincare rules standardization hypothesis, and added FDA import alert analysis to the validation roadmap.
+- **Section 2.3 (APPENDED):** Added comprehensive TAM-SAM-SOM market sizing grounded in NITI Aayog MSME trade data, establishing the $2.5B–$3.0B TAM (at $200B 2030 e-commerce exports), ₹600Cr–₹750Cr SAM (~15k brands), and ₹4Cr–₹10Cr SOM (200–400 skincare brands at ₹1.5L–₹1.8L ARPA).
+- **Section 5.2 (REVISED):** Explicitly integrated unit economics and ARPA breakdown (Hero SKU setup, per-shipment orchestration fees, bond margins) against ICP demurrage risk ROI.
