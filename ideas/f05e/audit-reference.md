@@ -239,3 +239,96 @@ Mode: product (PM)
 
 - The proposed product should allow agencies to connect their third-party providers (such as logistics) and provide a tracking screen on the other end for brands to see how much compliance readiness they have to proceed with shipping. [FOUNDER BELIEF]
 - The brand-facing interface can initially be an information-heavy, read-only reporting screen without user interactions. [FOUNDER BELIEF]
+
+---
+### 2026-09-05T08:05:39.804Z
+
+**Mode:** brainstorm
+
+Mode: brainstorm (Co-founder)
+
+- Product specification / workflow: Export Management Agencies (EMAs) managing multi-brand catalogs will configure their contracted forwarders and Custom House Agents (CHAs) and upload brand SKU dossiers on the brand's behalf, while brands receive a read-only, information-heavy compliance health dashboard tracking SKU readiness and compliance status without interactive features initially. [FOUNDER BELIEF]
+- Indian export regulations: A Bill of Entry is not required for exports and is only required for imports into India. [FOUNDER BELIEF]
+- US customs / IOR requirements: A US Importer of Record (IOR) is required due to a US bill preventing non-resident IORs, requiring a partner in the US. [FOUNDER BELIEF]
+- US import rejection dynamics: Cosmetics have the highest failure/rejection rate in US imports from India, with a large share of rejections occurring because cosmetics are labeled or classified as drugs. [FOUNDER BELIEF]
+- Scope determinism: Category scope cannot be deterministic because classification factors will not be within the system's control. [FOUNDER BELIEF]
+- US FDA Prior Notice requirements: US FDA Prior Notice is required only for food items and is not necessary for skincare/cosmetics (referencing user story US-7). [FOUNDER BELIEF]
+
+---
+### 2026-09-05T08:15:02.125Z
+
+**Mode:** brainstorm
+
+MODE: brainstorm (Co-founder)
+
+Research passes cited: none (no research passes have run for this idea yet).
+
+---
+
+### Attributed Claims
+
+* **U.S. Cosmetics Import Regulations & MoCRA:** Importing cosmetics into the U.S. requires compliance with FDA and MoCRA frameworks to prevent detentions for unapproved new drugs. Marketing claims regarding skin repair or therapeutic benefits trigger drug oversight. As of July 1, 2024, facilities must obtain an FDA Establishment Identifier (FEI) via Cosmetics Direct. [SURFACE SEARCH — not evidence]
+
+* **Indian Export Documentation:** Outbound shipments from India require an ICEGATE Commercial Shipping Bill rather than a Bill of Entry (which applies only to inbound imports). [FOUNDER BELIEF]
+
+* **U.S. Importer of Record / Agent Mandate:** Under CBP and MoCRA enforcement, foreign brands require a U.S.-based Importer of Record or a designated U.S. Agent with a domestic physical address and continuous customs bond to clear entry. [FOUNDER BELIEF]
+
+* **Detention Drivers & Claims Auditing:** Therapeutic or structure-function claims (e.g., "cures acne", "repairs melanin") are the primary reason Indian skincare products are detained by the FDA as unapproved new drugs. Pre-clearance scanning must audit packaging copy and website marketing claims against FDA prohibited drug lexicons alongside INCI ingredient lists. [FOUNDER BELIEF]
+
+* **Border Clearance Determinism:** Customs clearance cannot be 100% deterministic due to discretionary inspection authority held by CBP and FDA field officers; platform verification provides pre-flight compliance scoring and defect-proofing rather than a guaranteed pass. [FOUNDER BELIEF]
+
+* **Prior Notice Scope:** Prior Notice filings under the Bioterrorism Act apply exclusively to food, beverages, and dietary supplements, whereas cosmetics require MoCRA Product Listing (PPLA) and Facility Registration (FEI). [FOUNDER BELIEF]
+
+* **HTS Tariff Mapping & Divergences:**
+  * Indian ITC-HS / HSN codes (8-digit) diverge from U.S. HTS-10 codes beyond the 6-digit WCO baseline. [FOUNDER BELIEF]
+  * Indian HSN `3304 99 10` (Face creams/moisturisers) maps to U.S. HTS `3304.99.5000` (0% general duty, requires FDA MoCRA Facility & Product Listing). [FOUNDER BELIEF]
+  * Indian HSN `3304 10 00` (Lip make-up) maps to U.S. HTS `3304.10.0000` (0% general duty, requires FDA color additive compliance). [FOUNDER BELIEF]
+  * Indian HSN `3304 99 30` (Sunscreen) maps to OTC Drug HTS `3004.90.9203` (0% general duty, requires FDA Drug Listing, NDC Number, and U.S. Facility Drug Master File) if therapeutic or SPF claims are made. [FOUNDER BELIEF]
+  * Indian HSN `3305 90 40` (Herbal hair oils/tonics) maps to U.S. HTS `3305.90.0000` (0% general duty, FDA botanical review). [FOUNDER BELIEF]
+  * Indian HSN `3307 30 10` (Perfumed bath salts) maps to U.S. HTS `3307.30.5000` (4.9% general duty, FDA). [FOUNDER BELIEF]
+
+* **Automated HTS Failure Modes:**
+  * On-pack claims ("treats eczema", "removes acne", "prevents sunburn") trigger CBP/FDA reclassification from Cosmetic HTS `3304.99` to OTC Drug HTS `3004.90`, requiring NDC registration, U.S. Drug Establishment Registration, and cGMP drug manufacturing audits. [FOUNDER BELIEF]
+  * Multi-item kits require classification under General Rules of Interpretation (GRI 3(b) essential character) or commercial invoice line-item splitting, and packaging format (e.g., aerosol vs. glass dropper) can trigger hazardous material or statistical breakout changes. [FOUNDER BELIEF]
+  * U.S. ACE customs filings require HTS-10 codes to trigger Partner Government Agency (PGA) Message Sets; invalid HTS codes trigger automated manifest rejections prior to vessel berthing. [FOUNDER BELIEF]
+
+* **HTS Engine Architecture:** The proposed automation engine relies on deterministic GRI 1 mapping from catalog attributes, active ingredient / therapeutic claim scanning to alert for drug reclassification, and PGA data association (FEI, MoCRA PPLA, D-U-N-S) on the commercial shipping bill pack. [FOUNDER BELIEF]
+
+---
+
+### Contradiction and Gap Analysis
+
+*(No research passes have run for this idea yet; no CONTRADICTS or NOT DISCUSSED flags apply.)*
+
+---
+### 2026-09-09T04:54:10.137Z
+
+**Mode:** brainstorm
+
+Mode: brainstorm (Co-founder)
+
+- The founder proposes calculating the TAM-SAM-SOM using a NITI Aayog report (https://www.niti.gov.in/hi/node/2099), stating that MSMEs account for 48.8% of exports while only 1.1% of MSMEs actively export, suggesting the market opportunity lies in enabling non-participating MSMEs to export. [FOUNDER BELIEF]
+- Surface search results (`ideas/f05e/find/20260909-045401.md`) citing NITI Aayog state that approximately 0.95% to 1% of India’s estimated 64 million MSMEs actively export directly, the MSME sector accounts for 43% to 46% of total merchandise exports, and India’s cross-border e-commerce exports currently sit at roughly USD 2 billion. [SURFACE SEARCH — not evidence]
+
+---
+### 2026-09-09T05:51:30.604Z
+
+**Mode:** audit
+
+Mode: audit (Auditor)
+
+- TAM is modeled at $2.5B–$3.0B annually by 2030, citing NITI Aayog projections that Indian cross-border e-commerce exports will scale from ~$2B today to $200B–$300B by 2030 (with ~1% of 64M MSMEs exporting today), applying an assumed compliance, documentation, and regulatory orchestration take rate of 1.0%–1.5% of GMV. [FOUNDER BELIEF]
+- SAM is estimated at ₹600 Cr–₹750 Cr (~$75M–$90M ARR), based on an estimated pool of ~15,000 mid-market Indian consumer brands (₹15Cr–₹150Cr ARR / 500–5,000 domestic orders/day) in high-regulation categories (Beauty/Skincare, Nutraceuticals, Specialty Apparel) shipping bulk palletized inventory (LCL/FCL) to Western fulfillment hubs (US, EU, UK), each spending ₹35,000–₹50,000/month (~₹4L–₹6L/year) across SKU audits, US Domestic Agent fees, and per-shipment orchestration fees. [FOUNDER BELIEF]
+- SOM over a 24–36 month horizon is estimated at ₹4 Cr–₹10 Cr (~$500k–$1.2M ARR), targeting 200–400 active skincare and beauty brands exporting to US Amazon FBA/3PLs acquired via 5 partnering freight forwarders and 3 export management agencies in Nhava Sheva, Delhi NCR, and Bangalore. [FOUNDER BELIEF]
+- Projected unit economics per brand assume an ARPA of ₹1,50,000–₹1,80,000/year ($1,800–$2,200), broken down into a ₹25,000 flat MoCRA onboarding setup fee, ₹15,000 per-pallet orchestration fee across 6–8 shipments/year (₹90,000–₹120,000/year), and ~₹35,000/year continuous bond/agent margin; scaling from 250 brands at ₹1.6L ARPA (₹4.0 Cr / $480k ARR) in Year 2 to 600 brands (₹9.6 Cr / ~$1.15M ARR) in Year 3. [FOUNDER BELIEF]
+- The commercial model relies on mid-market brands running 5–10 pallets annually, where saving a single $250/day demurrage penalty or $20,000 inventory seizure is believed to justify the ~₹1.5L/year software and service cost, whereas long-tail MSMEs will not pay this amount. [FOUNDER BELIEF]
+
+---
+### 2026-09-09T05:51:55.169Z
+
+**Mode:** audit
+
+Mode: audit (Auditor)
+
+- The founder attempted to trigger the audit gate via chat command (`@Mill audit`). [FOUNDER BELIEF]
+- Mill issued operational refusals stating that the auditor desk cannot deliver a verdict, score, or pass/fail decision directly inside the chat interface, instructing that formal gate passes must be executed against registered project files, assumptions, and evidence reports. [FOUNDER BELIEF]
