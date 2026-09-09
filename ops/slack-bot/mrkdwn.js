@@ -74,9 +74,69 @@ function convertSegment(seg) {
 	});
 }
 
+
+// LATEX. The models emit inline maths no matter what the prompt says —
+// the same problem as `**bold**`, from the same cause. Seen live in a
+// project thread:
+//
+//   $15,000 \text{ brands} \times \text{₹4.5L/year} \approx \text{₹675 Cr}$
+//   ₹15,000 per pallet run $\times$ 6–8 shipments/year
+//
+// Slack renders none of it, so a founder reads raw \text{} and \times in
+// the middle of their own unit economics.
+//
+// THE CARE HERE IS ABOUT CURRENCY, not about the maths. These threads are
+// full of real "$2B", "$200B", "($480k ARR)", and a naive `$...$` matcher
+// treats the gap between two dollar amounts as a maths span and eats
+// them. So: commands are converted anywhere, and a `$` is only removed
+// when it is NOT followed by a digit — a real currency figure is always
+// `$` + digit, while a LaTeX delimiter closes on a space, punctuation or
+// end of line. Conservative on purpose: the failure mode of being too
+// eager is destroying a number the founder wrote.
+const LATEX_SYMBOLS = [
+	[/\\times\b/g, "×"], [/\\div\b/g, "÷"], [/\\pm\b/g, "±"],
+	[/\\approx\b/g, "≈"], [/\\neq\b/g, "≠"], [/\\equiv\b/g, "≡"],
+	[/\\geq?\b/g, "≥"], [/\\leq?\b/g, "≤"],
+	[/\\rightarrow\b/g, "→"], [/\\to\b/g, "→"], [/\\leftarrow\b/g, "←"], [/\\gets\b/g, "←"],
+	[/\\Rightarrow\b/g, "⇒"], [/\\Leftarrow\b/g, "⇐"],
+	[/\\cdot\b/g, "·"], [/\\ldots\b/g, "…"], [/\\dots\b/g, "…"],
+	[/\\infty\b/g, "∞"], [/\\sim\b/g, "~"], [/\\propto\b/g, "∝"],
+	[/\\%/g, "%"], [/\\\$/g, "$"], [/\\&/g, "&"], [/\\_/g, "_"],
+];
+
+function stripLatex(text) {
+	if (!text || typeof text !== "string") return text;
+	if (!/\\[a-zA-Z]|\\\[|\\\(/.test(text)) return text; // nothing LaTeX-ish; leave it entirely alone
+	let out = text;
+	// \text{...} / \mathrm{...} / \mathbf{...} -> their contents. Repeated
+	// so one level of nesting unwraps.
+	for (let i = 0; i < 3; i += 1) {
+		out = out.replace(/\\(?:text|mathrm|mathbf|mathit|textbf|textit|operatorname)\s*\{([^{}]*)\}/g, "$1");
+	}
+	// \frac{a}{b} -> a/b, before the generic symbol pass.
+	out = out.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "$1/$2");
+	for (const [re, ch] of LATEX_SYMBOLS) out = out.replace(re, ch);
+	// \( \) and \[ \] delimiters carry no currency ambiguity.
+	out = out.replace(/\\[()[\]]/g, "");
+	// Now the dollars. Only ones NOT followed by a digit, and only on
+	// lines that actually contained LaTeX — a line of pure currency is
+	// never touched.
+	out = out
+		.split("\n")
+		.map((line) => {
+			if (!/[×÷±≈≠≥≤→←⇒·…∞]/.test(line) && !/\\[a-zA-Z]/.test(line)) return line;
+			// Unwrapping `\text{ brands}` leaves the space that was already
+			// before it, so collapse the doubles it creates. Only on lines
+			// that were LaTeX; nobody else's spacing is touched.
+			return line.replace(/\$(?![\d.,])/g, "").replace(/ {2,}/g, " ");
+		})
+		.join("\n");
+	return out;
+}
+
 function toSlackMrkdwn(text) {
 	if (!text || typeof text !== "string") return text;
-	return eachOutsideFences(text, convertSegment);
+	return eachOutsideFences(stripLatex(text), convertSegment);
 }
 
 // Walk a Block Kit array and convert every mrkdwn text field in place.
@@ -190,4 +250,4 @@ function wrapClientFormatting(client) {
 	return client;
 }
 
-module.exports = { toSlackMrkdwn, convertBlocks, wrapClientFormatting, chunkForSlack, SLACK_TEXT_MAX };
+module.exports = { toSlackMrkdwn, convertBlocks, wrapClientFormatting, chunkForSlack, stripLatex, SLACK_TEXT_MAX };

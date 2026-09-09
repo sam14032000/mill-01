@@ -407,7 +407,7 @@ Held the research lead on BrowseComp 91.2%. At roughly $3/$15 it is 4× Flash's 
 
 **Monthly caps do not stop runaways.** The healthcheck polls daily spend and alerts to Slack above ~$8/day. Provider caps are the last line; `max_tokens` and loop iteration ceilings come first.
 
-**Per-key daily budgets (LiteLLM virtual keys, C-05).** `mill-flash` **$2.00/day**, `mill-research` $3.00/day, `mill-audit` $2.00/day, **`mill-code` $2.00/day** (proto's coding agent, D-58), all `budget_duration: "1d"`. `mill-flash` ran at $0.50/day through the D-51 build; **D-53 put a `flash-fast` agent-loop call on every conversational turn** (previously only slash commands and brainstorm hit `flash-fast`), the observed peak reached $0.50/day and tripped the cap, so it was raised to $1.00 via `/key/update` (key value preserved; `docs/build-guide.md` Part 7.3 updated same commit). **Raised to $2.00/day on 2 September 2026** — founders' call, same mechanism, key value preserved again.
+**Per-key daily budgets (LiteLLM virtual keys, C-05).** `mill-flash` **$2.00/day**, `mill-research` $3.00/day, `mill-audit` $2.00/day (Fable **5.1** since 9 Sep 2026, D-59), **`mill-code` $2.00/day** (proto's coding agent, D-58), all `budget_duration: "1d"`. `mill-flash` ran at $0.50/day through the D-51 build; **D-53 put a `flash-fast` agent-loop call on every conversational turn** (previously only slash commands and brainstorm hit `flash-fast`), the observed peak reached $0.50/day and tripped the cap, so it was raised to $1.00 via `/key/update` (key value preserved; `docs/build-guide.md` Part 7.3 updated same commit). **Raised to $2.00/day on 2 September 2026** — founders' call, same mechanism, key value preserved again.
 
 **Be honest about what that second peak was.** It was not founder traffic: an agent verification sweep ran ~25 test scaffolds with real model calls, some twice, and pushed the key to $1.0006 — which **blocked every conversational turn and command for the rest of the day**, because `mill-flash` backs all of them. Real use has still never approached $1.00/day. So this raise is headroom for build and verification work, not evidence that D-53's agent loop costs more than it measured, and it must not be read as one when the December pricing change (D-08) is reassessed.
 
@@ -737,6 +737,31 @@ The conversational system prompt now also tells the model: if the founder is ask
 - Telemetry: `search_initiated_by: "agent" | "founder" | null` on every relevant event. `EVAL.md` Layer 2 watches the agent-initiated rate — over ~1/5 of turns means the trigger wording is too loose, visible rather than inferred. Cost: the agent-loop call on every conversational turn put `mill-flash` at its $0.50/day cap, raised to $1.00 (D-23).
 
 **Revisit when:** `replied_without_tool` or the agent-initiated search rate trends wrong (both prompt levers now, visible in telemetry), or dsh reaches 1.0 and the `ops/dsh-investigation.md` spike clears (embed footprint + sandbox seam + session export), at which point swapping `agent.runTurn()` for a maintained loop is an explicit founders' decision.
+
+---
+
+### D-59 · The gate runs Fable 5.1; the rest of the constellation holds
+
+**Decision.** `audit` maps to `anthropic/claude-fable-5-1`. Every other stage is unchanged. Founders' call, on published benchmarks and founder judgement — the method D-14 sanctions, not a benchmarking programme.
+
+**Why this one change.** Fable 5.1 scores **57** on Artificial Analysis's Intelligence Index against Fable 5's **53** — now #1 overall, ahead of GPT-6 Astra (55) and Opus 5 (54) — for roughly 9% more per task at the same $10/$50 list price. Same vendor, same key, same jurisdiction, so D-17's posture is unchanged and no new failure mode is introduced. For a one-line change on the model deliberately reserved for the highest-leverage decision in the system, nothing else on the board comes close.
+
+**Explicitly NOT D-10's oscillation.** That warning is about *spreading Fable across stages or arguing it out of the gate*. This keeps a frontier model at the gate and swaps it for a better one from the same vendor. Recorded so a future session doesn't misread it as the recurrence D-10 predicts.
+
+**Why GPT-6 Astra was rejected for brainstorm and product**, which is what prompted the review:
+
+- **Cost, measured on this system's own traffic rather than estimated.** 52 conversational turns: 464,979 tokens in, 41,197 out. Gemini 3.7 Flash $0.503; GPT-6 Astra $6.710. **13.3×.** After Flash's December increase it is still 6.7×.
+- **Our workload is input-heavy** — an 11:1 in:out ratio, because every turn carries cached prefixes, specs and file trees. That is *why* our number disagrees with Artificial Analysis's cost-per-task (where Astra at $2.57 beats Fable at $5.62): their normalised task is output-heavy, ours is not. A benchmark's cost figure is not a bill.
+- **The refusal gate is a model-specific finding.** D-55 measured that presenting tools suppresses refusal, on Gemini, with a byte-identical message list. Swapping the model under brainstorm or product means re-running that isolation test, which D-55's own revisit clause requires.
+- **A third provider.** D-46 removed MiniMax to avoid "a fourth key to rotate, a fourth spend cap to watch, a fourth failure mode" for a marginal gain. This would add a third for one or two modes.
+
+**The rest of the constellation, and why each holds.** Capture stays Flash (native audio, D-36). Brainstorm stays `flash-fast` — Flash is the cheapest model above the production-quality line at $0.75/$3.75. Research stays `flash`: GPT-5.6 Terra is +2 Intelligence at 2.7× cost, which is D-11's rejected trade in new clothes. Proto keeps Opus 5 to plan (leads SWE-bench Verified at 96%) and Sonnet 5 to build ($2/$10 at the 95% tier). Indexing, the compressor and the veto stay `flash-fast` — Haiku 4.5 costs *more* ($1/$5) at Intelligence 22.
+
+**The one thing genuinely worth revisiting, on D-08's existing 31 December date.** GPT-5.6 Luna is Intelligence 43 against Flash's 45, at $0.20/$1.20. On our measured traffic that is $0.142 against Flash's $0.503 today — a saving too small to justify re-verifying the refusal gate and adding a provider. When Flash doubles to $1.50/$7.50 the gap becomes 7.1×, and it may be. Run that comparison then, with the refusal-gate isolation test as part of it.
+
+**Unresolved, deliberately not asserted:** OpenAI's data-retention posture against D-17 (Fable's is documented as mandatory 30-day with no zero-retention option). SWE-bench is also saturating — top models cluster within 1.0 points — so coding rank is weak signal now.
+
+**Revisit when:** 31 December 2026 with D-08, or a Fable release moves the gate again.
 
 ---
 

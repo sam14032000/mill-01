@@ -404,7 +404,10 @@ curl -s -X POST http://127.0.0.1:4000/key/generate \
        "max_budget":3.00,"budget_duration":"1d",
        "rpm_limit":60}'
 
-# the audit gate — tight, deliberately
+# the audit gate — tight, deliberately.
+# `audit` maps to anthropic/claude-fable-5-1 (Fable 5.1) as of 9 Sep 2026,
+# not claude-fable-5 — see D-23/D-59. Model id verified against the live
+# API: `claude-fable-5.1` 404s with "Did you mean claude-fable-5-1?".
 curl -s -X POST http://127.0.0.1:4000/key/generate \
   -H "Authorization: Bearer $MASTER" -H "Content-Type: application/json" \
   -d '{"key_alias":"mill-audit","models":["audit"],
