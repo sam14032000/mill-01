@@ -201,7 +201,17 @@ function timestamp() {
 	return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
 
+// git.js excludes `ideas/zz*` from every commit so verification scaffolds
+// cannot push junk ideas into the shared repo. Nothing extended that
+// protection to the GRAVEYARD, which is a founder's own file — and two
+// scaffolds duly wrote `zzGA`, `zzGD`, `zzKG` and `zzKH` into it across
+// two sessions, one of which reached a commit. Same exclusion, applied
+// where it was missing.
 function appendToGraveyard({ founder, id, assumption, reason }) {
+	if (/^zz/i.test(String(id))) {
+		console.warn(`audit: refusing to write test idea ${id} to ${founder}'s graveyard`);
+		return;
+	}
 	const graveyardPath = path.join(IDEAS_DIR, "..", "minds", founder, "graveyard.md");
 	const date = new Date().toISOString().slice(0, 10);
 	const line = `- ${date} — \`${id}\`: ${assumption}\n  Reason: ${reason}\n`;
