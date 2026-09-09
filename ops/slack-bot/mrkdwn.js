@@ -125,10 +125,16 @@ function stripLatex(text) {
 		.split("\n")
 		.map((line) => {
 			if (!/[×÷±≈≠≥≤→←⇒·…∞]/.test(line) && !/\\[a-zA-Z]/.test(line)) return line;
-			// Unwrapping `\text{ brands}` leaves the space that was already
-			// before it, so collapse the doubles it creates. Only on lines
-			// that were LaTeX; nobody else's spacing is touched.
-			return line.replace(/\$(?![\d.,])/g, "").replace(/ {2,}/g, " ");
+			// A `$` is currency only when a DIGIT follows: "$2B", "$15,000".
+			// `$.` and `$,` are LaTeX closers sitting before punctuation —
+			// an earlier draft protected those too and left "₹675 Cr$."
+			// in a founder's thread.
+			//
+			// The space collapse applies to INTERIOR runs only. Collapsing
+			// leading whitespace flattened nested bullets ("  •" -> " •"),
+			// which is indentation the founder can see.
+			const indent = line.match(/^\s*/)[0];
+			return indent + line.slice(indent.length).replace(/\$(?!\d)/g, "").replace(/ {2,}/g, " ");
 		})
 		.join("\n");
 	return out;
