@@ -114,7 +114,37 @@ async function reportBuild({ client, channel, chatTs, id, res, say }) {
 	if (res.untouched.length) lines.push(`_${res.untouched.length} other file${res.untouched.length === 1 ? "" : "s"} untouched._`);
 	if (res.cost) lines.push(`_Built for $${Number(res.cost).toFixed(3)}._`);
 	const touchNote = res.touchN >= TOUCH_CAP ? `\n\n_That was touch ${TOUCH_CAP} — the next one will be refused._` : `\n\n_Touch ${res.touchN}/${TOUCH_CAP}._`;
-	await say(`🔨 *Built.*\n${lines.join("\n")}${touchNote}`);
+
+	// A MOUNT BUTTON, because otherwise there is no way to ask for one.
+	// The build report used to end with "or mount it to look at" while
+	// `@Mill mount` didn't parse and the only Mount button lived on the old
+	// slash-command path — the message pointed at something that did not
+	// exist. Offered only when this idea doesn't already hold the slot;
+	// when it does, the refresh below reports the URL instead.
+	const mountMod = require("./mount");
+	const holder = mountMod.findMountedIdea();
+	const offerMount = !holder || holder.id !== id;
+	await say(
+		`🔨 *Built.*\n${lines.join("\n")}${touchNote}`,
+		offerMount
+			? [
+					{ type: "section", text: { type: "mrkdwn", text: `🔨 *Built.*\n${lines.join("\n")}${touchNote}` } },
+					{
+						type: "actions",
+						block_id: "proto_built",
+						elements: [
+							{
+								type: "button",
+								action_id: "proto_mount",
+								style: "primary",
+								text: { type: "plain_text", text: "Mount it" },
+								value: `${id}::${res.touchN}::${mountMod.DEFAULT_MIN}`,
+							},
+						],
+					},
+				]
+			: null,
+	);
 
 	const { commitAndPush } = require("./git");
 	await commitAndPush([`ideas/${id}/proto/${res.touchN}`], `idea ${id}: proto touch ${res.touchN}`, (r) =>
@@ -127,8 +157,7 @@ async function reportBuild({ client, channel, chatTs, id, res, say }) {
 	// STALE PREVIEW rather than passed over: the build did land, and
 	// implying the preview shows it when it doesn't is the class of false
 	// claim this project keeps having to correct.
-	const mountMod = require("./mount");
-	const mounted = mountMod.findMountedIdea();
+	const mounted = holder;
 	if (mounted?.id === id) {
 		const r = await mountMod.refreshMount({ id, touchN: res.touchN }).catch((e) => ({ ok: false, reason: e.message }));
 		if (r.ok) {

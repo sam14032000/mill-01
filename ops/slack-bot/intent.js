@@ -15,10 +15,10 @@
 //   composeIdeaInput        -- merge the invoking text with thread context
 //   isAnaphoric             -- /find's anaphora resolver (commands/find.js)
 
-const ACTIONS = ["attack", "find", "cross", "blindspot", "themes", "test", "proto", "spinoff", "audit", "save", "ask"];
+const ACTIONS = ["attack", "find", "cross", "blindspot", "themes", "test", "proto", "spinoff", "audit", "save", "ask", "mount"];
 
 // Actions that need a project (not usable in a bare #chats session).
-const PROJECT_ONLY = new Set(["test", "proto", "spinoff", "audit", "save", "ask"]);
+const PROJECT_ONLY = new Set(["test", "proto", "spinoff", "audit", "save", "ask", "mount"]);
 
 // The `@Mill <word> ...` form. First word after the mention, mapped to an
 // action. Returns { action, rest } or null. Deliberate invocation --
@@ -38,6 +38,12 @@ const MENTION_ALIASES = {
 	deck: "deck", render: "deck",
 	// `@Mill chat <title>` opens a new chat inside a project channel.
 	chat: "chat", newchat: "chat",
+	// `@Mill mount [minutes]` puts the latest prototype behind the ngrok
+	// slot. Handled directly in index.js like `mode`/`save`/`deck`, not
+	// through command-shim's HANDLERS map. Without this there was no way
+	// to ask for a mount at all outside the old slash-command path, while
+	// the build report cheerfully said "or mount it to look at".
+	mount: "mount", preview: "mount",
 };
 function parseMention(textAfterMention) {
 	const m = String(textAfterMention || "").trim().match(/^(\S+)\s*([\s\S]*)$/);

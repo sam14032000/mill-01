@@ -335,6 +335,34 @@ app.event("app_mention", async ({ event, client }) => {
 		await postDeckControl(client, project.id, chatTs, event.channel);
 		return;
 	}
+	if (parsed.action === "mount") {
+		const project = findIdeaByChannel(event.channel);
+		if (!project) {
+			await post("`mount` puts a prototype behind the preview URL — it only works inside a project.");
+			return;
+		}
+		const st = readState(project.id) || {};
+		const touchN = st.touch_count ?? 0;
+		if (!touchN) {
+			await post("Nothing to mount yet — build a prototype first.");
+			return;
+		}
+		const mins = Number(String(parsed.rest || "").match(/\d+/)?.[0]) || undefined;
+		const { mount } = require("./mount");
+		await mount({
+			id: project.id,
+			touchN,
+			byFounder: founderForUserId(event.user) || "a founder",
+			minutes: mins,
+			client,
+			channel: event.channel,
+			threadTs: event.thread_ts || null,
+		}).catch(async (e) => {
+			console.error(`mount via mention failed for ${project.id}: ${e.message}`);
+			await post(`Couldn't mount: ${e.message}`);
+		});
+		return;
+	}
 	if (parsed.action === "save") {
 		const project = findIdeaByChannel(event.channel);
 		if (!project) {
