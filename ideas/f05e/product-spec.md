@@ -135,7 +135,4 @@ Enable mid-market Indian consumer brands and their Export Management Agencies (E
 ---
 
 ## Changed in this update
-- **Section 1, 2 & 4 (REVISED):** Corrected Indian export documentation terminology from "Commercial Bill of Entry" to "Commercial Shipping Bill"; updated destination filing references from FDA Prior Notice (applicable to food/supplements) to US MoCRA Product Listing (PPLA), Facility FEI registration, and ACE PGA message sets.
-- **Section 3 (APPENDED):** Added the Rules Automation Rate metric ($\ge 80\%$ deterministic validation checks) and aligned lead conversion threshold to $\ge 40\%$.
-- **Section 4 & 5 (REVISED & APPENDED):** Added on-pack marketing/therapeutic claim scanning (US-4) to detect Cosmetic-to-OTC-Drug reclassification risks (Chapter 33 vs Chapter 30) and updated screen cards on Page 4 and Page 5.
-- **Section 6 (APPENDED):** Added explicit scope tradeoff decisions on the Regulatory Boundary (pre-flight defect proofing vs sovereign discretionary holds) and Export Documentation scope.
+- **Sections 1–6 (UNCHANGED):** Verified current specification against the latest research base; confirmed all target metrics, regulatory scopes, and UX flows remain up to date without new changes required.
