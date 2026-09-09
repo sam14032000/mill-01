@@ -67,7 +67,12 @@ async function handleProtoMessage({ session, message, client, text }) {
 		await say(
 			res.missing
 				? "The coding agent isn't available on this box right now, so I can't plan a change. The build log and files are untouched."
-				: `Couldn't plan that: ${res.reason}`,
+				: res.budget
+					// A budget stop is not an error — nothing broke and nothing
+					// was spent. Say so plainly rather than dressing it as a
+					// failure the founder should debug.
+					? `💰 ${res.reason}`
+					: `Couldn't plan that: ${res.reason}`,
 		);
 		return true;
 	}
@@ -101,7 +106,7 @@ async function runBounded(fn, label) {
 // reported is read off the TREE, not off what the plan forecast.
 async function reportBuild({ client, channel, chatTs, id, res, say }) {
 	if (!res.ok) {
-		await say(`The build didn't land: ${res.reason}`);
+		await say(res.budget ? `💰 ${res.reason}` : `The build didn't land: ${res.reason}`);
 		return;
 	}
 	const { updateState } = require("./ideas");

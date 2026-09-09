@@ -55,6 +55,10 @@ const BUILD_MODEL = process.env.MILL_PROTO_BUILD_MODEL || "claude-sonnet-5";
 const MAX_USD_PLAN = Number(process.env.MILL_PROTO_PLAN_USD) || 0.5;
 const MAX_USD_BUILD = Number(process.env.MILL_PROTO_BUILD_USD) || 1.0;
 const MAX_TURNS = Number(process.env.MILL_PROTO_MAX_TURNS) || 12;
+// A plan READS and reasons; it never writes. It does not need a build's
+// headroom, and every extra turn re-sends the whole brief plus the
+// transcript so far — which is where the cost compounds.
+const MAX_TURNS_PLAN = Number(process.env.MILL_PROTO_MAX_TURNS_PLAN) || 6;
 const DEADLINE_MS = Number(process.env.MILL_PROTO_DEADLINE_MS) || 600_000;
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -106,7 +110,7 @@ function childEnv(apiKey) {
 	};
 }
 
-function baseArgs({ cwd, model, effort }) {
+function baseArgs({ cwd, model, effort, maxTurns = MAX_TURNS }) {
 	return [
 		"-p",
 		"--output-format", "json",
@@ -114,7 +118,7 @@ function baseArgs({ cwd, model, effort }) {
 		"--bare",
 		"--model", model,
 		"--effort", EFFORTS.includes(effort) ? effort : DEFAULT_EFFORT,
-		"--max-turns", String(MAX_TURNS),
+		"--max-turns", String(maxTurns),
 		"--add-dir", cwd,
 	];
 }
@@ -156,6 +160,56 @@ function parseEnvelope(stdout) {
 	}
 }
 
+
+// PRE-FLIGHT BUDGET CHECK.
+//
+// A founder approved a plan, tapped Build, and the build died mid-flight
+// on "Budget has been exceeded" — losing the plan they had just read and
+// agreed to. The daily cap is the right guard (D-23: provider caps are
+// the last line), but hitting it AFTER the expensive part is the worst
+// place to find out.
+//
+// So: ask what's left before spawning. Deliberately FAILS OPEN — if the
+// proxy can't be reached the real cap still protects, and a monitoring
+// hiccup must not block a founder's build.
+const EST_PLAN_USD = Number(process.env.MILL_PROTO_EST_PLAN_USD) || 0.3;
+const EST_BUILD_USD = Number(process.env.MILL_PROTO_EST_BUILD_USD) || 0.7;
+
+async function budgetRemaining(apiKey) {
+	try {
+		const r = await fetch(`${BASE_URL}/key/info`, {
+			headers: { Authorization: `Bearer ${apiKey}` },
+			signal: AbortSignal.timeout(8000),
+		});
+		if (!r.ok) return null;
+		const info = (await r.json())?.info || {};
+		if (typeof info.max_budget !== "number") return null;
+		const spend = Number(info.spend || 0);
+		return { spend, max: info.max_budget, remaining: info.max_budget - spend, resetAt: info.budget_reset_at || null };
+	} catch {
+		return null;
+	}
+}
+
+function budgetRefusal(b, need, label) {
+	const resets = b.resetAt ? ` It resets at ${String(b.resetAt).slice(11, 16)} UTC.` : "";
+	// "$-0.17 left" is arithmetic, not English. Over the cap is a different
+	// sentence from nearly at it.
+	const left =
+		b.remaining <= 0
+			? `Today's $${b.max.toFixed(2)} coding budget is used up`
+			: `Only $${b.remaining.toFixed(2)} left of today's $${b.max.toFixed(2)} coding budget`;
+	// A refused BUILD leaves an approved plan waiting; a refused PLAN
+	// leaves nothing to reassure the founder about.
+	const tail = label === "build" ? " Nothing was spent, and your approved plan is still here." : " Nothing was spent.";
+	return {
+		ok: false,
+		budget: true,
+		remaining: b.remaining,
+		reason: `${left}, and a ${label} usually costs about $${need.toFixed(2)}, so I haven't started one.${resets}${tail}`,
+	};
+}
+
 // PLAN. Read-only -- verified by hashing a tree before and after: both
 // files came back byte-identical. A plan that can write is not a gate.
 // `--session-id` CREATES a session; `--resume` continues one. Passing
@@ -177,11 +231,14 @@ const ALREADY_IN_USE = /already in use/i;
 const NO_SUCH_SESSION = /no conversation found|session not found|no such session/i;
 
 async function plan({ cwd, request, brief = "", sessionId = null, resume = false, effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
-	if (!apiKey) return { ok: false, reason: "MILL_CODE_KEY not set" };
+	const pre = preflight(apiKey);
+	if (pre) return { ...pre, sessionId: sessionId || null };
+	const budget = await budgetRemaining(apiKey);
+	if (budget && budget.remaining < EST_PLAN_USD) return budgetRefusal(budget, EST_PLAN_USD, "plan");
 	const sid = sessionId || newSessionId();
 	const build = (asResume) => {
 		const a = [
-			...baseArgs({ cwd, model: PLAN_MODEL, effort }),
+			...baseArgs({ cwd, model: PLAN_MODEL, effort, maxTurns: MAX_TURNS_PLAN }),
 			"--permission-mode", "plan",
 			...sessionArgs(sid, asResume),
 			"--max-budget-usd", String(MAX_USD_PLAN),
@@ -242,8 +299,13 @@ async function plan({ cwd, request, brief = "", sessionId = null, resume = false
 // BUILD. Resumes the SAME session the plan was made in, so it is acting
 // on its own plan rather than re-deriving one from a summary.
 async function build({ cwd, sessionId, request = "Implement the plan you just described.", brief = "", effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
-	if (!apiKey) return { ok: false, reason: "MILL_CODE_KEY not set" };
+	const pre = preflight(apiKey);
+	if (pre) return pre;
 	if (!sessionId) return { ok: false, reason: "no session to resume" };
+	// Checked BEFORE the build, so an approved plan is never burned by a
+	// cap the founder could have seen coming.
+	const budget = await budgetRemaining(apiKey);
+	if (budget && budget.remaining < EST_BUILD_USD) return budgetRefusal(budget, EST_BUILD_USD, "build");
 	const args = [
 		...baseArgs({ cwd, model: BUILD_MODEL, effort }),
 		"--permission-mode", "acceptEdits",
@@ -273,20 +335,40 @@ async function build({ cwd, sessionId, request = "Implement the plan you just de
 
 // Is the engine usable at all? `/proto` must never hard-fail on its
 // absence -- it falls back to the flash-fast tree path.
+let availableCache = null;
 function available() {
 	if (!process.env.MILL_CODE_KEY) return false;
+	if (availableCache !== null) return availableCache;
 	try {
 		require("node:child_process").execFileSync(BIN, ["--version"], { stdio: "ignore", timeout: 15_000 });
-		return true;
+		availableCache = true;
 	} catch {
-		return false;
+		availableCache = false;
 	}
+	return availableCache;
+}
+// Tests flip MILL_CLAUDE_BIN between runs.
+function resetAvailableCache() {
+	availableCache = null;
+}
+
+// The binary check comes BEFORE the budget check, and the order matters.
+// A missing binary must report `missing` so the caller can fall back to
+// the flash-fast path — which bills a DIFFERENT key with its own budget.
+// Checking budget first would refuse on a cap that has nothing to do with
+// the fallback, and the founder would get nothing at all.
+function preflight(apiKey, need, label) {
+	if (!apiKey) return { ok: false, reason: "MILL_CODE_KEY not set" };
+	if (!available()) return { ok: false, missing: true, reason: `${BIN} is not available on this box` };
+	return null;
 }
 
 module.exports = {
 	plan,
+	budgetRemaining,
 	build,
 	available,
+	resetAvailableCache,
 	newSessionId,
 	childEnv,
 	baseArgs,
