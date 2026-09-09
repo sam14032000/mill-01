@@ -158,21 +158,51 @@ function parseEnvelope(stdout) {
 
 // PLAN. Read-only -- verified by hashing a tree before and after: both
 // files came back byte-identical. A plan that can write is not a gate.
-async function plan({ cwd, request, brief = "", sessionId = null, effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
+// `--session-id` CREATES a session; `--resume` continues one. Passing
+// --session-id for a second turn fails with "Session ID <uuid> is already
+// in use", which is exactly what a founder hit on their first [Adjust]:
+// the bootstrap created the session, the adjust tried to create it again.
+// Probed to be sure of the semantics rather than inferred from the error:
+// --session-id on a fresh id works, on the same id fails, and --resume on
+// it works AND remembers the earlier turn.
+//
+// The two are also self-healing in both directions, because a session
+// file can be pruned or a caller can be wrong about which state it is in:
+// "already in use" retries as a resume, and a missing session retries as
+// a new one. Neither should happen; both are cheap to survive.
+function sessionArgs(sid, resume) {
+	return resume ? ["--resume", sid] : ["--session-id", sid];
+}
+const ALREADY_IN_USE = /already in use/i;
+const NO_SUCH_SESSION = /no conversation found|session not found|no such session/i;
+
+async function plan({ cwd, request, brief = "", sessionId = null, resume = false, effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
 	if (!apiKey) return { ok: false, reason: "MILL_CODE_KEY not set" };
 	const sid = sessionId || newSessionId();
-	const args = [
-		...baseArgs({ cwd, model: PLAN_MODEL, effort }),
-		"--permission-mode", "plan",
-		"--session-id", sid,
-		"--max-budget-usd", String(MAX_USD_PLAN),
-		"--json-schema", JSON.stringify(PLAN_SCHEMA),
-	];
-	if (brief) args.push("--append-system-prompt", brief);
+	const build = (asResume) => {
+		const a = [
+			...baseArgs({ cwd, model: PLAN_MODEL, effort }),
+			"--permission-mode", "plan",
+			...sessionArgs(sid, asResume),
+			"--max-budget-usd", String(MAX_USD_PLAN),
+			"--json-schema", JSON.stringify(PLAN_SCHEMA),
+		];
+		if (brief) a.push("--append-system-prompt", brief);
+		return a;
+	};
 
 	let res;
+	const attempt = async (asResume) => withDeadline(run({ args: build(asResume), cwd, apiKey, prompt: request }), DEADLINE_MS, "proto plan");
 	try {
-		res = await withDeadline(run({ args, cwd, apiKey, prompt: request }), DEADLINE_MS, "proto plan");
+		res = await attempt(resume);
+		const out = `${res.stdout || ""}${res.stderr || ""}`;
+		if (!res.ok && ALREADY_IN_USE.test(out)) {
+			console.warn(`code-agent: session ${sid} exists — retrying as a resume`);
+			res = await attempt(true);
+		} else if (!res.ok && NO_SUCH_SESSION.test(out)) {
+			console.warn(`code-agent: session ${sid} is gone — starting it fresh`);
+			res = await attempt(false);
+		}
 	} catch (err) {
 		if (err instanceof DeadlineError) return { ok: false, reason: `planning stalled past ${Math.round(DEADLINE_MS / 1000)}s`, sessionId: sid };
 		return { ok: false, reason: err.message, sessionId: sid };
