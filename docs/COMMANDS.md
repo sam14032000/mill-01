@@ -226,7 +226,12 @@ The prompt asks for **behaviour, not intent** (I1) — what people currently do 
 - **Grading is the audit's, from raw notes.** `field-intent` = "they said they would". `field-behaviour` = observed current spend / a workaround / a price named unprompted. `field-committed` = paid, pre-ordered, signed up, or did the thing (incl. in `ideas/<id>/outcomes.md`, I2).
 - Malformed JSON → one retry, then report failure. Never post an unvalidated verdict.
 
-**On `kill`:** append to `minds/<founder>/graveyard.md` with id, assumption, reason, date. Post to `#graveyard`. State → `killed`, terminal.
+**On `kill`: the verdict is a recommendation, not an action (D-60).** State goes to `audited` and `pending_kill` records the recommendation; **nothing** is written to a graveyard, posted to `#graveyard` or archived. The thread gets the verdict plus `[Kill it]` / `[Keep it open]`.
+
+- **`[Kill it]`** → graveyard entry, `#graveyard` post, channel archived, state → `killed`, terminal. Records who killed it.
+- **`[Keep it open]`** → state stays `audited`, the override is recorded with who made it. The verdict stays on file — overriding the gate is worth being able to look back on.
+
+The gate is unchanged (D-28: one gate, its judgement, recorded). What moved is who pulls the trigger, the same way D-30 makes a profile diff a proposal rather than an edit.
 
 ---
 

@@ -174,6 +174,7 @@ For each decision below, the falsifier states what evidence would show it wrong.
 |---|---|
 | **D-10** Fable at the gate | Kill rate < 30% over two months — the gate is a $24/month tollbooth on a road you were driving anyway. Or: killed ideas keep getting resurrected, meaning the gate is wrong rather than strict. |
 | **D-33** Evidence merge | Field-evidence share is flat near zero after three months. Everything caps at `narrow`, the loop never completes, and the rule is blocking rather than raising the bar. |
+| **D-60** Kill is confirmed, not executed | Founders decline the gate's kill recommendation on most verdicts — the gate is miscalibrated, or nobody trusts it. Track `kill` verdicts against executed kills; the gap is the signal. |
 | **D-28** Research ungated | Research spend exceeds audit spend by more than 2× while kill rate stays high — you are researching things that were obviously dead. |
 | **D-27** Cross-pollination | `/cross` and `/blindspot` invocation counts near zero. Founders aren't using the feature that justified building profiles at all. |
 | **D-26/D-30** Profiles | Diff approval rate below 50%, or profiles unedited by hand for two months. Either the profiles are wrong or nobody trusts them. |

@@ -740,6 +740,24 @@ The conversational system prompt now also tells the model: if the founder is ask
 
 ---
 
+### D-60 · A kill verdict is a recommendation; the founder pulls the trigger
+
+**Decision.** `/audit` no longer executes a `kill`. The verdict is posted with `[Kill it]` / `[Keep it open]`; state goes to `audited` with a `pending_kill` record, and the graveyard write, the `#graveyard` post and the channel archive all move behind the founder's tap.
+
+**Why, and it was found the hard way.** On 9 September 2026 the gate returned `kill` on `f05e` — the project the founders show other founders — and the system acted on it unasked: state to `killed`, an entry in `minds/saksham/graveyard.md`, a post in `#graveyard`, and the founder discovering it afterwards when mode switching started refusing with *"`f05e` is killed — nothing to switch"*.
+
+**This does not weaken D-28.** There is still one gate, it still runs on Fable, its judgement is still recorded, and the auditor still never sees the brainstorm transcript. The verdict from that run is kept at `ideas/f05e/audit-20260909-0552.json` precisely because the *analysis was good* — it caught that no research pass had ever run and that the assumption had been orphaned by the product spec's pivot. What was wrong was the action, not the reasoning.
+
+**The principle is D-30's, applied one layer up.** A profile diff is proposed rather than applied because "the profile shapes every brainstorm downstream" and the edit is the founder's. A kill writes to a founder's graveyard, archives their channel and ends the idea — strictly more consequential, and strictly harder to walk back. If a diff needs a human in the loop, a kill certainly does.
+
+**D-24 still holds and is worth restating so this isn't read as softening it.** A kill is a success; it returns founder attention, which is scarcer than the money. Nothing here makes killing harder to *choose* — the button is one tap and the recommendation is unhedged. It makes killing something a founder does rather than something that happens to them.
+
+**Kill-rate tracking gains a distinction rather than losing one.** `EVAL.md` and D-28 track kill rate as the signal that the gate is earning its budget share. That now splits into *verdicts that were `kill`* and *kills a founder executed*, and the gap between them is a new signal: a gate whose kills are routinely declined is either miscalibrated or being ignored, and either is worth knowing. The verdict is kept on file on a decline for exactly this reason.
+
+**Revisit when:** the decline rate is high enough to suggest the gate is miscalibrated (re-cut the audit prompt, don't remove the confirmation), or founders find the extra tap is friction they never wanted — which would be them asking for it back, not an inference from the data.
+
+---
+
 ### D-59 · The gate runs Fable 5.1; the rest of the constellation holds
 
 **Decision.** `audit` maps to `anthropic/claude-fable-5-1`. Every other stage is unchanged. Founders' call, on published benchmarks and founder judgement — the method D-14 sanctions, not a benchmarking programme.

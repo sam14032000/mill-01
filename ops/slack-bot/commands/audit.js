@@ -142,6 +142,59 @@ function enforceEvidenceGate(verdictObj) {
 	return { verdict: verdictObj, downgraded: false };
 }
 
+
+// What a kill actually does, once a founder has approved it. Extracted so
+// the button is the only trigger and nothing can drift into doing half of
+// it: graveyard, #graveyard post, channel archive, terminal state.
+async function executeKill({ id, client, byFounder = null }) {
+	const state = readState(id) || {};
+	const pending = state.pending_kill || {};
+	const founder = state.founder;
+	const assumption = readAssumption(id) || state.assumption || "(no assumption recorded)";
+	const reason = pending.reason || "killed by the founder after an audit verdict";
+
+	updateState(id, { state: "killed", pending_kill: null, killed_at: new Date().toISOString(), killed_by: byFounder || founder });
+	if (founder) appendToGraveyard({ founder, id, assumption, reason });
+
+	const graveyardChannel = channelId("graveyard");
+	if (graveyardChannel) {
+		await client.chat
+			.postMessage({
+				channel: graveyardChannel,
+				text: `\`${id}\` killed — ${reason}${state.channel_id ? ` (was <#${state.channel_id}>)` : ""}`,
+			})
+			.catch((e) => console.error(`audit: graveyard post failed for ${id}: ${e?.data?.error || e.message}`));
+	}
+
+	// 18.1: archive the project channel, after the verdict is posted.
+	if (state.channel_id) {
+		await client.conversations.archive({ channel: state.channel_id }).catch(async (e) => {
+			const why = e?.data?.error || e.message;
+			console.error(`audit: archive failed for ${id}: ${why}`);
+			if (graveyardChannel) {
+				await client.chat
+					.postMessage({ channel: graveyardChannel, text: `⚠️ couldn't archive <#${state.channel_id}> for killed \`${id}\` (${why}) — archive it by hand. The verdict stands.` })
+					.catch(() => {});
+			}
+		});
+	}
+
+	await commitAndPush(
+		[`ideas/${id}/state.json`, `minds/${founder}/graveyard.md`],
+		`idea ${id}: killed by ${byFounder || founder} after audit`,
+		(r) => console.error(`audit: kill commit failed: ${r}`),
+	).catch(() => {});
+
+	return { ok: true, id, reason };
+}
+
+// The founder declines the recommendation. The verdict stays on file --
+// overriding the gate is a decision worth being able to look back on.
+function keepOpen({ id, byFounder = null }) {
+	updateState(id, { state: "audited", pending_kill: null, kill_declined_at: new Date().toISOString(), kill_declined_by: byFounder });
+	return { ok: true, id };
+}
+
 function timestamp() {
 	const d = new Date();
 	const pad = (n) => String(n).padStart(2, "0");
@@ -358,19 +411,28 @@ async function handleAuditCommand({ command, ack, client }) {
 			"utf8",
 		);
 
-		if (verdict.verdict === "kill") {
-			updateState(id, { state: "killed" });
-			if (ideaFounder) {
-				appendToGraveyard({
-					founder: ideaFounder,
-					id,
-					assumption,
-					reason: verdict.strongest_failure_reason,
-				});
-			}
-		} else {
-			updateState(id, { state: "audited" });
-		}
+		// A KILL VERDICT IS A RECOMMENDATION, NOT AN ACTION.
+		//
+		// This used to set state to `killed`, write the graveyard entry,
+		// post to #graveyard and archive the channel, all on the model's
+		// say-so. It did that to f05e -- the project other founders are
+		// shown -- and the founder found out afterwards.
+		//
+		// The verdict is still the gate's judgement and it is still
+		// recorded; D-28's "one gate between research and prototype" is
+		// unchanged. What moved is who pulls the trigger. Killing writes to
+		// a founder's graveyard, archives their channel and ends the idea:
+		// that is the founders' call to make, in the same way D-30 makes a
+		// profile diff a proposal rather than an edit.
+		//
+		// State goes to `audited` either way; `pending_kill` records that a
+		// kill was recommended and is what the button acts on.
+		updateState(
+			id,
+			verdict.verdict === "kill"
+				? { state: "audited", pending_kill: { recommended_at: new Date().toISOString(), reason: verdict.strongest_failure_reason, stamp } }
+				: { state: "audited", pending_kill: null },
+		);
 
 		await commitAndPush(
 			[`ideas/${id}`, ideaFounder ? `minds/${ideaFounder}/graveyard.md` : null].filter(Boolean),
@@ -420,27 +482,37 @@ async function handleAuditCommand({ command, ack, client }) {
 		// a card update on an archived channel would fail.
 		if (pdest.project) await upsertStateCard(client, id, { latestTs: verdictPost?.ts, latestChannel: researchChannel });
 
-		if (verdict.verdict === "kill" && graveyardChannel) {
-			await client.chat.postMessage({
-				channel: graveyardChannel,
-				text: `\`${id}\` killed — ${verdict.strongest_failure_reason}${pdest.project ? ` (was <#${pdest.project.channel_id}>)` : ""}`,
-			});
-		}
-
-		// 18.1: archive the project channel on a kill, after the verdict is
-		// posted. The verdict stands even if archiving fails.
-		if (verdict.verdict === "kill" && pdest.project?.channel_id) {
-			try {
-				await client.conversations.archive({ channel: pdest.project.channel_id });
-			} catch (archErr) {
-				const why = archErr?.data?.error || archErr?.message || archErr;
-				console.error(`audit: channel archive failed for ${id}: ${why}`);
-				if (graveyardChannel) {
-					await client.chat
-						.postMessage({ channel: graveyardChannel, text: `⚠️ couldn't archive <#${pdest.project.channel_id}> for killed \`${id}\` (${why}) — archive it by hand. The verdict stands.` })
-						.catch(() => {});
-				}
-			}
+		// No #graveyard post and no archive here any more — both belong to
+		// executeKill, behind the founder's tap.
+		//
+		// A kill RECOMMENDATION gets buttons. Nothing is written to a
+		// graveyard, nothing is archived, and the idea stays reachable
+		// until a founder says so.
+		if (verdict.verdict === "kill") {
+			await client.chat
+				.postMessage({
+					channel: researchChannel,
+					thread_ts: auditThreadTs || research.json.slack_thread_ts,
+					text: `The gate recommends killing \`${id}\`. That's yours to decide, not mine to do.`,
+					blocks: [
+						{
+							type: "section",
+							text: {
+								type: "mrkdwn",
+								text: `*The gate recommends killing \`${id}\`.*\nThat's yours to decide — nothing has been written to your graveyard and the channel is untouched.\n\n_A kill is a success under D-24: it returns founder attention. But it ends the idea, so you pull the trigger._`,
+							},
+						},
+						{
+							type: "actions",
+							block_id: "audit_kill_decision",
+							elements: [
+								{ type: "button", action_id: "audit_kill_confirm", style: "danger", text: { type: "plain_text", text: "Kill it" }, value: id },
+								{ type: "button", action_id: "audit_kill_decline", text: { type: "plain_text", text: "Keep it open" }, value: id },
+							],
+						},
+					],
+				})
+				.catch((e) => console.error(`audit: kill-decision post failed for ${id}: ${e?.data?.error || e.message}`));
 		}
 	} catch (err) {
 		console.error("audit command failed:", err);
@@ -469,4 +541,6 @@ module.exports = {
 	parseAuditResponse,
 	appendToGraveyard,
 	enforceEvidenceGate,
+	executeKill,
+	keepOpen,
 };

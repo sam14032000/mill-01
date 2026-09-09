@@ -414,6 +414,56 @@ app.event("app_mention", async ({ event, client }) => {
 });
 
 // I4: [Kill it] on a staleness nudge -- always reason `stale`.
+// ---- the audit's kill recommendation: the founder decides ------------
+//
+// A kill verdict used to execute itself — state to `killed`, graveyard
+// written, #graveyard posted, channel archived — on the model's say-so.
+// It did that to the reference project and the founder found out after.
+// The verdict is still the gate's judgement and is still recorded; what
+// moved is who pulls the trigger, the same way D-30 makes a profile diff
+// a proposal rather than an edit.
+app.action("audit_kill_confirm", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const id = action.value;
+		const who = founderForUserId(body.user?.id);
+		const res = await require("./commands/audit").executeKill({ id, client: app.client, byFounder: who });
+		await buttonResolve.resolveMessage({
+			client, body,
+			outcomeText: res.ok ? `💀 Killed by ${who || "a founder"} — written to the graveyard, channel archived.` : "⚠️ Kill failed — check logs",
+		});
+	} catch (e) {
+		console.error("audit_kill_confirm failed:", e?.data?.error || e.message);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Kill failed — check logs. The idea is untouched." });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
+app.action("audit_kill_decline", async ({ ack, body, client, action }) => {
+	await ack();
+	if (!buttonResolve.claimTap(body)) return;
+	try {
+		const id = action.value;
+		const who = founderForUserId(body.user?.id);
+		require("./commands/audit").keepOpen({ id, byFounder: who });
+		// The verdict stays on file. Overriding the gate is a decision
+		// worth being able to look back on — EVAL.md's kill rate now
+		// separates "the gate said kill" from "a founder killed it", which
+		// is a better signal than either alone.
+		await buttonResolve.resolveMessage({
+			client, body,
+			outcomeText: `Kept open by ${who || "a founder"} — the verdict stays on file.`,
+		});
+	} catch (e) {
+		console.error("audit_kill_decline failed:", e?.data?.error || e.message);
+		await buttonResolve.resolveMessage({ client, body, outcomeText: "⚠️ Couldn't record that — check logs" });
+	} finally {
+		buttonResolve.releaseTap(body);
+	}
+});
+
 app.action("stale_kill", async ({ ack, body, client }) => {
 	await ack();
 	if (!buttonResolve.claimTap(body)) return;
