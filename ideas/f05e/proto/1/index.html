@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pallet — FBA Pre-Clearance Orchestrator (Prototype)</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">Pallet <span class="tag">prototype</span></div>
+  <nav class="mainnav">
+    <a href="#/forwarder" data-route="forwarder">Forwarder Pipeline</a>
+    <a href="#/agency" data-route="agency">Agency Hub</a>
+    <a href="#/intake" data-route="intake">SKU Intake</a>
+    <a href="#/audit" data-route="audit">Audit & Remediation</a>
+    <a href="#/pack" data-route="pack">Export Pack</a>
+    <a href="#/dashboard" data-route="dashboard">Brand Dashboard</a>
+  </nav>
+  <button class="logbtn" id="openLog">Session Log (<span id="logCount">0</span>)</button>
+</header>
+
+<main id="app"></main>
+
+<!-- ============ SESSION LOG DRAWER (assumption-testing instrument) ============ -->
+<aside class="drawer" id="logDrawer">
+  <div class="drawer-head">
+    <h3>Discovery Session Log</h3>
+    <button id="closeLog">✕</button>
+  </div>
+  <p class="drawer-sub">Fill this in live, on the call, right after showing the Audit &amp; Remediation screen. It writes to a local table you can read off after the call ends.</p>
+
+  <form id="screenerForm" class="screener">
+    <label>Brand / company name
+      <input type="text" name="companyName" placeholder="e.g. Kavala Skin" required />
+    </label>
+
+    <label>Cross-border orders per month (rough)
+      <select name="ordersPerMonth" required>
+        <option value="">Select…</option>
+        <option value="<300">Under 300</option>
+        <option value="300-2000">300 – 2,000</option>
+        <option value=">2000">Over 2,000</option>
+      </select>
+    </label>
+
+    <label>Who currently handles export docs / e-BRC reconciliation?
+      <select name="whoHandles" required>
+        <option value="">Select…</option>
+        <option value="inhouse">In-house team</option>
+        <option value="ca_retainer">CA on monthly retainer</option>
+        <option value="customs_agent">Third-party customs/CHA agent</option>
+        <option value="aggregator_free">Free tools bundled with logistics aggregator (Shiprocket X etc.)</option>
+        <option value="nobody">Nobody / ad hoc</option>
+      </select>
+    </label>
+
+    <label>Monthly spend specifically on export documentation + e-BRC reconciliation
+      <select name="monthlySpend" required>
+        <option value="">Select…</option>
+        <option value="0">₹0 (uses free aggregator tools)</option>
+        <option value="<10k">Under ₹10,000</option>
+        <option value="10-25k">₹10,000 – ₹25,000</option>
+        <option value=">25k">Over ₹25,000</option>
+      </select>
+    </label>
+
+    <label>Would they commit to a paid pilot today? (₹25,000 setup + ₹15,000/run)
+      <select name="paidPilot" required>
+        <option value="">Select…</option>
+        <option value="yes">Yes — verbally committed</option>
+        <option value="maybe">Maybe — wants to see references/results</option>
+        <option value="no">No</option>
+      </select>
+    </label>
+
+    <label>Notes
+      <textarea name="notes" rows="3" placeholder="Anything said verbatim about cost, CA relationship, or aggregator tools"></textarea>
+    </label>
+
+    <button type="submit" class="primary">Save to session log</button>
+  </form>
+
+  <div class="logtable-wrap">
+    <table class="logtable" id="logTable">
+      <thead>
+        <tr><th>Company</th><th>Orders/mo</th><th>Handles today</th><th>Spend/mo</th><th>Pilot?</th><th></th></tr>
+      </thead>
+      <tbody id="logTableBody"></tbody>
+    </table>
+    <p class="empty-note" id="logEmptyNote">No sessions logged yet.</p>
+  </div>
+</aside>
+<div class="scrim" id="scrim"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
