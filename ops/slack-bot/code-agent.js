@@ -54,11 +54,17 @@ const BUILD_MODEL = process.env.MILL_PROTO_BUILD_MODEL || "claude-sonnet-5";
 // "$0.40" (D-58), so `effort` is what they see.
 const MAX_USD_PLAN = Number(process.env.MILL_PROTO_PLAN_USD) || 0.5;
 const MAX_USD_BUILD = Number(process.env.MILL_PROTO_BUILD_USD) || 1.0;
-const MAX_TURNS = Number(process.env.MILL_PROTO_MAX_TURNS) || 12;
-// A plan READS and reasons; it never writes. It does not need a build's
-// headroom, and every extra turn re-sends the whole brief plus the
-// transcript so far — which is where the cost compounds.
-const MAX_TURNS_PLAN = Number(process.env.MILL_PROTO_MAX_TURNS_PLAN) || 6;
+const MAX_TURNS = Number(process.env.MILL_PROTO_MAX_TURNS) || 24;
+// Turns became CHEAP when the specs moved out of the prompt and onto
+// disk: the brief went from ~8,900 tokens to ~220, so a turn no longer
+// re-sends the project. But reading those files COSTS turns — measured, a
+// thorough context read plus an answer took 13 — so cutting turns to save
+// money now buys nothing and starves the read.
+//
+// An earlier version had 6 here, sized against the old prompt-heavy
+// shape, and a plan ran out of turns mid-read. Generous is correct now;
+// --max-budget-usd is the actual guard.
+const MAX_TURNS_PLAN = Number(process.env.MILL_PROTO_MAX_TURNS_PLAN) || 20;
 const DEADLINE_MS = Number(process.env.MILL_PROTO_DEADLINE_MS) || 600_000;
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -110,7 +116,14 @@ function childEnv(apiKey) {
 	};
 }
 
-function baseArgs({ cwd, model, effort, maxTurns = MAX_TURNS }) {
+function baseArgs({ cwd, model, effort, maxTurns = MAX_TURNS, addDirs = [] }) {
+	// Extra --add-dir paths are how the session reaches its project context
+	// without that context being re-sent as prompt on every turn.
+	// `--restricted` confines the file tools to the working directories,
+	// "--add-dir included", so this widens access deliberately and by
+	// exactly these paths — nothing else becomes reachable.
+	const extra = [];
+	for (const d of addDirs) extra.push("--add-dir", d);
 	return [
 		"-p",
 		"--output-format", "json",
@@ -120,6 +133,7 @@ function baseArgs({ cwd, model, effort, maxTurns = MAX_TURNS }) {
 		"--effort", EFFORTS.includes(effort) ? effort : DEFAULT_EFFORT,
 		"--max-turns", String(maxTurns),
 		"--add-dir", cwd,
+		...extra,
 	];
 }
 
@@ -172,7 +186,11 @@ function parseEnvelope(stdout) {
 // So: ask what's left before spawning. Deliberately FAILS OPEN — if the
 // proxy can't be reached the real cap still protects, and a monitoring
 // hiccup must not block a founder's build.
-const EST_PLAN_USD = Number(process.env.MILL_PROTO_EST_PLAN_USD) || 0.3;
+// Measured after the specs moved to disk: a full context read plus an
+// answer was $0.047 on Sonnet. Opus at high effort is dearer, so this
+// stays conservative — refusing a plan that would have fitted is
+// annoying; dying halfway through one is worse.
+const EST_PLAN_USD = Number(process.env.MILL_PROTO_EST_PLAN_USD) || 0.25;
 const EST_BUILD_USD = Number(process.env.MILL_PROTO_EST_BUILD_USD) || 0.7;
 
 async function budgetRemaining(apiKey) {
@@ -230,7 +248,7 @@ function sessionArgs(sid, resume) {
 const ALREADY_IN_USE = /already in use/i;
 const NO_SUCH_SESSION = /no conversation found|session not found|no such session/i;
 
-async function plan({ cwd, request, brief = "", sessionId = null, resume = false, effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
+async function plan({ cwd, request, brief = "", sessionId = null, resume = false, effort = DEFAULT_EFFORT, addDirs = [], apiKey = process.env.MILL_CODE_KEY }) {
 	const pre = preflight(apiKey);
 	if (pre) return { ...pre, sessionId: sessionId || null };
 	const budget = await budgetRemaining(apiKey);
@@ -238,7 +256,7 @@ async function plan({ cwd, request, brief = "", sessionId = null, resume = false
 	const sid = sessionId || newSessionId();
 	const build = (asResume) => {
 		const a = [
-			...baseArgs({ cwd, model: PLAN_MODEL, effort, maxTurns: MAX_TURNS_PLAN }),
+			...baseArgs({ cwd, model: PLAN_MODEL, effort, maxTurns: MAX_TURNS_PLAN, addDirs }),
 			"--permission-mode", "plan",
 			...sessionArgs(sid, asResume),
 			"--max-budget-usd", String(MAX_USD_PLAN),
@@ -298,7 +316,7 @@ async function plan({ cwd, request, brief = "", sessionId = null, resume = false
 
 // BUILD. Resumes the SAME session the plan was made in, so it is acting
 // on its own plan rather than re-deriving one from a summary.
-async function build({ cwd, sessionId, request = "Implement the plan you just described.", brief = "", effort = DEFAULT_EFFORT, apiKey = process.env.MILL_CODE_KEY }) {
+async function build({ cwd, sessionId, request = "Implement the plan you just described.", brief = "", effort = DEFAULT_EFFORT, addDirs = [], apiKey = process.env.MILL_CODE_KEY }) {
 	const pre = preflight(apiKey);
 	if (pre) return pre;
 	if (!sessionId) return { ok: false, reason: "no session to resume" };
@@ -307,7 +325,7 @@ async function build({ cwd, sessionId, request = "Implement the plan you just de
 	const budget = await budgetRemaining(apiKey);
 	if (budget && budget.remaining < EST_BUILD_USD) return budgetRefusal(budget, EST_BUILD_USD, "build");
 	const args = [
-		...baseArgs({ cwd, model: BUILD_MODEL, effort }),
+		...baseArgs({ cwd, model: BUILD_MODEL, effort, addDirs }),
 		"--permission-mode", "acceptEdits",
 		"--resume", sessionId,
 		"--max-budget-usd", String(MAX_USD_BUILD),

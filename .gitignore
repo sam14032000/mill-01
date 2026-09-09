@@ -10,3 +10,10 @@ minds/shared/.pending-diffs/
 
 # throwaway test scaffolds (underscore-prefixed, per convention)
 ops/slack-bot/_*.js
+
+# Proto's context directory is a DERIVED CACHE: the project's own
+# documents, copied where a Claude Code session can read them, rewritten
+# on every plan and build. The originals are tracked at ideas/<id>/*.md —
+# committing copies would duplicate them and add diff noise on every
+# spec edit.
+ideas/*/proto/.context/
