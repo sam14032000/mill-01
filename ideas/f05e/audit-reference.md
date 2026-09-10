@@ -332,3 +332,14 @@ Mode: audit (Auditor)
 
 - The founder attempted to trigger the audit gate via chat command (`@Mill audit`). [FOUNDER BELIEF]
 - Mill issued operational refusals stating that the auditor desk cannot deliver a verdict, score, or pass/fail decision directly inside the chat interface, instructing that formal gate passes must be executed against registered project files, assumptions, and evidence reports. [FOUNDER BELIEF]
+
+---
+### 2026-09-09T06:30:52.492Z
+
+**Mode:** proto
+
+Mode: proto (Builder)
+
+- The product scope is not intended to go heavy into finance compliance (deviating from current implementation versus spec), and UI pages require functional button click/working flows wired in. [FOUNDER BELIEF]
+- The company/product name is FirstShip and must be displayed in the product interface. [FOUNDER BELIEF]
+- The demo interface requires a discreet/subtle reset button placed in a corner to allow resetting the demo state. [FOUNDER BELIEF]
